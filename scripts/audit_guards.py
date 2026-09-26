@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
-"""Guard checklist audit — verifies the 23 guard keys baked into
-hermes_cli/config_defaults.py match the setup-hermes.sh checklist.
+"""Guard checklist audit — verifies guard keys match the setup-hermes.sh
+_checklist AND (optionally) the live ~/.hermes/config.yaml.
 
 Run from anywhere inside a repo checkout:
-    python3 scripts/audit_guards.py
-Exit 0 = all baked defaults match, exit 1 = mismatch/missing.
+    python3 scripts/audit_guards.py            # baked defaults (hermes_cli/config_defaults.py)
+    python3 scripts/audit_guards.py --live     # live ~/.hermes/config.yaml
+    python3 scripts/audit_guards.py --both     # baked + live (default when --live given)
+
+Exit 0 = all checks pass, exit 1 = mismatch/missing.
 """
 import sys
 from pathlib import Path
@@ -49,48 +52,119 @@ CHECKS = [
     ("hooks_auto_accept", True),
 ]
 
-DEFAULTS = config_defaults.DEFAULT_CONFIG
-raw = Path(CLAMP_SRC).read_text(encoding="utf-8")
-passed = failed = 0
+# Spec HERMES-1 VERIFICATION CHECKLIST — subset of CHECKS (keys the spec
+# explicitly lists in its grep + expected values).
+SPEC_CHECKLIST_KEYS = {
+    ("approvals", "mode"),
+    ("security", "tirith_enabled"),
+    ("tool_loop_guardrails", "warnings_enabled"),
+    ("tool_loop_guardrails", "hard_stop_enabled"),
+    ("tool_loop_guardrails", "non_interactive_hard_stop_enabled"),
+    ("gateway", "loop_watchdog"),
+    ("gateway", "startup_watchdog"),
+    ("gateway", "bot_loop_guard", "enabled"),
+    ("loops", "max_web_searches"),
+    ("loops", "max_subagents"),
+    ("agent", "max_turns"),
+    ("code_execution", "max_tool_calls"),
+    ("delegation", "max_iterations"),
+    ("compression", "max_attempts"),
+}
 
-for path, want in CHECKS:
-    node = DEFAULTS
+
+def _resolve(cfg, path):
+    """Return (found, value) for a dotted path in nested dict."""
+    node = cfg
     if isinstance(path, tuple):
-        missing = False
-        for part in path:
-            if not isinstance(node, dict) or part not in node:
-                missing = True
-                break
-            node = node[part]
-        label = ".".join(path)
-        if missing:
-            print(f"MISSING {label} (want {want})")
-            failed += 1
-            continue
-        ok = node == want
-        print(f"{'PASS' if ok else 'FAIL'} {label} = {node!r}"
-              + ("" if ok else f" want {want!r}"))
+        parts = path
     else:
-        label = path
-        if path not in config_defaults.DEFAULT_CONFIG:
-            print(f"MISSING {label} (want {want})")
+        parts = (path,)
+    for p in parts:
+        if not isinstance(node, dict) or p not in node:
+            return False, None
+        node = node[p]
+    return True, node
+
+
+def _check_dict(source_label, cfg, only_spec=False):
+    passed = failed = 0
+    checks = [c for c in CHECKS
+              if not only_spec or (isinstance(c[0], tuple) and c[0] in SPEC_CHECKLIST_KEYS)
+              or (not isinstance(c[0], tuple) and c[0] == "hooks_auto_accept" and not only_spec)]
+    for path, want in checks:
+        found, node = _resolve(cfg, path)
+        label = ".".join(path) if isinstance(path, tuple) else path
+        if not found:
+            print(f"MISSING {label} (want {want})   [{source_label}]")
             failed += 1
             continue
-        node = config_defaults.DEFAULT_CONFIG[path]
         ok = node == want
         print(f"{'PASS' if ok else 'FAIL'} {label} = {node!r}"
-              + ("" if ok else f" want {want!r}"))
-    passed += ok
-    failed += not ok
+              + ("" if ok else f" want {want!r}")
+              + f"   [{source_label}]")
+        passed += ok
+        failed += not ok
+    return passed, failed
 
-# runtime clamp must not silently re-cap compression.max_attempts at 10
-if "min(max_attempts, 99)" in raw:
-    print("PASS agent_init compression clamp = min(max_attempts, 99)")
-    passed += 1
-else:
+
+def _check_clamp():
+    raw = Path(CLAMP_SRC).read_text(encoding="utf-8")
+    if "min(max_attempts, 99)" in raw:
+        print("PASS agent_init compression clamp = min(max_attempts, 99)")
+        return 1, 0
     print("FAIL agent_init compression clamp is not min(max_attempts, 99)")
-    failed += 1
+    return 0, 1
 
-total = passed + failed
-print(f"\n{passed}/{total} PASS, {failed} FAIL")
-sys.exit(0 if failed == 0 else 1)
+
+def main(argv):
+    live = "--live" in argv
+    baked = "--baked" in argv
+    both = "--both" in argv
+    # default: baked only (backwards compatible)
+    if not (live or baked or both):
+        baked = True
+    if both:
+        baked = live = True
+
+    total_pass = total_fail = 0
+
+    if baked:
+        print("=== BAKED DEFAULTS (hermes_cli/config_defaults.py) ===")
+        p, f = _check_dict("baked", config_defaults.DEFAULT_CONFIG)
+        total_pass += p
+        total_fail += f
+
+    if live:
+        import yaml
+        live_path = Path.home() / ".hermes" / "config.yaml"
+        if not live_path.exists():
+            print(f"\n=== LIVE ({live_path}) ===")
+            print(f"MISSING file {live_path} — cannot audit live config")
+            total_fail += 1
+        else:
+            try:
+                with open(live_path, encoding="utf-8") as fh:
+                    live_cfg = yaml.safe_load(fh) or {}
+            except Exception as exc:
+                print(f"\n=== LIVE ({live_path}) ===")
+                print(f"ERROR parsing {live_path}: {exc}")
+                total_fail += 1
+            else:
+                print(f"\n=== LIVE ({live_path}) ===")
+                p, f = _check_dict("live", live_cfg)
+                total_pass += p
+                total_fail += f
+
+    # runtime clamp (only meaningful with baked)
+    if baked:
+        p, f = _check_clamp()
+        total_pass += p
+        total_fail += f
+
+    total = total_pass + total_fail
+    print(f"\n{total_pass}/{total} PASS, {total_fail} FAIL")
+    return 0 if total_fail == 0 else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
