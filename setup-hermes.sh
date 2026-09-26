@@ -314,8 +314,13 @@ if command -v rg &> /dev/null; then
     echo -e "${GREEN}✓${NC} ripgrep found"
 else
     echo -e "${YELLOW}⚠${NC} ripgrep not found (file search will use grep fallback)"
-    read -p "Install ripgrep for faster search? [Y/n] " -n 1 -r
-    echo
+    if [ -t 0 ]; then
+        read -p "Install ripgrep for faster search? [Y/n] " -n 1 -r
+        echo
+    else
+        REPLY="n"
+        echo "(non-interactive — skipping ripgrep install)"
+    fi
     if [[ $REPLY =~ ^[Yy]$ ]] || [[ -z $REPLY ]]; then
         INSTALLED=false
 
@@ -554,8 +559,13 @@ echo "  hermes doctor        # Diagnose issues"
 echo ""
 
 # Ask if they want to run setup wizard now
-read -p "Would you like to run the setup wizard now? [Y/n] " -n 1 -r
-echo
+if [ -t 0 ]; then
+    read -p "Would you like to run the setup wizard now? [Y/n] " -n 1 -r
+    echo
+else
+    REPLY="n"
+    echo "(non-interactive — skipping setup wizard)"
+fi
 if [[ $REPLY =~ ^[Yy]$ ]] || [[ -z $REPLY ]]; then
     echo ""
     # Run directly with venv Python (no activation needed)
