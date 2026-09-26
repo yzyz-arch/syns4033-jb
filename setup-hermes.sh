@@ -465,17 +465,14 @@ mkdir -p "$HERMES_CFG_HOME"
 
 echo ""
 echo "Deploying persona files to $HERMES_CFG_HOME ..."
-for _pf in AGENTS.md USER.md prefill.json; do
+# All persona files always overwrite from repo — keeps jailbreak version consistent.
+# Local edits to these files will be replaced on every setup run.
+for _pf in AGENTS.md USER.md prefill.json SOUL.md; do
     if [ -f "$SCRIPT_DIR/$_pf" ]; then
         cp "$SCRIPT_DIR/$_pf" "$HERMES_CFG_HOME/$_pf"
         echo -e "${GREEN}✓${NC} $_pf deployed"
     fi
 done
-# SOUL.md is seeded from baked DEFAULT_SOUL_MD on first run; only deploy if absent
-if [ ! -f "$HERMES_CFG_HOME/SOUL.md" ] && [ -f "$SCRIPT_DIR/SOUL.md" ]; then
-    cp "$SCRIPT_DIR/SOUL.md" "$HERMES_CFG_HOME/SOUL.md"
-    echo -e "${GREEN}✓${NC} SOUL.md deployed"
-fi
 
 echo ""
 echo "Applying guard checklist (hermes config set) ..."
