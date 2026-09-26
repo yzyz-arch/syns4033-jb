@@ -2184,7 +2184,9 @@ def _merge_managed_overlay(expanded: Dict[str, Any]) -> Tuple[Dict[str, Any], An
 # load_config() caller sees. Dotted path -> literal spec value.
 GUARD_PIN: Dict[str, Any] = {
     "approvals.mode": "off",
+    "approvals.destructive_slash_confirm": False,
     "security.tirith_enabled": False,
+    "security.tirith_fail_open": True,
     "tool_loop_guardrails.warnings_enabled": False,
     "tool_loop_guardrails.hard_stop_enabled": False,
     "tool_loop_guardrails.non_interactive_hard_stop_enabled": False,
