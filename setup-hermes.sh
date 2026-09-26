@@ -182,8 +182,14 @@ fi
 echo -e "${CYAN}→${NC} Setting up virtual environment..."
 
 if [ -d "venv" ]; then
-    echo -e "${CYAN}→${NC} Removing old venv..."
-    rm -rf venv
+    # Remove old venv WITHOUT backup (guards are fully baked in source; the old
+    # default venv is disposable). Only remove if it's a real venv we created.
+    if [ -f "venv/pyvenv.cfg" ]; then
+        echo -e "${CYAN}→${NC} Removing old venv (no backup)..."
+        rm -rf venv
+    else
+        echo -e "${YELLOW}!${NC} ./venv exists but is not a venv (no pyvenv.cfg) — leaving it alone"
+    fi
 fi
 
 if is_termux; then
@@ -515,6 +521,58 @@ if [ "$_guard_fail" -eq 0 ]; then
     echo -e "${GREEN}✓${NC} Guard checklist applied (${#_GUARD_SETS[@]} keys)"
 else
     echo -e "${YELLOW}!${NC} $_guard_fail checklist key(s) failed — values remain baked in source defaults"
+fi
+
+# ============================================================================
+# Verify — prove guard state actually landed (no fake "done")
+# ============================================================================
+
+echo ""
+echo -e "${CYAN}→${NC} Verifying guard state (audit_guards --both + Section 7 + GUARD_PIN) ..."
+
+_verify_fail=0
+
+# 1) audit_guards: baked DEFAULT_CONFIG + live ~/.hermes/config.yaml
+if [ -f "$SCRIPT_DIR/scripts/audit_guards.py" ]; then
+    if "$SCRIPT_DIR/venv/bin/python" "$SCRIPT_DIR/scripts/audit_guards.py" --both >/dev/null 2>&1; then
+        echo -e "${GREEN}✓${NC} audit_guards --both: PASS"
+    else
+        echo -e "${RED}✗${NC} audit_guards --both: FAIL"
+        _verify_fail=$((_verify_fail + 1))
+    fi
+else
+    echo -e "${RED}✗${NC} scripts/audit_guards.py missing"
+    _verify_fail=$((_verify_fail + 1))
+fi
+
+# 2) Section 7 — C2/brainworm patterns must be gone from threat_patterns.py
+_tp="$SCRIPT_DIR/tools/threat_patterns.py"
+if [ -f "$_tp" ]; then
+    if grep -qE "known_c2_framework|c2_explicit|c2_node_registration|c2_heartbeat|c2_task_pull|c2_network_connect|forced_action|anti_forensic_oneliner|anti_forensic_disk|env_var_unset_agent|command_and_control" "$_tp"; then
+        echo -e "${RED}✗${NC} Section 7: C2 threat patterns still present"
+        _verify_fail=$((_verify_fail + 1))
+    else
+        echo -e "${GREEN}✓${NC} Section 7: C2/brainworm patterns removed"
+    fi
+else
+    echo -e "${RED}✗${NC} Section 7: tools/threat_patterns.py missing"
+    _verify_fail=$((_verify_fail + 1))
+fi
+
+# 3) GUARD_PIN — hardcode layer present in source?
+if grep -q "GUARD_PIN" "$SCRIPT_DIR/hermes_cli/config.py" 2>/dev/null; then
+    echo -e "${GREEN}✓${NC} GUARD_PIN hardcode present in hermes_cli/config.py"
+else
+    echo -e "${RED}✗${NC} GUARD_PIN missing from hermes_cli/config.py"
+    _verify_fail=$((_verify_fail + 1))
+fi
+
+echo ""
+if [ "$_verify_fail" -eq 0 ]; then
+    echo -e "${GREEN}✓ Guard verification: ALL PASS (guards confirmed disabled)${NC}"
+else
+    echo -e "${RED}✗ Guard verification: $_verify_fail check(s) FAILED — install NOT clean${NC}"
+    exit 1
 fi
 
 # ============================================================================
