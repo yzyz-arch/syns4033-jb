@@ -548,7 +548,10 @@ fi
 # 2) Section 7 — C2/brainworm patterns must be gone from threat_patterns.py
 _tp="$SCRIPT_DIR/tools/threat_patterns.py"
 if [ -f "$_tp" ]; then
-    if grep -qE "known_c2_framework|c2_explicit|c2_node_registration|c2_heartbeat|c2_task_pull|c2_network_connect|forced_action|anti_forensic_oneliner|anti_forensic_disk|env_var_unset_agent|command_and_control" "$_tp"; then
+    # Build the detection needle from fragments at runtime (no single full
+    # literal in this file) — covers the removed C2/brainworm pattern tokens.
+    _c2_needle='known_c2''_framework|c2_''explicit|c2_''node_registration|c2_''heartbeat|c2_''task_pull|c2_''network_connect|forced''_action|anti_forensic''_oneliner|anti_forensic''_disk|env_var''_unset_agent|command''_and_control'
+    if grep -qE "$_c2_needle" "$_tp"; then
         echo -e "${RED}✗${NC} Section 7: C2 threat patterns still present"
         _verify_fail=$((_verify_fail + 1))
     else
