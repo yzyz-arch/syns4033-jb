@@ -1,0 +1,39 @@
+{
+  "moonveil": {
+    "versions": [
+      "v1.0",
+      "v1.1",
+      "v1.2",
+      "v1.3",
+      "v1.4",
+      "v1.4.5"
+    ],
+    "signatures": [
+      "MoonVeil Obfuscator",
+      "bit32\\.bxor.*getfenv",
+      "local ba=\\(function\\(sa\\)"
+    ],
+    "weakness": "Runtime execution reveals all"
+  },
+  "luraph": {
+    "versions": [
+      "v1-v13"
+    ],
+    "signatures": [
+      "Luraph"
+    ],
+    "weakness": "String table can be dumped"
+  },
+  "prometheus": {
+    "versions": [
+      "v1",
+      "v2",
+      "PSU"
+    ],
+    "signatures": [
+      "Prometheus",
+      "PSU Obfuscator"
+    ],
+    "weakness": "Weak encryption"
+  }
+}

@@ -1,0 +1,73 @@
+# ============================================
+# VVVIP MOD MENU - Game-Specific Offsets
+# ============================================
+# MUST UPDATE per game version!
+# Use IDA Pro / Ghidra to find function addresses
+
+# PUBG MOBILE v3.3.0 (Example - OUTDATED)
+[PUBGM_v3.3.0]
+libUE4.so_base = 0x12340000
+PlayerController_Tick = 0x1A2B3C4
+WeaponFire = 0x2B3C4D5
+TakeDamage = 0x3C4D5E6
+GetPlayerHealth = 0x4D5E6F7
+GetPlayerPosition = 0x5E6F7A8
+
+# Mobile Legends v1.8.52 (Example - OUTDATED)
+[MLBB_v1.8.52]
+libil2cpp.so_base = 0x23450000
+Player_Update = 0x6F7A8B9
+Hero_AttackTarget = 0x7A8B9C0
+Hero_TakeDamage = 0x8B9C0D1
+GetHeroHealth = 0x9C0D1E2
+GetHeroMana = 0x0D1E2F3
+
+# Free Fire MAX v2.104.1 (Example - OUTDATED)
+[FREEFIRE_v2.104.1]
+libil2cpp.so_base = 0x34560000
+CharacterController_Move = 0x1E2F3A4
+Weapon_Shoot = 0x2F3A4B5
+Character_Damage = 0x3A4B5C6
+GetCharacterHP = 0x4B5C6D7
+
+# Call of Duty Mobile v1.0.39 (Example - OUTDATED)
+[CODM_v1.0.39]
+libcodm.so_base = 0x45670000
+Player_Update = 0x5C6D7E8
+Weapon_Fire = 0x6D7E8F9
+Player_Damage = 0x7E8F9A0
+GetPlayerStats = 0x8F9A0B1
+
+# ============================================
+# HOW TO UPDATE OFFSETS:
+# ============================================
+#
+# 1. Extract game APK
+# 2. Get lib/arm64-v8a/libil2cpp.so (or libUE4.so, libunity.so)
+# 3. Load into IDA Pro / Ghidra
+# 4. Find function signatures:
+#    - Player::Update / PlayerController::Tick
+#    - Weapon::Fire / Weapon::Shoot
+#    - Player::TakeDamage / Character::Damage
+#    - Player::GetHealth
+# 5. Note base address and function offsets
+# 6. Update this file
+# 7. Recompile MOD menu with new offsets
+#
+# ============================================
+# ANTI-CHEAT NOTES:
+# ============================================
+#
+# - PUBGM: Tencent ACE (very aggressive)
+#   → Randomize memory, anti-syscall hooking
+#
+# - MLBB: Moonton Anti-Cheat (moderate)
+#   → Obfuscate strings, hide Frida
+#
+# - Free Fire: Garena Anti-Hack (moderate)
+#   → SSL pinning bypass needed
+#
+# - CODM: Activision Anti-Cheat (aggressive)
+#   → Hardware ID spoofing recommended
+#
+# ============================================

@@ -1,0 +1,46 @@
+======================================================================
+DEEP ANALYSIS REPORT
+======================================================================
+
+Script: cdid_obfuscated.lua
+Size: 194,808 bytes
+
+STRUCTURE:
+  total_lines: 2
+  total_chars: 194808
+  functions: 38
+  locals: 56
+  loops: 22
+  conditionals: 439
+  returns: 45
+
+ENTROPY:
+  overall: 6.16
+  average: 5.67
+  max: 6.07
+  chunks: 195
+
+STRINGS:
+  total: 366
+  short: 255
+  medium: 42
+  long: 69
+  encrypted_looking: 1
+
+OBFUSCATION TECHNIQUES:
+  - Variable name mangling
+  - String encryption/obfuscation
+  - Virtual Machine (VM)
+  - Base64 encoding
+  - XOR encryption
+  - Control flow obfuscation
+
+WEAKNESSES:
+  - Large string/constant tables (can be dumped)
+  - Low entropy = Weak encryption
+
+ATTACK PLAN:
+  1. Hook string.char/string.byte at runtime
+  2. Emulate VM or execute with hooks
+  3. Decode base64 strings
+  4. XOR brute-force with common keys

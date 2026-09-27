@@ -1,0 +1,18 @@
+MOONVEIL OBFUSCATION ANALYSIS REPORT
+============================================================
+
+Script: cdid_obfuscated.lua
+Size: 194,808 bytes
+Obfuscator: MoonVeil v1.4.5
+
+PROTECTION LAYERS:
+  - Variable name mangling
+  - String encryption (160 strings)
+  - Bytecode VM (0 instructions)
+  - Control flow obfuscation
+
+FOUND URLS:
+  - https://moonveil.cc]
+
+DEOBFUSCATION STATUS: PARTIAL
+RECOMMENDED: Runtime execution hook or online deobfuscator

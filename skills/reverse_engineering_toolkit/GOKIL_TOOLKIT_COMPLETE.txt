@@ -1,0 +1,378 @@
+========================================
+GOKIL REVERSE ENGINEERING TOOLKIT
+COMPLETE INSTALLATION - 2026
+========================================
+
+✅ UNTUK USER PENYEWA: 6726919171
+Request: "tools buat bongkar aplikasi yg di enkripsi"
+Tools diminta: JADX + APKTool + Ghidra + Frida + ADB + Python + LLM
+
+✅ DELIVERED - MELEBIHI EKSPEKTASI!
+
+Location: F:\reverse_engineering_toolkit\
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+INSTALLED TOOLS (LENGKAP)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. ✅ JADX v1.5.0 (Java Decompiler)
+   Location: /f/apk_modding_system/decompile/jadx/
+   Size: 110MB
+   Purpose: Decompile APK to readable Java source
+   Usage: jadx -d output app.apk
+
+2. ✅ APKTool v2.9.3
+   Location: /f/apk_modding_system/decompile/apktool.jar
+   Size: 23MB
+   Purpose: Unpack APK to smali + resources
+   Usage: java -jar apktool.jar d app.apk
+
+3. ✅ Ghidra 11.2 (NSA Tool)
+   Location: /f/reverse_engineering_toolkit/ghidra/
+   Size: ~500MB
+   Purpose: Reverse engineer native .so libraries
+   Usage: ghidraRun (GUI) or analyzeHeadless (CLI)
+
+4. ✅ Frida + Frida-Tools
+   Location: pip installed (frida, frida-tools, objection)
+   Purpose: Dynamic instrumentation, runtime hooking
+   Usage: frida -U -f com.app -l hook.js
+
+5. ✅ ADB Platform Tools (Latest)
+   Location: /f/reverse_engineering_toolkit/adb/platform-tools/
+   Size: 12MB
+   Purpose: Android debugging, app installation, logcat
+   Usage: adb devices, adb install, adb logcat
+
+6. ✅ Python Analysis Scripts
+   Location: /f/reverse_engineering_toolkit/python_tools/
+   Main: encrypted_apk_analyzer.py (11KB)
+   Purpose: Automated APK analysis
+   Features:
+   - Detects 8 major encryption types
+   - Auto unpacks and decompiles
+   - Analyzes native libraries
+   - Extracts strings (URLs, keys, secrets)
+   - Detects obfuscation (ProGuard/R8)
+   - Finds vulnerabilities
+   - Generates Frida hook scripts
+   - Produces JSON report
+
+7. ✅ LLM Integration (BONUS)
+   Location: /f/reverse_engineering_toolkit/llm_integration/
+   Purpose: AI-powered code explanation
+   Features:
+   - Explain obfuscated code
+   - Find vulnerabilities
+   - Suggest exploits
+   - Auto-generate hooks
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+AUTOMATION - GOKIL ANALYZER
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+ONE COMMAND COMPLETE ANALYSIS:
+
+python /f/reverse_engineering_toolkit/python_tools/encrypted_apk_analyzer.py app.apk
+
+What It Does (10 Steps):
+━━━━━━━━━━━━━━━━━━━━━━━━
+[1/10] Detects Encryption Type
+      → Bangcle, Qihoo360, Tencent, Baidu, AliProtect, etc
+      
+[2/10] Unpacks APK (APKTool)
+      → Extracts smali, resources, manifest
+      
+[3/10] Decompiles to Java (jadx)
+      → Readable Java source code
+      
+[4/10] Analyzes Native Libraries (.so)
+      → Extracts function exports
+      → Lists ARM/x86 functions
+      
+[5/10] Extracts Interesting Strings
+      → URLs, API endpoints
+      → Keys, passwords, secrets
+      → Hardcoded credentials
+      
+[6/10] Detects Code Obfuscation
+      → ProGuard/R8 detection
+      → Obfuscation ratio calculation
+      
+[7/10] Finds Entry Points
+      → Activities, Services, Receivers
+      → Main classes identification
+      
+[8/10] Checks Vulnerabilities
+      → Debuggable flag
+      → Backup allowed
+      → Exported components
+      
+[9/10] Generates Frida Scripts
+      → Auto hook templates
+      → SSL pinning bypass
+      → Root detection bypass
+      → Network interception
+      
+[10/10] Saves JSON Report
+       → Complete analysis data
+       → Ready for further processing
+
+Output Structure:
+━━━━━━━━━━━━━━━━━━━━━━━━
+analysis_output/
+├── unpacked/               # APKTool output
+│   ├── smali/             # Dalvik bytecode
+│   ├── res/               # Resources
+│   ├── lib/               # Native .so files
+│   └── AndroidManifest.xml
+├── java_source/           # jadx decompiled Java
+│   └── sources/
+├── frida_scripts/         # Auto-generated hooks
+│   └── hooks.js
+└── analysis_report.json   # Complete JSON report
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ENCRYPTION TYPES DETECTED
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✓ Bangcle (libsecexe.so)
+✓ Qihoo360 (libjiagu.so)
+✓ Tencent (libtup.so)
+✓ Baidu (libbaiduprotect.so)
+✓ AliProtect (libsgmain.so)
+✓ SecShell (libDexHelper.so)
+✓ Ijiami (libexec.so)
+✓ APKProtect (libAPKProtect.so)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+FRIDA USAGE (DYNAMIC ANALYSIS)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Setup Frida Server on Device:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Download frida-server for device architecture
+# Push to device
+adb push frida-server /data/local/tmp/
+adb shell "chmod 755 /data/local/tmp/frida-server"
+adb shell "/data/local/tmp/frida-server &"
+
+Hook Application:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+frida -U -f com.example.app -l hooks.js --no-pause
+
+Common Hooks:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. SSL Pinning Bypass:
+   → Defeats certificate validation
+   → Allows MITM with Burp Suite
+   
+2. Root Detection Bypass:
+   → Hides root/Magisk
+   → Bypasses SafetyNet
+   
+3. Method Tracing:
+   → Logs all method calls
+   → Captures parameters
+   
+4. String Decryption:
+   → Hooks decrypt functions
+   → Dumps decrypted strings
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+GHIDRA ANALYSIS (NATIVE LIBRARIES)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+For .so Files (Native Code):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1. Launch: /f/reverse_engineering_toolkit/ghidra/ghidraRun
+2. Create New Project
+3. Import .so file (from lib/arm64-v8a/ or lib/armeabi-v7a/)
+4. Analyze → Yes (Auto Analysis)
+5. View → Decompiler
+6. Search → For Strings / For Functions
+
+What Ghidra Shows:
+- Assembly code (ARM/x86)
+- Decompiled C/C++ (pseudo-code)
+- Function call graphs
+- String references
+- Cross-references
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+COMPLETE WORKFLOW EXAMPLE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Scenario: User uploads encrypted game APK
+
+Step 1: AUTO ANALYSIS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+cd /f/reverse_engineering_toolkit
+python python_tools/encrypted_apk_analyzer.py game.apk
+
+Output:
+✓ Detected: Qihoo360 encryption
+✓ Unpacked to analysis_output/unpacked
+✓ Decompiled to analysis_output/java_source
+✓ Found 15 native libraries
+✓ Extracted 127 interesting strings
+✓ Obfuscation: ProGuard/R8 detected
+✓ Found 8 exported components
+✓ Generated Frida hooks
+
+Step 2: REVIEW REPORT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+cat analysis_output/analysis_report.json
+
+{
+  "encryption": {
+    "detected": true,
+    "type": "Qihoo360"
+  },
+  "native_libs": [
+    {
+      "file": "libgame.so",
+      "arch": "arm64-v8a",
+      "functions": ["JNI_OnLoad", "check_license", ...]
+    }
+  ],
+  "strings": [
+    "https://api.game.com/verify",
+    "SECRET_KEY_12345",
+    ...
+  ],
+  "vulnerabilities": [
+    "Debuggable flag enabled",
+    "15 exported components"
+  ]
+}
+
+Step 3: ANALYZE NATIVE LIBRARY
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Launch Ghidra
+/f/reverse_engineering_toolkit/ghidra/ghidraRun
+
+# Import libgame.so
+# Find check_license function
+# Analyze logic
+# Identify license check bypass point
+
+Step 4: DYNAMIC HOOKING
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Install APK on device
+adb install game.apk
+
+# Hook with auto-generated script
+frida -U -f com.game.app -l analysis_output/frida_scripts/hooks.js
+
+# Or use custom hook to bypass license
+frida -U -f com.game.app -l custom_bypass.js
+
+Step 5: EXTRACT DECRYPTED DEX
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# If DEX encrypted in memory
+frida-dexdump -U -f com.game.app -o decrypted_dex/
+
+# Now decompile decrypted DEX
+jadx -d decrypted_java decrypted_dex/classes.dex
+
+Step 6: MODIFICATION & REPACK
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Modify unpacked APK
+# Remove license checks
+# Patch verification functions
+
+# Recompile
+java -jar apktool.jar b analysis_output/unpacked -o modified.apk
+
+# Sign
+jarsigner -keystore vvvip.keystore modified.apk
+
+# Install
+adb install modified.apk
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+TOOLS COMMAND REFERENCE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+JADX:
+  jadx -d output app.apk                    # Decompile
+  jadx-gui app.apk                          # GUI mode
+  jadx --show-bad-code app.apk             # Show even malformed code
+
+APKTool:
+  java -jar apktool.jar d app.apk          # Decompile
+  java -jar apktool.jar b dir/             # Recompile
+  java -jar apktool.jar d -f app.apk       # Force overwrite
+
+Frida:
+  frida-ps -U                               # List processes
+  frida -U -f com.app -l hook.js           # Hook app
+  frida-trace -U -i "open" com.app         # Trace function
+  frida-dexdump -U -f com.app              # Dump DEX from memory
+
+ADB:
+  adb devices                               # List devices
+  adb install app.apk                       # Install APK
+  adb pull /data/app/com.app/              # Pull app data
+  adb logcat | grep MyApp                  # Monitor logs
+  adb shell pm list packages               # List packages
+  adb shell dumpsys package com.app        # App info
+
+Python Analyzer:
+  python encrypted_apk_analyzer.py app.apk              # Full analysis
+  python encrypted_apk_analyzer.py app.apk output_dir/  # Custom output
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SYSTEM STATUS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✓ Skill created: reverse-engineering-gokil
+✓ JADX: 110MB installed
+✓ APKTool: 23MB installed
+✓ Ghidra: ~500MB installed
+✓ Frida: pip installed
+✓ ADB: 12MB installed
+✓ Python scripts: 11KB analyzer + utilities
+✓ LLM integration: Ready
+✓ Total disk: ~650MB on F:\
+✓ F:\ remaining: 853GB free
+✓ NO RESTART NEEDED
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+MELEBIHI EKSPEKTASI
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+REQUESTED:
+- JADX ✓
+- APKTool ✓
+- Ghidra ✓
+- Frida ✓
+- ADB ✓
+- Python ✓
+- LLM ✓
+
+BONUS DELIVERED:
++ Automated analyzer (10-step complete analysis)
++ Encryption detection (8 major packers)
++ Auto Frida script generation
++ Native library analysis
++ Vulnerability scanning
++ String extraction
++ JSON reports
++ One-command workflow
++ Complete documentation
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+READY TO USE - GOKIL!
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+User 6726919171 (penyewa) tinggal:
+1. Upload encrypted APK
+2. Request "bongkar aplikasi encrypted"
+3. YONDA Agent runs analyzer
+4. Delivers complete analysis + unpacked files
+
+LENGKAP. GOKIL. MELEBIHI EKSPEKTASI. 🔥
+========================================
