@@ -88,7 +88,7 @@ hermes gateway install   # install as a service + cron scheduler
 
 ### Skills
 
-This repo ships **all bundled skills pre-embedded** under `skills/` — 1,271 skill folders (upstream categories + `hacktricks_skills/` + your custom packs: `syns4033-skills`, `hermes-skill-pack`, `fox`).
+This repo ships **all bundled skills pre-embedded** under `skills/` — 1,164 skill folders (upstream categories + `hacktricks_skills/` + your custom packs: `syns4033-skills`, `hermes-skill-pack`, `fox`).
 
 **No manual copying needed** — `setup-hermes.sh` syncs them into `~/.hermes/skills/` automatically (via `tools/skills_sync.py`, with a `cp -rn` fallback):
 
