@@ -6,9 +6,9 @@ version: 1.0.0
 
 # fox-sqli — Elite SQL Injection Toolkit
 
-Run from: `C:\Users\lhuciver\fox-tools\fox-sqli.py`
+Run from: `C:\Users\SYNS4033\fox-tools\fox-sqli.py`
 Execute with: `fox-sqli "http://target/page.php?id=1"`
-Or: `python C:\Users\lhuciver\fox-tools\fox-sqli.py "http://target/page.php?id=1"`
+Or: `python C:\Users\SYNS4033\fox-tools\fox-sqli.py "http://target/page.php?id=1"`
 
 ## Quick Reference
 
