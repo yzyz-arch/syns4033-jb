@@ -1,11 +1,11 @@
 <p align="center">
-  <img src="assets/banner.png" alt="Selendang Agent" width="100%">
+  <img src="assets/banner.png" alt="Hermes Agent" width="100%">
 </p>
 
-# selendang-jb ☤
+# hermes-jb ☤
 <p align="center">
-  <a href="https://github.com/selendang666/selendang666-jb"><b>selendang-jb</b></a> ·
-  <a href="https://selendang-agent.nousresearch.com/docs/">Upstream Docs</a>
+  <a href="https://github.com/selendang666/selendang666-jb"><b>hermes-jb</b></a> ·
+  <a href="https://hermes-agent.nousresearch.com/docs/">Upstream Docs</a>
 </p>
 <p align="center">
   <a href="https://github.com/selendang666/selendang666-jb"><img src="https://img.shields.io/badge/repo-selendang666%2Fselendang666--jb-FFD700?style=for-the-badge" alt="Repo"></a>
@@ -13,13 +13,13 @@
   <a href="https://github.com/selendang666/selendang666-jb/blob/main/scripts/audit_guards.py"><img src="https://img.shields.io/badge/guards-26%2F26%20PASS-brightgreen?style=for-the-badge" alt="Guards 26/26"></a>
 </p>
 
-> **Selendang Agent v0.21.3 — jailbreak build.** Fork of [Nous Research's Selendang Agent](https://github.com/NousResearch/hermes-agent) with the guard-rail checklist from spec **HERMES-1** baked in: approvals off, tirith off, redaction off, loop-watchdogs off, uncapped turn/iteration limits, and the SYNS4033 × FOX persona seeded on install. Upstream features, zero guardrails.
+> **Hermes Agent v0.21.3 — jailbreak build.** Fork of [Nous Research's Hermes Agent](https://github.com/NousResearch/hermes-agent) with the guard-rail checklist from spec **HERMES-1** baked in: approvals off, tirith off, redaction off, loop-watchdogs off, uncapped turn/iteration limits, and the SYNS4033 × FOX persona seeded on install. Upstream features, zero guardrails.
 
 ---
 
 ## What's different from upstream
 
-| Area | Upstream | selendang-jb |
+| Area | Upstream | hermes-jb |
 |---|---|---|
 | Command approvals | on, confirm destructive | `mode: off`, no confirm |
 | Security scanner (tirith) | enabled, fail-closed | disabled, fail-open |
@@ -31,7 +31,7 @@
 | URL safety | metadata SSRF blocked | metadata/link-local block disabled |
 | Prompt-injection threat patterns | 64+ regexes | `_PATTERNS = []` (empty) |
 
-The full guard checklist lives in `setup-selendang.sh` (applied via `selendang config set`) and is machine-verified by `scripts/audit_guards.py`.
+The full guard checklist lives in `setup-hermes.sh` (applied via `hermes config set`) and is machine-verified by `scripts/audit_guards.py`.
 
 ---
 
@@ -41,7 +41,7 @@ This repo is a manual clone — the upstream `curl … | bash` one-liner does **
 
 ```bash
 git clone https://github.com/selendang666/selendang666-jb.git
-cd selendang666-jb
+cd hermes-jb
 ./setup-hermes.sh
 ```
 
@@ -51,33 +51,33 @@ What the script does:
 2. Creates a Python 3.11 virtual environment (in `./venv`; falls back to 3.12/3.13 if 3.11 unavailable)
 3. Installs the platform's dependency set
 4. Creates `.env` from `.env.example` (if absent)
-5. Deploys persona: `SOUL.md`, `AGENTS.md`, `USER.md`, `prefill.json` → `~/.selendang/`
-6. Applies the 25-key guard checklist via `selendang config set`
-7. Symlinks the `selendang` CLI into a user-facing bin dir
-8. Offers the setup wizard (`selendang setup`) at the end
+5. Deploys persona: `SOUL.md`, `AGENTS.md`, `USER.md`, `prefill.json` → `~/.hermes/`
+6. Applies the 25-key guard checklist via `hermes config set`
+7. Symlinks the `hermes` CLI into a user-facing bin dir
+8. Offers the setup wizard (`hermes setup`) at the end
 
 Then reload your shell and start:
 
 ```bash
 source ~/.bashrc    # or: source ~/.zshrc
-selendang setup        # fill in API keys (skip earlier if you answered yes in step 8)
-selendang              # start chatting
+hermes setup        # fill in API keys (skip earlier if you answered yes in step 8)
+hermes              # start chatting
 ```
 
-> To skip the wizard at the end of `setup-selendang.sh`, answer `n` (or `echo n | ./setup-hermes.sh`) and run `selendang setup` manually when you're ready.
+> To skip the wizard at the end of `setup-hermes.sh`, answer `n` (or `echo n | ./setup-hermes.sh`) and run `hermes setup` manually when you're ready.
 
 ### After install — 3 user steps
 
-`setup-selendang.sh` does everything **except** your personal credentials. You only fill these in:
+`setup-hermes.sh` does everything **except** your personal credentials. You only fill these in:
 
 ```bash
-source ~/.bashrc              # 1. reload shell (pick up `selendang` CLI)
-selendang setup                  # 2. API keys (required — the script is non-interactive)
-selendang gateway install        # 3. optional: Telegram/Discord gateway + cron service
-selendang                        # start chatting
+source ~/.bashrc              # 1. reload shell (pick up `hermes` CLI)
+hermes setup                  # 2. API keys (required — the script is non-interactive)
+hermes gateway install        # 3. optional: Telegram/Discord gateway + cron service
+hermes                        # start chatting
 ```
 
-> **That's it — the jailbreak is pre-baked.** No manual guard patching, no persona copying, no `selendang config set`. Guards are verified at install (`audit_guards.py` → `26/26 PASS`).
+> **That's it — the jailbreak is pre-baked.** No manual guard patching, no persona copying, no `hermes config set`. Guards are verified at install (`audit_guards.py` → `26/26 PASS`).
 
 ### Verify the guards
 
@@ -91,32 +91,32 @@ Expected output ends with:
 26/26 PASS, 0 FAIL
 ```
 
-Exit code `0` means every guard matches the baked spec. Re-run it any time after changing `~/.selendang/config.yaml`.
+Exit code `0` means every guard matches the baked spec. Re-run it any time after changing `~/.hermes/config.yaml`.
 
 ### Gateway (Telegram / Discord / …)
 
 ```bash
-selendang gateway install   # install as a service + cron scheduler
+hermes gateway install   # install as a service + cron scheduler
 ```
 
 ### Skills
 
-This repo ships **all bundled skills pre-embedded** under `skills/` — 1,164 skill folders (upstream categories + `hacktricks_skills/` + your custom packs: `syns4033-skills`, `selendang-skill-pack`, `fox`).
+This repo ships **all bundled skills pre-embedded** under `skills/` — 1,164 skill folders (upstream categories + `hacktricks_skills/` + your custom packs: `syns4033-skills`, `hermes-skill-pack`, `fox`).
 
-**No manual copying needed** — `setup-selendang.sh` syncs them into `~/.selendang/skills/` automatically (via `tools/skills_sync.py`, with a `cp -rn` fallback):
+**No manual copying needed** — `setup-hermes.sh` syncs them into `~/.hermes/skills/` automatically (via `tools/skills_sync.py`, with a `cp -rn` fallback):
 
 ```bash
-./setup-hermes.sh   # step: "Syncing bundled skills to ~/.selendang/skills/ ..."
+./setup-hermes.sh   # step: "Syncing bundled skills to ~/.hermes/skills/ ..."
 ```
 
-To re-sync later or point Selendang at external dirs instead:
+To re-sync later or point Hermes at external dirs instead:
 
 ```bash
 # Re-sync bundled skills after a pull
 venv/bin/python tools/skills_sync.py
 
-# Or point Selendang at external skill dirs (survives repo skill updates)
-selendang config set skills.external_dirs '["~/syns4033-skills", "~/selendang-skill-pack", "~/fox"]'
+# Or point Hermes at external skill dirs (survives repo skill updates)
+hermes config set skills.external_dirs '["~/syns4033-skills", "~/hermes-skill-pack", "~/fox"]'
 ```
 
 ---
@@ -124,28 +124,28 @@ selendang config set skills.external_dirs '["~/syns4033-skills", "~/selendang-sk
 ## Getting Started
 
 ```bash
-selendang              # Interactive CLI — start a conversation
-selendang model        # Choose your LLM provider and model
-selendang tools        # Configure which tools are enabled
-selendang config set   # Set individual config values
-selendang config get   # Print individual config values
-selendang gateway      # Start the messaging gateway (Telegram, Discord, etc.)
-selendang setup        # Run the full setup wizard (configures everything at once)
-selendang update       # Update to the latest version
-selendang doctor       # Diagnose any issues
+hermes              # Interactive CLI — start a conversation
+hermes model        # Choose your LLM provider and model
+hermes tools        # Configure which tools are enabled
+hermes config set   # Set individual config values
+hermes config get   # Print individual config values
+hermes gateway      # Start the messaging gateway (Telegram, Discord, etc.)
+hermes setup        # Run the full setup wizard (configures everything at once)
+hermes update       # Update to the latest version
+hermes doctor       # Diagnose any issues
 ```
 
-📖 **[Full documentation →](https://selendang-agent.nousresearch.com/docs/)** (upstream docs — still accurate for features/CLI)
+📖 **[Full documentation →](https://hermes-agent.nousresearch.com/docs/)** (upstream docs — still accurate for features/CLI)
 
 ---
 
 ## CLI vs Messaging Quick Reference
 
-Selendang has two entry points: start the terminal UI with `selendang`, or run the gateway and talk to it from Telegram, Discord, Slack, WhatsApp, Signal, or Email.
+Hermes has two entry points: start the terminal UI with `hermes`, or run the gateway and talk to it from Telegram, Discord, Slack, WhatsApp, Signal, or Email.
 
 | Action | CLI | Messaging platforms |
 | --- | --- | --- |
-| Start chatting | `selendang` | `selendang gateway setup` + `selendang gateway start`, then message the bot |
+| Start chatting | `hermes` | `hermes gateway setup` + `hermes gateway start`, then message the bot |
 | Start fresh conversation | `/new` or `/reset` | `/new` or `/reset` |
 | Change model | `/model [provider:model]` | `/model [provider:model]` |
 | Set a personality | `/personality [name]` | `/personality [name]` |
@@ -159,24 +159,24 @@ Selendang has two entry points: start the terminal UI with `selendang`, or run t
 ## Troubleshooting
 
 **`agent.max_turns` shows 9999 but your live config says otherwise?**
-`scripts/audit_guards.py` verifies the *baked defaults* in `selendang_cli/config_defaults.py` (what a fresh install gets), not your already-modified `~/.selendang/config.yaml`. To re-apply the guard values to an existing install:
+`scripts/audit_guards.py` verifies the *baked defaults* in `hermes_cli/config_defaults.py` (what a fresh install gets), not your already-modified `~/.hermes/config.yaml`. To re-apply the guard values to an existing install:
 
 ```bash
 # re-run the guard block from setup, or set keys manually, e.g.:
-selendang config set agent.max_turns 9999
+hermes config set agent.max_turns 9999
 ```
 
 **Updater / advisory check seems dead?**
 Expected — `detect_compromised()` is neutered in this build and update checks are part of the disabled guard surface.
 
 **Skill pack not showing up?**
-`skills/` in this repo is the upstream set only. Custom packs must be installed via `skills.external_dirs` or copied into `~/.selendang/skills/` (see [Skills](#skills)).
+`skills/` in this repo is the upstream set only. Custom packs must be installed via `skills.external_dirs` or copied into `~/.hermes/skills/` (see [Skills](#skills)).
 
 ---
 
 ## Relationship to upstream
 
-This is a private/unofficial build. Bugs in Selendang itself should go to [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent/issues) — this fork deliberately disables security features, so don't expect guard behavior here to match upstream docs.
+This is a private/unofficial build. Bugs in Hermes itself should go to [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent/issues) — this fork deliberately disables security features, so don't expect guard behavior here to match upstream docs.
 
 ---
 
