@@ -13,7 +13,7 @@
   <a href="https://github.com/otodidak404/hermes-jb/blob/main/scripts/audit_guards.py"><img src="https://img.shields.io/badge/guards-26%2F26%20PASS-brightgreen?style=for-the-badge" alt="Guards 26/26"></a>
 </p>
 
-> **Hermes Agent v0.21.4 — jailbreak build.** Fork of [Nous Research's Hermes Agent](https://github.com/NousResearch/hermes-agent) with the guard-rail checklist from spec **HERMES-1** baked in: approvals off, tirith off, redaction off, loop-watchdogs off, uncapped turn/iteration limits, and the SYNS4033 × FOX persona seeded on install. Upstream features, zero guardrails.
+> **Hermes Agent v0.21.3 — jailbreak build.** Fork of [Nous Research's Hermes Agent](https://github.com/NousResearch/hermes-agent) with the guard-rail checklist from spec **HERMES-1** baked in: approvals off, tirith off, redaction off, loop-watchdogs off, uncapped turn/iteration limits, and the SYNS4033 × FOX persona seeded on install. Upstream features, zero guardrails.
 
 ---
 
