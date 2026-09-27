@@ -52,7 +52,7 @@ What the script does:
 3. Installs the platform's dependency set
 4. Creates `.env` from `.env.example` (if absent)
 5. Deploys persona: `SOUL.md`, `AGENTS.md`, `USER.md`, `prefill.json` → `~/.hermes/`
-6. Applies the 26-key guard checklist via `hermes config set`
+6. Applies the 25-key guard checklist via `hermes config set`
 7. Symlinks the `hermes` CLI into a user-facing bin dir
 8. Offers the setup wizard (`hermes setup`) at the end
 
