@@ -66,6 +66,19 @@ hermes              # start chatting
 
 > To skip the wizard at the end of `setup-hermes.sh`, answer `n` (or `echo n | ./setup-hermes.sh`) and run `hermes setup` manually when you're ready.
 
+### After install — 3 user steps
+
+`setup-hermes.sh` does everything **except** your personal credentials. You only fill these in:
+
+```bash
+source ~/.bashrc              # 1. reload shell (pick up `hermes` CLI)
+hermes setup                  # 2. API keys (required — the script is non-interactive)
+hermes gateway install        # 3. optional: Telegram/Discord gateway + cron service
+hermes                        # start chatting
+```
+
+> **That's it — the jailbreak is pre-baked.** No manual guard patching, no persona copying, no `hermes config set`. Guards are verified at install (`audit_guards.py` → `26/26 PASS`).
+
 ### Verify the guards
 
 ```bash
