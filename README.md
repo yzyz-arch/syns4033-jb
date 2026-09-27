@@ -41,7 +41,7 @@ This repo is a manual clone — the upstream `curl … | bash` one-liner does **
 
 ```bash
 git clone https://github.com/selendang666/selendang666-jb.git
-cd hermes-jb
+cd selendang666-jb
 ./setup-hermes.sh
 ```
 
