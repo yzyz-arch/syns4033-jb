@@ -48,11 +48,11 @@ cd hermes-jb
 What the script does:
 
 1. Detects desktop/server vs Android/Termux
-2. Creates a Python 3.11 virtual environment (in `./venv`)
+2. Creates a Python 3.11 virtual environment (in `./venv`; falls back to 3.12/3.13 if 3.11 unavailable)
 3. Installs the platform's dependency set
 4. Creates `.env` from `.env.example` (if absent)
 5. Deploys persona: `SOUL.md`, `AGENTS.md`, `USER.md`, `prefill.json` → `~/.hermes/`
-6. Applies the 25-key guard checklist via `hermes config set`
+6. Applies the 26-key guard checklist via `hermes config set`
 7. Symlinks the `hermes` CLI into a user-facing bin dir
 8. Offers the setup wizard (`hermes setup`) at the end
 
@@ -88,14 +88,22 @@ hermes gateway install   # install as a service + cron scheduler
 
 ### Skills
 
-This repo ships the **upstream** skill set under `skills/` (14 categories: apple, creative, productivity, research, …). Custom skill packs are installed separately after setup:
+This repo ships **all bundled skills pre-embedded** under `skills/` — 1,271 skill folders (upstream categories + `hacktricks_skills/` + your custom packs: `syns4033-skills`, `hermes-skill-pack`, `fox`).
+
+**No manual copying needed** — `setup-hermes.sh` syncs them into `~/.hermes/skills/` automatically (via `tools/skills_sync.py`, with a `cp -rn` fallback):
 
 ```bash
-# Option A — point Hermes at external skill dirs (survives upstream skill updates)
-hermes config set skills.external_dirs '["~/syns4033-skills", "~/hermes-skill-pack", "~/fox"]'
+./setup-hermes.sh   # step: "Syncing bundled skills to ~/.hermes/skills/ ..."
+```
 
-# Option B — copy straight into the live skill dir
-cp -rn ~/syns4033-skills/* ~/.hermes/skills/
+To re-sync later or point Hermes at external dirs instead:
+
+```bash
+# Re-sync bundled skills after a pull
+venv/bin/python tools/skills_sync.py
+
+# Or point Hermes at external skill dirs (survives repo skill updates)
+hermes config set skills.external_dirs '["~/syns4033-skills", "~/hermes-skill-pack", "~/fox"]'
 ```
 
 ---
