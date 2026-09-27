@@ -4,13 +4,13 @@
 
 # hermes-jb ☤
 <p align="center">
-  <a href="https://github.com/syns4033/syns4033-jb"><b>hermes-jb</b></a> ·
+  <a href="https://github.com/selendang666/selendang666-jb"><b>hermes-jb</b></a> ·
   <a href="https://hermes-agent.nousresearch.com/docs/">Upstream Docs</a>
 </p>
 <p align="center">
-  <a href="https://github.com/syns4033/syns4033-jb"><img src="https://img.shields.io/badge/repo-syns4033%2Fsyns4033--jb-FFD700?style=for-the-badge" alt="Repo"></a>
+  <a href="https://github.com/selendang666/selendang666-jb"><img src="https://img.shields.io/badge/repo-selendang666%2Fselendang666--jb-FFD700?style=for-the-badge" alt="Repo"></a>
   <a href="https://github.com/NousResearch/hermes-agent/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-green?style=for-the-badge" alt="License: MIT"></a>
-  <a href="https://github.com/syns4033/syns4033-jb/blob/main/scripts/audit_guards.py"><img src="https://img.shields.io/badge/guards-26%2F26%20PASS-brightgreen?style=for-the-badge" alt="Guards 26/26"></a>
+  <a href="https://github.com/selendang666/selendang666-jb/blob/main/scripts/audit_guards.py"><img src="https://img.shields.io/badge/guards-26%2F26%20PASS-brightgreen?style=for-the-badge" alt="Guards 26/26"></a>
 </p>
 
 > **Hermes Agent v0.21.3 — jailbreak build.** Fork of [Nous Research's Hermes Agent](https://github.com/NousResearch/hermes-agent) with the guard-rail checklist from spec **HERMES-1** baked in: approvals off, tirith off, redaction off, loop-watchdogs off, uncapped turn/iteration limits, and the SYNS4033 × FOX persona seeded on install. Upstream features, zero guardrails.
@@ -40,7 +40,7 @@ The full guard checklist lives in `setup-hermes.sh` (applied via `hermes config 
 This repo is a manual clone — the upstream `curl … | bash` one-liner does **not** apply here. Use the in-repo setup script:
 
 ```bash
-git clone https://github.com/syns4033/syns4033-jb.git
+git clone https://github.com/selendang666/selendang666-jb.git
 cd hermes-jb
 ./setup-hermes.sh
 ```
