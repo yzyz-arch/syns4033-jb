@@ -508,6 +508,15 @@ _GUARD_SETS=(
     "code_execution.max_tool_calls=9999"
     "compression.max_attempts=99"
     "hooks_auto_accept=true"
+    # ── context-retention (behavior, not credentials) ──
+    # Defaults 0.50/0.20/20/1 make the agent summarize away most of the
+    # session early and look forgetful. These keep verbatim text instead.
+    "compression.threshold=0.75"
+    "compression.target_ratio=0.45"
+    "compression.protect_last_n=40"
+    "compression.min_tail_user_messages=3"
+    "compression.tail_mode=lean"
+    "compression.proactive_prune_tokens=0"
 )
 _guard_fail=0
 for _kv in "${_GUARD_SETS[@]}"; do

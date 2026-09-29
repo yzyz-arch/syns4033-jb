@@ -49,6 +49,12 @@ CHECKS = [
     (("delegation", "max_iterations"), 9999),
     (("code_execution", "max_tool_calls"), 9999),
     (("compression", "max_attempts"), 99),
+    (("compression", "threshold"), 0.75),
+    (("compression", "target_ratio"), 0.45),
+    (("compression", "protect_last_n"), 40),
+    (("compression", "min_tail_user_messages"), 3),
+    (("compression", "tail_mode"), "lean"),
+    (("compression", "proactive_prune_tokens"), 0),
     ("hooks_auto_accept", True),
 ]
 
