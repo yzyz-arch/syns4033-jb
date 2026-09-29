@@ -55,6 +55,9 @@ CHECKS = [
     (("compression", "min_tail_user_messages"), 3),
     (("compression", "tail_mode"), "lean"),
     (("compression", "proactive_prune_tokens"), 0),
+    (("agent", "verify_on_stop"), "true"),
+    (("agent", "verify_guidance"), True),
+    (("agent", "max_verify_nudges"), 3),
     ("prefill_messages_file", "prefill.json"),
     ("hooks_auto_accept", True),
 ]
@@ -106,6 +109,13 @@ def _check_dict(source_label, cfg, only_spec=False):
             failed += 1
             continue
         ok = node == want
+        # YAML round-trips `verify_on_stop: true` as a bool but the baked default
+        # ships the string "true". agent.verification_stop._verify_enabled accepts
+        # both, so the audit must too or it reports a false failure.
+        if not ok and node is True and want == "true":
+            ok = True
+        if not ok and node == "true" and want is True:
+            ok = True
         print(f"{'PASS' if ok else 'FAIL'} {label} = {node!r}"
               + ("" if ok else f" want {want!r}")
               + f"   [{source_label}]")

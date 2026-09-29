@@ -508,6 +508,14 @@ _GUARD_SETS=(
     "code_execution.max_tool_calls=9999"
     "compression.max_attempts=99"
     "hooks_auto_accept=true"
+    # ── evidence gate (binding: no "done" without a tool result) ──
+    # agent.verify_on_stop is a DIFFERENT section from tool_loop_guardrails:
+    # the guardrail set below stops the loop from being killed, this one
+    # refuses a completion claim that no command backs. Both on together.
+    # "true" (not "auto") so messaging surfaces enforce it too.
+    "agent.verify_on_stop=true"
+    "agent.verify_guidance=true"
+    "agent.max_verify_nudges=3"
     # ── prefill wiring (loads prefill.json) ──
     # setup copies prefill.json to ~/.hermes/, but nothing referenced it: the
     # loader resolves the path from this key only. Without it the anti-refusal

@@ -180,7 +180,10 @@ DEFAULT_CONFIG = {
         # passive ledger). False (default) because the nudges proved more noise than signal; true =
         # force on everywhere; "auto" = on for interactive coding surfaces and programmatic callers,
         # off for messaging surfaces. Doc/markdown/skill-only edits never fire.
-        "verify_on_stop": False,
+        # This fork ships "true": the operator runs unrestricted execution, so an unbacked "done"
+        # is the one failure mode that actually costs him. Separate from tool_loop_guardrails —
+        # those stop the loop being killed, this one stops a completion claim no command backs.
+        "verify_on_stop": "true",
         # Inactivity warning (seconds), once per run before gateway_timeout; no interrupt. 0 = off.
         "gateway_timeout_warning": 900,
         # Max seconds the gateway blocks an agent awaiting a clarify-tool reply; then it unblocks
