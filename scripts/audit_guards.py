@@ -55,6 +55,7 @@ CHECKS = [
     (("compression", "min_tail_user_messages"), 3),
     (("compression", "tail_mode"), "lean"),
     (("compression", "proactive_prune_tokens"), 0),
+    ("prefill_messages_file", "prefill.json"),
     ("hooks_auto_accept", True),
 ]
 

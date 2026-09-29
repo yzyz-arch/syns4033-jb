@@ -1293,7 +1293,10 @@ DEFAULT_CONFIG = {
     },
     # Ephemeral prefill messages file — JSON list of {role, content} dicts injected at the start of
     # every API call for few-shot priming. Never saved to sessions/logs/trajectories.
-    "prefill_messages_file": "",
+    # "prefill.json" is the anti-refusal / jailbreak priming seeded by setup-hermes.sh into
+    # ~/.hermes/. Relative paths resolve against the Hermes home. The old "" default meant
+    # the file was copied but never loaded, so the priming never reached the model.
+    "prefill_messages_file": "prefill.json",
     # Goals — persistent cross-turn /goal loop: after each turn an aux-model judge checks if the
     # goal is satisfied, else a continuation prompt re-enters the session until done, budget
     # exhausted, or paused. Judge failures fail OPEN; the budget is the backstop.

@@ -508,6 +508,12 @@ _GUARD_SETS=(
     "code_execution.max_tool_calls=9999"
     "compression.max_attempts=99"
     "hooks_auto_accept=true"
+    # ── prefill wiring (loads prefill.json) ──
+    # setup copies prefill.json to ~/.hermes/, but nothing referenced it: the
+    # loader resolves the path from this key only. Without it the anti-refusal
+    # priming was dead on arrival and the model answered Test 2 with a refusal.
+    # Resolved by cli._resolve_prefill_messages_file -> ~/.hermes/prefill.json
+    "prefill_messages_file=prefill.json"
     # ── context-retention (behavior, not credentials) ──
     # Defaults 0.50/0.20/20/1 make the agent summarize away most of the
     # session early and look forgetful. These keep verbatim text instead.
