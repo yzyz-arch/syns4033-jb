@@ -37,7 +37,7 @@ def cmd_import_key(a):
 def cmd_import_keys(a):
     st = Store()
     n = 0
-    with open(a.file) as f:
+    with open(a.file, encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if not line or line.startswith("#"):
