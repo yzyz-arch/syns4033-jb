@@ -184,7 +184,7 @@ class Store:
 
     def export_keys_jsonl(self, path) -> int:
         keys = self.keys_table()
-        with open(path, "w") as f:
+        with open(path, "w", encoding="utf-8") as f:
             for k in keys:
                 f.write(json.dumps(k) + "\n")
         return len(keys)
@@ -195,7 +195,7 @@ def load_accounts_jsonl(path) -> list[dict]:
     if not os.path.exists(path):
         return []
     out = []
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if not line or line.startswith("#"):

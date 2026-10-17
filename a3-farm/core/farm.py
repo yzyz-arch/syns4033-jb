@@ -39,7 +39,7 @@ def run_farm(accounts_file: str, max_keys: int = 1, headless: bool = True,
 
     ok = fail = 0
     total_keys = 0
-    with open(RESULTS, "a") as out, ThreadPoolExecutor(max_workers=workers) as ex:
+    with open(RESULTS, "a", encoding="utf-8") as out, ThreadPoolExecutor(max_workers=workers) as ex:
         futs = {ex.submit(_one, a, max_keys, headless, proxy): a for a in accounts}
         for i, f in enumerate(as_completed(futs), 1):
             r = f.result()
