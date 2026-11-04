@@ -1,0 +1,196 @@
+{
+  "verdict": "PASS",
+  "reason": "7/12 throttled, first block at request #5",
+  "mode": "unique-phones",
+  "url": "http://127.0.0.1:50279/otp/request?mode=leaky",
+  "requests": 12,
+  "accepted_2xx": 5,
+  "throttled_429_403_401": 7,
+  "server_5xx": 0,
+  "transport_errors": 0,
+  "first_throttle_at_index": 5,
+  "max_accepts_single_identifier": {
+    "phone": "+62811000000001",
+    "count": 1
+  },
+  "otp_leaked_in_response": {
+    "strong": 5,
+    "weak": 0,
+    "samples": [
+      [
+        "796774",
+        "json-key"
+      ],
+      [
+        "796790",
+        "json-key"
+      ],
+      [
+        "796789",
+        "json-key"
+      ]
+    ]
+  },
+  "latency_ms": {
+    "p50": 43.8,
+    "p95": 55.2,
+    "p99": 55.2,
+    "mean": 36.6,
+    "max": 55.2
+  },
+  "throughput_rps": 68.03,
+  "elapsed_s": 0.18,
+  "status_histogram": {
+    "200": 5,
+    "429": 7
+  },
+  "raw": [
+    {
+      "i": 0,
+      "phone": "+62811000000001",
+      "status": 200,
+      "ms": 7.5,
+      "len": 43,
+      "retry_after": null,
+      "err": null,
+      "otp_leak": {
+        "value": "796774",
+        "how": "json-key"
+      },
+      "body_head": null
+    },
+    {
+      "i": 1,
+      "phone": "+62811000000002",
+      "status": 200,
+      "ms": 48.3,
+      "len": 43,
+      "retry_after": null,
+      "err": null,
+      "otp_leak": {
+        "value": "796790",
+        "how": "json-key"
+      },
+      "body_head": null
+    },
+    {
+      "i": 2,
+      "phone": "+62811000000003",
+      "status": 200,
+      "ms": 3.0,
+      "len": 43,
+      "retry_after": null,
+      "err": null,
+      "otp_leak": {
+        "value": "796789",
+        "how": "json-key"
+      },
+      "body_head": null
+    },
+    {
+      "i": 3,
+      "phone": "+62811000000004",
+      "status": 200,
+      "ms": 55.2,
+      "len": 43,
+      "retry_after": null,
+      "err": null,
+      "otp_leak": {
+        "value": "796796",
+        "how": "json-key"
+      },
+      "body_head": null
+    },
+    {
+      "i": 4,
+      "phone": "+62811000000005",
+      "status": 200,
+      "ms": 3.0,
+      "len": 43,
+      "retry_after": null,
+      "err": null,
+      "otp_leak": {
+        "value": "796799",
+        "how": "json-key"
+      },
+      "body_head": null
+    },
+    {
+      "i": 5,
+      "phone": "+62811000000006",
+      "status": 429,
+      "ms": 51.5,
+      "len": 45,
+      "retry_after": "59",
+      "err": null,
+      "otp_leak": null,
+      "body_head": "{\"error\": \"too_many_requests\", \"scope\": \"ip\"}"
+    },
+    {
+      "i": 6,
+      "phone": "+62811000000007",
+      "status": 429,
+      "ms": 43.6,
+      "len": 45,
+      "retry_after": "59",
+      "err": null,
+      "otp_leak": null,
+      "body_head": "{\"error\": \"too_many_requests\", \"scope\": \"ip\"}"
+    },
+    {
+      "i": 7,
+      "phone": "+62811000000008",
+      "status": 429,
+      "ms": 43.2,
+      "len": 45,
+      "retry_after": "59",
+      "err": null,
+      "otp_leak": null,
+      "body_head": "{\"error\": \"too_many_requests\", \"scope\": \"ip\"}"
+    },
+    {
+      "i": 8,
+      "phone": "+62811000000009",
+      "status": 429,
+      "ms": 46.2,
+      "len": 45,
+      "retry_after": "59",
+      "err": null,
+      "otp_leak": null,
+      "body_head": "{\"error\": \"too_many_requests\", \"scope\": \"ip\"}"
+    },
+    {
+      "i": 9,
+      "phone": "+62811000000010",
+      "status": 429,
+      "ms": 50.2,
+      "len": 45,
+      "retry_after": "59",
+      "err": null,
+      "otp_leak": null,
+      "body_head": "{\"error\": \"too_many_requests\", \"scope\": \"ip\"}"
+    },
+    {
+      "i": 10,
+      "phone": "+62811000000011",
+      "status": 429,
+      "ms": 43.8,
+      "len": 45,
+      "retry_after": "59",
+      "err": null,
+      "otp_leak": null,
+      "body_head": "{\"error\": \"too_many_requests\", \"scope\": \"ip\"}"
+    },
+    {
+      "i": 11,
+      "phone": "+62811000000012",
+      "status": 429,
+      "ms": 43.8,
+      "len": 45,
+      "retry_after": "59",
+      "err": null,
+      "otp_leak": null,
+      "body_head": "{\"error\": \"too_many_requests\", \"scope\": \"ip\"}"
+    }
+  ]
+}

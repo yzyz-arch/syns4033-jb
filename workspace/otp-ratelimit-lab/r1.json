@@ -1,0 +1,365 @@
+{
+  "verdict": "FAIL",
+  "reason": "30/30 requests accepted, zero throttling observed",
+  "mode": "same-phone",
+  "url": "http://127.0.0.1:50279/otp/request?mode=none",
+  "requests": 30,
+  "accepted_2xx": 30,
+  "throttled_429_403_401": 0,
+  "server_5xx": 0,
+  "transport_errors": 0,
+  "first_throttle_at_index": null,
+  "max_accepts_single_identifier": {
+    "phone": "+6281100000001",
+    "count": 30
+  },
+  "otp_leaked_in_response": {
+    "strong": 0,
+    "weak": 0,
+    "samples": []
+  },
+  "latency_ms": {
+    "p50": 43.3,
+    "p95": 49.7,
+    "p99": 50.1,
+    "mean": 31.7,
+    "max": 50.1
+  },
+  "throughput_rps": 189.46,
+  "elapsed_s": 0.16,
+  "status_histogram": {
+    "200": 30
+  },
+  "raw": [
+    {
+      "i": 0,
+      "phone": "+6281100000001",
+      "status": 200,
+      "ms": 5.5,
+      "len": 42,
+      "retry_after": null,
+      "err": null,
+      "otp_leak": null,
+      "body_head": null
+    },
+    {
+      "i": 1,
+      "phone": "+6281100000001",
+      "status": 200,
+      "ms": 45.0,
+      "len": 42,
+      "retry_after": null,
+      "err": null,
+      "otp_leak": null,
+      "body_head": null
+    },
+    {
+      "i": 2,
+      "phone": "+6281100000001",
+      "status": 200,
+      "ms": 6.1,
+      "len": 42,
+      "retry_after": null,
+      "err": null,
+      "otp_leak": null,
+      "body_head": null
+    },
+    {
+      "i": 3,
+      "phone": "+6281100000001",
+      "status": 200,
+      "ms": 47.1,
+      "len": 42,
+      "retry_after": null,
+      "err": null,
+      "otp_leak": null,
+      "body_head": null
+    },
+    {
+      "i": 4,
+      "phone": "+6281100000001",
+      "status": 200,
+      "ms": 3.0,
+      "len": 42,
+      "retry_after": null,
+      "err": null,
+      "otp_leak": null,
+      "body_head": null
+    },
+    {
+      "i": 5,
+      "phone": "+6281100000001",
+      "status": 200,
+      "ms": 43.4,
+      "len": 42,
+      "retry_after": null,
+      "err": null,
+      "otp_leak": null,
+      "body_head": null
+    },
+    {
+      "i": 6,
+      "phone": "+6281100000001",
+      "status": 200,
+      "ms": 2.8,
+      "len": 42,
+      "retry_after": null,
+      "err": null,
+      "otp_leak": null,
+      "body_head": null
+    },
+    {
+      "i": 7,
+      "phone": "+6281100000001",
+      "status": 200,
+      "ms": 41.4,
+      "len": 42,
+      "retry_after": null,
+      "err": null,
+      "otp_leak": null,
+      "body_head": null
+    },
+    {
+      "i": 8,
+      "phone": "+6281100000001",
+      "status": 200,
+      "ms": 2.4,
+      "len": 42,
+      "retry_after": null,
+      "err": null,
+      "otp_leak": null,
+      "body_head": null
+    },
+    {
+      "i": 9,
+      "phone": "+6281100000001",
+      "status": 200,
+      "ms": 2.4,
+      "len": 42,
+      "retry_after": null,
+      "err": null,
+      "otp_leak": null,
+      "body_head": null
+    },
+    {
+      "i": 10,
+      "phone": "+6281100000001",
+      "status": 200,
+      "ms": 49.7,
+      "len": 42,
+      "retry_after": null,
+      "err": null,
+      "otp_leak": null,
+      "body_head": null
+    },
+    {
+      "i": 11,
+      "phone": "+6281100000001",
+      "status": 200,
+      "ms": 44.2,
+      "len": 42,
+      "retry_after": null,
+      "err": null,
+      "otp_leak": null,
+      "body_head": null
+    },
+    {
+      "i": 12,
+      "phone": "+6281100000001",
+      "status": 200,
+      "ms": 5.1,
+      "len": 42,
+      "retry_after": null,
+      "err": null,
+      "otp_leak": null,
+      "body_head": null
+    },
+    {
+      "i": 13,
+      "phone": "+6281100000001",
+      "status": 200,
+      "ms": 2.1,
+      "len": 42,
+      "retry_after": null,
+      "err": null,
+      "otp_leak": null,
+      "body_head": null
+    },
+    {
+      "i": 14,
+      "phone": "+6281100000001",
+      "status": 200,
+      "ms": 17.0,
+      "len": 42,
+      "retry_after": null,
+      "err": null,
+      "otp_leak": null,
+      "body_head": null
+    },
+    {
+      "i": 15,
+      "phone": "+6281100000001",
+      "status": 200,
+      "ms": 46.8,
+      "len": 42,
+      "retry_after": null,
+      "err": null,
+      "otp_leak": null,
+      "body_head": null
+    },
+    {
+      "i": 16,
+      "phone": "+6281100000001",
+      "status": 200,
+      "ms": 45.4,
+      "len": 42,
+      "retry_after": null,
+      "err": null,
+      "otp_leak": null,
+      "body_head": null
+    },
+    {
+      "i": 17,
+      "phone": "+6281100000001",
+      "status": 200,
+      "ms": 6.7,
+      "len": 42,
+      "retry_after": null,
+      "err": null,
+      "otp_leak": null,
+      "body_head": null
+    },
+    {
+      "i": 18,
+      "phone": "+6281100000001",
+      "status": 200,
+      "ms": 47.6,
+      "len": 42,
+      "retry_after": null,
+      "err": null,
+      "otp_leak": null,
+      "body_head": null
+    },
+    {
+      "i": 19,
+      "phone": "+6281100000001",
+      "status": 200,
+      "ms": 46.1,
+      "len": 42,
+      "retry_after": null,
+      "err": null,
+      "otp_leak": null,
+      "body_head": null
+    },
+    {
+      "i": 20,
+      "phone": "+6281100000001",
+      "status": 200,
+      "ms": 50.1,
+      "len": 42,
+      "retry_after": null,
+      "err": null,
+      "otp_leak": null,
+      "body_head": null
+    },
+    {
+      "i": 21,
+      "phone": "+6281100000001",
+      "status": 200,
+      "ms": 43.3,
+      "len": 42,
+      "retry_after": null,
+      "err": null,
+      "otp_leak": null,
+      "body_head": null
+    },
+    {
+      "i": 22,
+      "phone": "+6281100000001",
+      "status": 200,
+      "ms": 43.5,
+      "len": 42,
+      "retry_after": null,
+      "err": null,
+      "otp_leak": null,
+      "body_head": null
+    },
+    {
+      "i": 23,
+      "phone": "+6281100000001",
+      "status": 200,
+      "ms": 43.9,
+      "len": 42,
+      "retry_after": null,
+      "err": null,
+      "otp_leak": null,
+      "body_head": null
+    },
+    {
+      "i": 24,
+      "phone": "+6281100000001",
+      "status": 200,
+      "ms": 43.3,
+      "len": 42,
+      "retry_after": null,
+      "err": null,
+      "otp_leak": null,
+      "body_head": null
+    },
+    {
+      "i": 25,
+      "phone": "+6281100000001",
+      "status": 200,
+      "ms": 42.5,
+      "len": 42,
+      "retry_after": null,
+      "err": null,
+      "otp_leak": null,
+      "body_head": null
+    },
+    {
+      "i": 26,
+      "phone": "+6281100000001",
+      "status": 200,
+      "ms": 43.1,
+      "len": 42,
+      "retry_after": null,
+      "err": null,
+      "otp_leak": null,
+      "body_head": null
+    },
+    {
+      "i": 27,
+      "phone": "+6281100000001",
+      "status": 200,
+      "ms": 42.4,
+      "len": 42,
+      "retry_after": null,
+      "err": null,
+      "otp_leak": null,
+      "body_head": null
+    },
+    {
+      "i": 28,
+      "phone": "+6281100000001",
+      "status": 200,
+      "ms": 46.0,
+      "len": 42,
+      "retry_after": null,
+      "err": null,
+      "otp_leak": null,
+      "body_head": null
+    },
+    {
+      "i": 29,
+      "phone": "+6281100000001",
+      "status": 200,
+      "ms": 43.6,
+      "len": 42,
+      "retry_after": null,
+      "err": null,
+      "otp_leak": null,
+      "body_head": null
+    }
+  ]
+}

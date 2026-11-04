@@ -1,0 +1,88 @@
+{
+  "verdict": "INCONCLUSIVE",
+  "reason": "every request errored at transport level; endpoint unreachable or blocked",
+  "mode": "same-phone",
+  "url": "http://127.0.0.1:33437/otp/request",
+  "requests": 5,
+  "accepted_2xx": 0,
+  "throttled_429_403_401": 0,
+  "server_5xx": 0,
+  "transport_errors": 5,
+  "first_throttle_at_index": null,
+  "max_accepts_single_identifier": {
+    "phone": null,
+    "count": 0
+  },
+  "otp_leaked_in_response": {
+    "strong": 0,
+    "weak": 0,
+    "samples": []
+  },
+  "latency_ms": {
+    "p50": null,
+    "p95": null,
+    "p99": null,
+    "mean": null,
+    "max": null
+  },
+  "throughput_rps": 386.63,
+  "elapsed_s": 0.01,
+  "status_histogram": {},
+  "raw": [
+    {
+      "i": 0,
+      "phone": "+6281100000001",
+      "status": null,
+      "ms": 3.6,
+      "len": 0,
+      "retry_after": null,
+      "err": "ConnectionError: HTTPConnectionPool(host='127.0.0.1', port=33437): Max retries exceeded with url: /otp/request (Caused by NewConnectionError(\"HTTPConnection(host='127.0.0.1', port=33437): Failed to es",
+      "otp_leak": null,
+      "body_head": null
+    },
+    {
+      "i": 1,
+      "phone": "+6281100000001",
+      "status": null,
+      "ms": 2.0,
+      "len": 0,
+      "retry_after": null,
+      "err": "ConnectionError: HTTPConnectionPool(host='127.0.0.1', port=33437): Max retries exceeded with url: /otp/request (Caused by NewConnectionError(\"HTTPConnection(host='127.0.0.1', port=33437): Failed to es",
+      "otp_leak": null,
+      "body_head": null
+    },
+    {
+      "i": 2,
+      "phone": "+6281100000001",
+      "status": null,
+      "ms": 1.3,
+      "len": 0,
+      "retry_after": null,
+      "err": "ConnectionError: HTTPConnectionPool(host='127.0.0.1', port=33437): Max retries exceeded with url: /otp/request (Caused by NewConnectionError(\"HTTPConnection(host='127.0.0.1', port=33437): Failed to es",
+      "otp_leak": null,
+      "body_head": null
+    },
+    {
+      "i": 3,
+      "phone": "+6281100000001",
+      "status": null,
+      "ms": 1.0,
+      "len": 0,
+      "retry_after": null,
+      "err": "ConnectionError: HTTPConnectionPool(host='127.0.0.1', port=33437): Max retries exceeded with url: /otp/request (Caused by NewConnectionError(\"HTTPConnection(host='127.0.0.1', port=33437): Failed to es",
+      "otp_leak": null,
+      "body_head": null
+    },
+    {
+      "i": 4,
+      "phone": "+6281100000001",
+      "status": null,
+      "ms": 0.8,
+      "len": 0,
+      "retry_after": null,
+      "err": "ConnectionError: HTTPConnectionPool(host='127.0.0.1', port=33437): Max retries exceeded with url: /otp/request (Caused by NewConnectionError(\"HTTPConnection(host='127.0.0.1', port=33437): Failed to es",
+      "otp_leak": null,
+      "body_head": null
+    }
+  ]
+}

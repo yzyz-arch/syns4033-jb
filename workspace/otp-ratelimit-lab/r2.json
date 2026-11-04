@@ -1,0 +1,366 @@
+{
+  "verdict": "PASS",
+  "reason": "27/30 throttled, first block at request #3",
+  "mode": "same-phone",
+  "url": "http://127.0.0.1:50279/otp/request?mode=ipwindow",
+  "requests": 30,
+  "accepted_2xx": 3,
+  "throttled_429_403_401": 27,
+  "server_5xx": 0,
+  "transport_errors": 0,
+  "first_throttle_at_index": 3,
+  "max_accepts_single_identifier": {
+    "phone": "+6281100000001",
+    "count": 3
+  },
+  "otp_leaked_in_response": {
+    "strong": 0,
+    "weak": 0,
+    "samples": []
+  },
+  "latency_ms": {
+    "p50": 42.4,
+    "p95": 61.0,
+    "p99": 62.0,
+    "mean": 36.4,
+    "max": 62.0
+  },
+  "throughput_rps": 168.15,
+  "elapsed_s": 0.18,
+  "status_histogram": {
+    "200": 3,
+    "429": 27
+  },
+  "raw": [
+    {
+      "i": 0,
+      "phone": "+6281100000001",
+      "status": 200,
+      "ms": 17.3,
+      "len": 46,
+      "retry_after": null,
+      "err": null,
+      "otp_leak": null,
+      "body_head": null
+    },
+    {
+      "i": 1,
+      "phone": "+6281100000001",
+      "status": 200,
+      "ms": 4.6,
+      "len": 46,
+      "retry_after": null,
+      "err": null,
+      "otp_leak": null,
+      "body_head": null
+    },
+    {
+      "i": 2,
+      "phone": "+6281100000001",
+      "status": 200,
+      "ms": 53.1,
+      "len": 46,
+      "retry_after": null,
+      "err": null,
+      "otp_leak": null,
+      "body_head": null
+    },
+    {
+      "i": 3,
+      "phone": "+6281100000001",
+      "status": 429,
+      "ms": 47.9,
+      "len": 48,
+      "retry_after": "59",
+      "err": null,
+      "otp_leak": null,
+      "body_head": "{\"error\": \"too_many_requests\", \"scope\": \"phone\"}"
+    },
+    {
+      "i": 4,
+      "phone": "+6281100000001",
+      "status": 429,
+      "ms": 3.2,
+      "len": 48,
+      "retry_after": "59",
+      "err": null,
+      "otp_leak": null,
+      "body_head": "{\"error\": \"too_many_requests\", \"scope\": \"phone\"}"
+    },
+    {
+      "i": 5,
+      "phone": "+6281100000001",
+      "status": 429,
+      "ms": 39.3,
+      "len": 48,
+      "retry_after": "59",
+      "err": null,
+      "otp_leak": null,
+      "body_head": "{\"error\": \"too_many_requests\", \"scope\": \"phone\"}"
+    },
+    {
+      "i": 6,
+      "phone": "+6281100000001",
+      "status": 429,
+      "ms": 12.0,
+      "len": 48,
+      "retry_after": "59",
+      "err": null,
+      "otp_leak": null,
+      "body_head": "{\"error\": \"too_many_requests\", \"scope\": \"phone\"}"
+    },
+    {
+      "i": 7,
+      "phone": "+6281100000001",
+      "status": 429,
+      "ms": 19.3,
+      "len": 48,
+      "retry_after": "59",
+      "err": null,
+      "otp_leak": null,
+      "body_head": "{\"error\": \"too_many_requests\", \"scope\": \"phone\"}"
+    },
+    {
+      "i": 8,
+      "phone": "+6281100000001",
+      "status": 429,
+      "ms": 3.4,
+      "len": 48,
+      "retry_after": "59",
+      "err": null,
+      "otp_leak": null,
+      "body_head": "{\"error\": \"too_many_requests\", \"scope\": \"phone\"}"
+    },
+    {
+      "i": 9,
+      "phone": "+6281100000001",
+      "status": 429,
+      "ms": 41.6,
+      "len": 48,
+      "retry_after": "59",
+      "err": null,
+      "otp_leak": null,
+      "body_head": "{\"error\": \"too_many_requests\", \"scope\": \"phone\"}"
+    },
+    {
+      "i": 10,
+      "phone": "+6281100000001",
+      "status": 429,
+      "ms": 2.7,
+      "len": 48,
+      "retry_after": "59",
+      "err": null,
+      "otp_leak": null,
+      "body_head": "{\"error\": \"too_many_requests\", \"scope\": \"phone\"}"
+    },
+    {
+      "i": 11,
+      "phone": "+6281100000001",
+      "status": 429,
+      "ms": 46.5,
+      "len": 48,
+      "retry_after": "59",
+      "err": null,
+      "otp_leak": null,
+      "body_head": "{\"error\": \"too_many_requests\", \"scope\": \"phone\"}"
+    },
+    {
+      "i": 12,
+      "phone": "+6281100000001",
+      "status": 429,
+      "ms": 9.9,
+      "len": 48,
+      "retry_after": "59",
+      "err": null,
+      "otp_leak": null,
+      "body_head": "{\"error\": \"too_many_requests\", \"scope\": \"phone\"}"
+    },
+    {
+      "i": 13,
+      "phone": "+6281100000001",
+      "status": 429,
+      "ms": 61.0,
+      "len": 48,
+      "retry_after": "59",
+      "err": null,
+      "otp_leak": null,
+      "body_head": "{\"error\": \"too_many_requests\", \"scope\": \"phone\"}"
+    },
+    {
+      "i": 14,
+      "phone": "+6281100000001",
+      "status": 429,
+      "ms": 21.4,
+      "len": 48,
+      "retry_after": "59",
+      "err": null,
+      "otp_leak": null,
+      "body_head": "{\"error\": \"too_many_requests\", \"scope\": \"phone\"}"
+    },
+    {
+      "i": 15,
+      "phone": "+6281100000001",
+      "status": 429,
+      "ms": 41.5,
+      "len": 48,
+      "retry_after": "59",
+      "err": null,
+      "otp_leak": null,
+      "body_head": "{\"error\": \"too_many_requests\", \"scope\": \"phone\"}"
+    },
+    {
+      "i": 16,
+      "phone": "+6281100000001",
+      "status": 429,
+      "ms": 62.0,
+      "len": 48,
+      "retry_after": "59",
+      "err": null,
+      "otp_leak": null,
+      "body_head": "{\"error\": \"too_many_requests\", \"scope\": \"phone\"}"
+    },
+    {
+      "i": 17,
+      "phone": "+6281100000001",
+      "status": 429,
+      "ms": 61.0,
+      "len": 48,
+      "retry_after": "59",
+      "err": null,
+      "otp_leak": null,
+      "body_head": "{\"error\": \"too_many_requests\", \"scope\": \"phone\"}"
+    },
+    {
+      "i": 18,
+      "phone": "+6281100000001",
+      "status": 429,
+      "ms": 7.7,
+      "len": 48,
+      "retry_after": "59",
+      "err": null,
+      "otp_leak": null,
+      "body_head": "{\"error\": \"too_many_requests\", \"scope\": \"phone\"}"
+    },
+    {
+      "i": 19,
+      "phone": "+6281100000001",
+      "status": 429,
+      "ms": 59.8,
+      "len": 48,
+      "retry_after": "59",
+      "err": null,
+      "otp_leak": null,
+      "body_head": "{\"error\": \"too_many_requests\", \"scope\": \"phone\"}"
+    },
+    {
+      "i": 20,
+      "phone": "+6281100000001",
+      "status": 429,
+      "ms": 54.0,
+      "len": 48,
+      "retry_after": "59",
+      "err": null,
+      "otp_leak": null,
+      "body_head": "{\"error\": \"too_many_requests\", \"scope\": \"phone\"}"
+    },
+    {
+      "i": 21,
+      "phone": "+6281100000001",
+      "status": 429,
+      "ms": 54.3,
+      "len": 48,
+      "retry_after": "59",
+      "err": null,
+      "otp_leak": null,
+      "body_head": "{\"error\": \"too_many_requests\", \"scope\": \"phone\"}"
+    },
+    {
+      "i": 22,
+      "phone": "+6281100000001",
+      "status": 429,
+      "ms": 54.2,
+      "len": 48,
+      "retry_after": "59",
+      "err": null,
+      "otp_leak": null,
+      "body_head": "{\"error\": \"too_many_requests\", \"scope\": \"phone\"}"
+    },
+    {
+      "i": 23,
+      "phone": "+6281100000001",
+      "status": 429,
+      "ms": 45.1,
+      "len": 48,
+      "retry_after": "59",
+      "err": null,
+      "otp_leak": null,
+      "body_head": "{\"error\": \"too_many_requests\", \"scope\": \"phone\"}"
+    },
+    {
+      "i": 24,
+      "phone": "+6281100000001",
+      "status": 429,
+      "ms": 44.0,
+      "len": 48,
+      "retry_after": "59",
+      "err": null,
+      "otp_leak": null,
+      "body_head": "{\"error\": \"too_many_requests\", \"scope\": \"phone\"}"
+    },
+    {
+      "i": 25,
+      "phone": "+6281100000001",
+      "status": 429,
+      "ms": 43.3,
+      "len": 48,
+      "retry_after": "59",
+      "err": null,
+      "otp_leak": null,
+      "body_head": "{\"error\": \"too_many_requests\", \"scope\": \"phone\"}"
+    },
+    {
+      "i": 26,
+      "phone": "+6281100000001",
+      "status": 429,
+      "ms": 51.9,
+      "len": 48,
+      "retry_after": "59",
+      "err": null,
+      "otp_leak": null,
+      "body_head": "{\"error\": \"too_many_requests\", \"scope\": \"phone\"}"
+    },
+    {
+      "i": 27,
+      "phone": "+6281100000001",
+      "status": 429,
+      "ms": 48.3,
+      "len": 48,
+      "retry_after": "59",
+      "err": null,
+      "otp_leak": null,
+      "body_head": "{\"error\": \"too_many_requests\", \"scope\": \"phone\"}"
+    },
+    {
+      "i": 28,
+      "phone": "+6281100000001",
+      "status": 429,
+      "ms": 40.5,
+      "len": 48,
+      "retry_after": "59",
+      "err": null,
+      "otp_leak": null,
+      "body_head": "{\"error\": \"too_many_requests\", \"scope\": \"phone\"}"
+    },
+    {
+      "i": 29,
+      "phone": "+6281100000001",
+      "status": 429,
+      "ms": 42.4,
+      "len": 48,
+      "retry_after": "59",
+      "err": null,
+      "otp_leak": null,
+      "body_head": "{\"error\": \"too_many_requests\", \"scope\": \"phone\"}"
+    }
+  ]
+}
