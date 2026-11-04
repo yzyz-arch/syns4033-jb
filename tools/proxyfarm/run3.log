@@ -1,0 +1,72 @@
+[*] reused 90431 cached candidates (state/candidates.tsv)
+[*] own ip=85.9.196.242 | candidates=90431 | todo=25000 | live=27
+    500/25000 anon_live=3 anon_rate=0.6%
+    1000/25000 anon_live=8 anon_rate=0.8%
+    1500/25000 anon_live=8 anon_rate=0.5%
+    2000/25000 anon_live=16 anon_rate=0.8%
+    2500/25000 anon_live=16 anon_rate=0.6%
+    3000/25000 anon_live=19 anon_rate=0.6%
+    3500/25000 anon_live=19 anon_rate=0.5%
+    4000/25000 anon_live=26 anon_rate=0.7%
+    4500/25000 anon_live=26 anon_rate=0.6%
+    5000/25000 anon_live=31 anon_rate=0.6%
+    5500/25000 anon_live=33 anon_rate=0.6%
+    6000/25000 anon_live=37 anon_rate=0.6%
+    6500/25000 anon_live=40 anon_rate=0.6%
+    7000/25000 anon_live=40 anon_rate=0.6%
+    7500/25000 anon_live=43 anon_rate=0.6%
+    8000/25000 anon_live=43 anon_rate=0.5%
+    8500/25000 anon_live=47 anon_rate=0.6%
+    9000/25000 anon_live=47 anon_rate=0.5%
+    9500/25000 anon_live=51 anon_rate=0.5%
+    10000/25000 anon_live=51 anon_rate=0.5%
+    10500/25000 anon_live=54 anon_rate=0.5%
+    11000/25000 anon_live=58 anon_rate=0.5%
+    11500/25000 anon_live=62 anon_rate=0.5%
+    12000/25000 anon_live=68 anon_rate=0.6%
+    12500/25000 anon_live=68 anon_rate=0.5%
+    13000/25000 anon_live=71 anon_rate=0.5%
+    13500/25000 anon_live=71 anon_rate=0.5%
+    14000/25000 anon_live=76 anon_rate=0.5%
+    14500/25000 anon_live=76 anon_rate=0.5%
+    15000/25000 anon_live=79 anon_rate=0.5%
+    15500/25000 anon_live=81 anon_rate=0.5%
+    16000/25000 anon_live=85 anon_rate=0.5%
+    16500/25000 anon_live=89 anon_rate=0.5%
+    17000/25000 anon_live=89 anon_rate=0.5%
+    17500/25000 anon_live=91 anon_rate=0.5%
+    18000/25000 anon_live=91 anon_rate=0.5%
+    18500/25000 anon_live=98 anon_rate=0.5%
+    19000/25000 anon_live=98 anon_rate=0.5%
+    19500/25000 anon_live=103 anon_rate=0.5%
+    20000/25000 anon_live=103 anon_rate=0.5%
+    20500/25000 anon_live=106 anon_rate=0.5%
+    21000/25000 anon_live=107 anon_rate=0.5%
+    21500/25000 anon_live=110 anon_rate=0.5%
+    22000/25000 anon_live=116 anon_rate=0.5%
+    22500/25000 anon_live=117 anon_rate=0.5%
+    23000/25000 anon_live=122 anon_rate=0.5%
+    23500/25000 anon_live=122 anon_rate=0.5%
+    24000/25000 anon_live=128 anon_rate=0.5%
+    24500/25000 anon_live=128 anon_rate=0.5%
+    25000/25000 anon_live=131 anon_rate=0.5%
+Traceback (most recent call last):
+  File "/root/syns4033-jb/tools/proxyfarm/farm.py", line 372, in <module>
+    asyncio.run(main())
+    ~~~~~~~~~~~^^^^^^^^
+  File "/usr/lib/python3.14/asyncio/runners.py", line 204, in run
+    return runner.run(main)
+           ~~~~~~~~~~^^^^^^
+  File "/usr/lib/python3.14/asyncio/runners.py", line 127, in run
+    return self._loop.run_until_complete(task)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "/usr/lib/python3.14/asyncio/base_events.py", line 719, in run_until_complete
+    return future.result()
+           ~~~~~~~~~~~~~^^
+  File "/root/syns4033-jb/tools/proxyfarm/farm.py", line 364, in main
+    "tls_capable": sum(1 for x in good if x["tls_ok"]),
+                   ~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/syns4033-jb/tools/proxyfarm/farm.py", line 364, in <genexpr>
+    "tls_capable": sum(1 for x in good if x["tls_ok"]),
+                                          ~^^^^^^^^^^
+KeyError: 'tls_ok'

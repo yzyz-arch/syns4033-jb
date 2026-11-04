@@ -1,0 +1,46 @@
+[*] reused 90431 cached candidates (state/candidates.tsv)
+[*] own ip=85.9.196.242 | candidates=4930 | todo=4928 | live=152
+    500/4928 anon_live=0 anon_rate=0.0%
+    1000/4928 anon_live=0 anon_rate=0.0%
+    1500/4928 anon_live=0 anon_rate=0.0%
+    2000/4928 anon_live=0 anon_rate=0.0%
+    2500/4928 anon_live=0 anon_rate=0.0%
+    3000/4928 anon_live=0 anon_rate=0.0%
+    3500/4928 anon_live=0 anon_rate=0.0%
+    4000/4928 anon_live=0 anon_rate=0.0%
+    4500/4928 anon_live=0 anon_rate=0.0%
+{
+ "ts": "2026-10-29T18:48:29Z",
+ "alive": 154,
+ "residential": 57,
+ "transparent": 55,
+ "by_country": {
+  "AE": 1,
+  "AR": 1,
+  "BD": 2,
+  "BR": 1,
+  "CL": 1,
+  "EG": 1,
+  "GB": 1,
+  "GE": 1,
+  "GR": 1,
+  "ID": 17,
+  "IN": 2,
+  "JP": 1,
+  "MX": 1,
+  "MY": 3,
+  "NL": 2,
+  "PK": 5,
+  "PY": 1,
+  "TH": 5,
+  "TR": 4,
+  "US": 2,
+  "VN": 2,
+  "XK": 1,
+  "ZW": 1
+ },
+ "avg_ms": 4075,
+ "mobile": 0,
+ "tls_capable": 16
+}
+[+] -> /root/syns4033-jb/tools/proxyfarm/out/residential.txt (57) | /root/syns4033-jb/tools/proxyfarm/out/transparent.txt (55)

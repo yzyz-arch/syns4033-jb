@@ -1,0 +1,40 @@
+[*] reused 90431 cached candidates (state/candidates.tsv)
+[*] own ip=85.9.196.242 | candidates=90431 | todo=8000 | live=0
+    500/8000 live=2 rate=0.4%
+    1000/8000 live=8 rate=0.8%
+    1500/8000 live=11 rate=0.7%
+    2000/8000 live=11 rate=0.5%
+    2500/8000 live=13 rate=0.5%
+    3000/8000 live=15 rate=0.5%
+    3500/8000 live=15 rate=0.4%
+    4000/8000 live=17 rate=0.4%
+    4500/8000 live=18 rate=0.4%
+    5000/8000 live=18 rate=0.4%
+    5500/8000 live=21 rate=0.4%
+    6000/8000 live=23 rate=0.4%
+    6500/8000 live=25 rate=0.4%
+    7000/8000 live=25 rate=0.4%
+    7500/8000 live=27 rate=0.4%
+    8000/8000 live=27 rate=0.3%
+{
+ "ts": "2026-10-29T18:36:58Z",
+ "live": 27,
+ "residential": 26,
+ "by_country": {
+  "AF": 1,
+  "BD": 1,
+  "BR": 2,
+  "ID": 11,
+  "MX": 2,
+  "NL": 1,
+  "RO": 1,
+  "SY": 1,
+  "TH": 3,
+  "TR": 1,
+  "US": 1,
+  "VN": 1
+ },
+ "avg_ms": 37042,
+ "mobile": 0
+}
+[+] -> /root/syns4033-jb/tools/proxyfarm/out/residential.txt

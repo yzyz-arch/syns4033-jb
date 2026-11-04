@@ -1,0 +1,48 @@
+[*] harvested 90431 unique; report={"geonode p1": 0, "geonode p2": 0, "geonode p3": 0, "geonode p4": 0, "geonode p5": 0, "geonode p6": 0, "geonode p7": 0, "geonode p8": 0, "openproxylist-http": 5783, "openproxylist-socks5": 4252, "proxyscrape-http-5s": 133, "proxyscrape-socks5": 678, "monosans-http": 0, "monosans-socks5": 0, "thespeedx-http": 0, "thespeedx-socks5": 0, "roosterkid-https": 59, "iplocate-http": 436, "clarketm": 0, "shifty-http": 0, "vakhov-https": 6, "proxifly-all": 79084, "hookzof-socks5": 0}
+    geonode p1             0
+    geonode p2             0
+    geonode p3             0
+    geonode p4             0
+    geonode p5             0
+    geonode p6             0
+    geonode p7             0
+    geonode p8             0
+    openproxylist-http     5783
+    openproxylist-socks5   4252
+    proxyscrape-http-5s    133
+    proxyscrape-socks5     678
+    monosans-http          0
+    monosans-socks5        0
+    thespeedx-http         0
+    thespeedx-socks5       0
+    roosterkid-https       59
+    iplocate-http          436
+    clarketm               0
+    shifty-http            0
+    vakhov-https           6
+    proxifly-all           79084
+    hookzof-socks5         0
+[*] own ip=85.9.196.242 | candidates=90431 | todo=6000 | live=0
+Traceback (most recent call last):
+  File "/root/syns4033-jb/tools/proxyfarm/farm.py", line 336, in <module>
+    asyncio.run(main())
+    ~~~~~~~~~~~^^^^^^^^
+  File "/usr/lib/python3.14/asyncio/runners.py", line 204, in run
+    return runner.run(main)
+           ~~~~~~~~~~^^^^^^
+  File "/usr/lib/python3.14/asyncio/runners.py", line 127, in run
+    return self._loop.run_until_complete(task)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "/usr/lib/python3.14/asyncio/base_events.py", line 719, in run_until_complete
+    return future.result()
+           ~~~~~~~~~~~~~^^
+  File "/root/syns4033-jb/tools/proxyfarm/farm.py", line 315, in main
+    live = await run_pool(entries, real, a.jobs, a.timeout, a.batch, not a.no_resume)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/syns4033-jb/tools/proxyfarm/farm.py", line 209, in run_pool
+    await asyncio.gather(*(one(p, pr) for p, pr in todo))
+          ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/syns4033-jb/tools/proxyfarm/farm.py", line 209, in <genexpr>
+    await asyncio.gather(*(one(p, pr) for p, pr in todo))
+                                          ^^^^^
+ValueError: too many values to unpack (expected 2, got 3)
