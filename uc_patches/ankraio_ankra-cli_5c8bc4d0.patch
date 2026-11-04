@@ -1,0 +1,1575 @@
+From 5c8bc4d0997fd8bb3c6bbbe014826ad98ec95c41 Mon Sep 17 00:00:00 2001
+From: Mark Shine <72512363+CodeStaple@users.noreply.github.com>
+Date: Sat, 29 Aug 2026 00:11:14 +0200
+Subject: [PATCH] feat(scaleway): bring the CLI to UpCloud parity (#185)
+
+Scaleway had 5 client methods and only stop/start, no credentials command,
+and no arm in the shared provider dispatch switches - so node groups, SSH
+keys, scaling and upgrades all refused Scaleway clusters even though the
+cluster-api mounts those routes for Scaleway in the same loop as UpCloud
+(providerapi/clusters.go, lifecycle.go).
+
+internal/client:
+- scaleway_credentials.go: list/create API credentials and SSH key
+  credentials. The secret key never reaches the command line.
+- scaleway_clusters.go: create, preflight, deprovision, worker count,
+  scale-workers, k8s version + upgrade, the full node-group surface
+  (list/add/scale/instance-type/labels/taints/delete/autoscaling),
+  control plane, SSH keys, and the catalog reads
+  (locations/instance-types/gateway-types/networks). Written against the
+  existing generic provider helpers rather than copying UpCloud's
+  per-provider HTTP boilerplate.
+
+cmd:
+- scaleway_credentials.go mirroring the Proxmox VE command.
+- scaleway_cluster.go gains create, preflight, deprovision, workers,
+  k8s-version, the four catalog readers, and control-plane. create and
+  preflight share one flag set so they cannot drift; flags left unset are
+  omitted from the body so the server's documented defaults apply, and
+  --worker-count is tri-state because 0 is legitimate for a
+  node-group-only cluster.
+- a scaleway arm in the node-group, ssh-keys, scale, upgrade and delete
+  dispatch switches, and Scaleway added to the user-facing provider lists
+  in those commands' help and refusal text.
+
+Preflight is Scaleway-only: no other provider exposes it as a route. Its
+help repeats the documented caveat that it proves availability, not
+project hard quota.
+
+Co-authored-by: Claude Opus 5 (1M context) <noreply@anthropic.com>
+---
+ cmd/cluster_node_group.go               |  24 +-
+ cmd/cluster_scale.go                    |   6 +-
+ cmd/cluster_ssh_keys.go                 |  12 +-
+ cmd/cluster_upgrade.go                  |   6 +-
+ cmd/control_plane.go                    |   9 +
+ cmd/delete.go                           |   2 +-
+ cmd/e2e_test.go                         | 120 +++++++
+ cmd/scaleway_cluster.go                 | 443 ++++++++++++++++++++++++
+ cmd/scaleway_credentials.go             | 220 ++++++++++++
+ cmd/services.go                         |  30 ++
+ internal/client/scaleway_clusters.go    | 279 +++++++++++++++
+ internal/client/scaleway_credentials.go |  93 +++++
+ 12 files changed, 1233 insertions(+), 11 deletions(-)
+ create mode 100644 cmd/scaleway_credentials.go
+ create mode 100644 internal/client/scaleway_credentials.go
+
+diff --git a/cmd/cluster_node_group.go b/cmd/cluster_node_group.go
+index 82b1aabe..7cce27a9 100644
+--- a/cmd/cluster_node_group.go
++++ b/cmd/cluster_node_group.go
+@@ -34,11 +34,11 @@ func resolveNodeGroupClusterKind(clusterID string) (string, error) {
+ 		return "", fmt.Errorf("looking up cluster %q: %w", clusterID, lookupError)
+ 	}
+ 	switch cluster.Kind {
+-	case "hetzner", "ovh", "upcloud", "digitalocean", "proxmox", "morpheus":
++	case "hetzner", "ovh", "upcloud", "digitalocean", "scaleway", "proxmox", "morpheus":
+ 		return cluster.Kind, nil
+ 	default:
+ 		return "", fmt.Errorf(
+-			"cluster %q (kind %q) does not support node groups. Only Hetzner, OVH, UpCloud, DigitalOcean, Proxmox VE, and HPE Morpheus clusters can use this command",
++			"cluster %q (kind %q) does not support node groups. Only Hetzner, OVH, UpCloud, DigitalOcean, Scaleway, Proxmox VE, and HPE Morpheus clusters can use this command",
+ 			clusterID, cluster.Kind)
+ 	}
+ }
+@@ -53,6 +53,8 @@ func nodeGroupListForKind(kind string) nodeGroupListFunc {
+ 		return apiClient.ListUpcloudNodeGroups
+ 	case "digitalocean":
+ 		return apiClient.ListDigitaloceanNodeGroups
++	case "scaleway":
++		return apiClient.ListScalewayNodeGroups
+ 	case "proxmox":
+ 		return apiClient.ListProxmoxNodeGroups
+ 	case "morpheus":
+@@ -71,6 +73,8 @@ func nodeGroupAddForKind(kind string) nodeGroupAddFunc {
+ 		return apiClient.AddUpcloudNodeGroup
+ 	case "digitalocean":
+ 		return apiClient.AddDigitaloceanNodeGroup
++	case "scaleway":
++		return apiClient.AddScalewayNodeGroup
+ 	case "proxmox":
+ 		return apiClient.AddProxmoxNodeGroup
+ 	case "morpheus":
+@@ -89,6 +93,8 @@ func nodeGroupScaleForKind(kind string) nodeGroupScaleFunc {
+ 		return apiClient.ScaleUpcloudNodeGroup
+ 	case "digitalocean":
+ 		return apiClient.ScaleDigitaloceanNodeGroup
++	case "scaleway":
++		return apiClient.ScaleScalewayNodeGroup
+ 	case "proxmox":
+ 		return apiClient.ScaleProxmoxNodeGroup
+ 	case "morpheus":
+@@ -107,6 +113,8 @@ func nodeGroupUpgradeForKind(kind string) nodeGroupUpgradeFunc {
+ 		return apiClient.UpdateUpcloudNodeGroupInstanceType
+ 	case "digitalocean":
+ 		return apiClient.UpdateDigitaloceanNodeGroupInstanceType
++	case "scaleway":
++		return apiClient.UpdateScalewayNodeGroupInstanceType
+ 	case "proxmox":
+ 		return apiClient.UpdateProxmoxNodeGroupInstanceType
+ 	case "morpheus":
+@@ -125,6 +133,8 @@ func nodeGroupDeleteForKind(kind string) nodeGroupDeleteFunc {
+ 		return apiClient.DeleteUpcloudNodeGroup
+ 	case "digitalocean":
+ 		return apiClient.DeleteDigitaloceanNodeGroup
++	case "scaleway":
++		return apiClient.DeleteScalewayNodeGroup
+ 	case "proxmox":
+ 		return apiClient.DeleteProxmoxNodeGroup
+ 	case "morpheus":
+@@ -143,6 +153,8 @@ func nodeGroupAutoscalingGetForKind(kind string) nodeGroupAutoscalingGetFunc {
+ 		return apiClient.GetUpcloudNodeGroupAutoscaling
+ 	case "digitalocean":
+ 		return apiClient.GetDigitaloceanNodeGroupAutoscaling
++	case "scaleway":
++		return apiClient.GetScalewayNodeGroupAutoscaling
+ 	case "proxmox":
+ 		return apiClient.GetProxmoxNodeGroupAutoscaling
+ 	case "morpheus":
+@@ -161,6 +173,8 @@ func nodeGroupAutoscalingSetForKind(kind string) nodeGroupAutoscalingSetFunc {
+ 		return apiClient.UpdateUpcloudNodeGroupAutoscaling
+ 	case "digitalocean":
+ 		return apiClient.UpdateDigitaloceanNodeGroupAutoscaling
++	case "scaleway":
++		return apiClient.UpdateScalewayNodeGroupAutoscaling
+ 	case "proxmox":
+ 		return apiClient.UpdateProxmoxNodeGroupAutoscaling
+ 	case "morpheus":
+@@ -179,6 +193,8 @@ func nodeGroupLabelsForKind(kind string) nodeGroupLabelsFunc {
+ 		return apiClient.UpdateUpcloudNodeGroupLabels
+ 	case "digitalocean":
+ 		return apiClient.UpdateDigitaloceanNodeGroupLabels
++	case "scaleway":
++		return apiClient.UpdateScalewayNodeGroupLabels
+ 	case "proxmox":
+ 		return apiClient.UpdateProxmoxNodeGroupLabels
+ 	case "morpheus":
+@@ -197,6 +213,8 @@ func nodeGroupTaintsForKind(kind string) nodeGroupTaintsFunc {
+ 		return apiClient.UpdateUpcloudNodeGroupTaints
+ 	case "digitalocean":
+ 		return apiClient.UpdateDigitaloceanNodeGroupTaints
++	case "scaleway":
++		return apiClient.UpdateScalewayNodeGroupTaints
+ 	case "proxmox":
+ 		return apiClient.UpdateProxmoxNodeGroupTaints
+ 	case "morpheus":
+@@ -210,7 +228,7 @@ var clusterNodeGroupCmd = &cobra.Command{
+ 	Short: "Manage node groups for a cloud cluster",
+ 	Long: `List, add, scale, upgrade, and delete node groups on a cloud cluster.
+ 
+-The cloud provider (Hetzner, OVH, UpCloud, DigitalOcean, Proxmox VE, or HPE
++The cloud provider (Hetzner, OVH, UpCloud, DigitalOcean, Scaleway, Proxmox VE, or HPE
+ Morpheus) is detected automatically from the cluster.`,
+ }
+ 
+diff --git a/cmd/cluster_scale.go b/cmd/cluster_scale.go
+index 042243cd..584ad52d 100644
+--- a/cmd/cluster_scale.go
++++ b/cmd/cluster_scale.go
+@@ -25,6 +25,8 @@ func scaleFunctionForKind(kind string) (workerScaleFunc, bool) {
+ 		return apiClient.ScaleUpcloudWorkers, true
+ 	case "digitalocean":
+ 		return apiClient.ScaleDigitaloceanWorkers, true
++	case "scaleway":
++		return apiClient.ScaleScalewayWorkers, true
+ 	case "proxmox":
+ 		return apiClient.ScaleProxmoxWorkers, true
+ 	case "morpheus":
+@@ -39,7 +41,7 @@ var clusterScaleCmd = &cobra.Command{
+ 	Short: "Scale the default worker pool of a cloud cluster",
+ 	Long: `Scale the number of default-pool worker nodes up or down for a cloud cluster.
+ 
+-The cloud provider (Hetzner, OVH, UpCloud, DigitalOcean, Proxmox VE, or HPE
++The cloud provider (Hetzner, OVH, UpCloud, DigitalOcean, Scaleway, Proxmox VE, or HPE
+ Morpheus) is detected automatically from the cluster, so you do not need to
+ remember which provider it runs on. To scale a named node group instead, use
+ 'ankra cluster node-group scale'.
+@@ -62,7 +64,7 @@ Example:
+ 		scale, supported := scaleFunctionForKind(cluster.Kind)
+ 		if !supported {
+ 			return fmt.Errorf(
+-				"cluster %q (kind %q) does not support worker scaling. Only Hetzner, OVH, UpCloud, DigitalOcean, Proxmox VE, and HPE Morpheus clusters can be scaled with this command",
++				"cluster %q (kind %q) does not support worker scaling. Only Hetzner, OVH, UpCloud, DigitalOcean, Scaleway, Proxmox VE, and HPE Morpheus clusters can be scaled with this command",
+ 				clusterID, cluster.Kind)
+ 		}
+ 
+diff --git a/cmd/cluster_ssh_keys.go b/cmd/cluster_ssh_keys.go
+index 624ca263..3d657fc4 100644
+--- a/cmd/cluster_ssh_keys.go
++++ b/cmd/cluster_ssh_keys.go
+@@ -25,11 +25,11 @@ func resolveSSHKeysClusterKind(clusterID string) (string, error) {
+ 		return "", fmt.Errorf("looking up cluster %q: %w", clusterID, lookupError)
+ 	}
+ 	switch cluster.Kind {
+-	case "hetzner", "ovh", "upcloud", "digitalocean", "proxmox", "morpheus":
++	case "hetzner", "ovh", "upcloud", "digitalocean", "scaleway", "proxmox", "morpheus":
+ 		return cluster.Kind, nil
+ 	default:
+ 		return "", fmt.Errorf(
+-			"cluster %q (kind %q) does not support SSH key management; only Hetzner, OVH, UpCloud, DigitalOcean, Proxmox VE, and HPE Morpheus clusters can use this command",
++			"cluster %q (kind %q) does not support SSH key management; only Hetzner, OVH, UpCloud, DigitalOcean, Scaleway, Proxmox VE, and HPE Morpheus clusters can use this command",
+ 			clusterID, cluster.Kind)
+ 	}
+ }
+@@ -44,6 +44,8 @@ func sshKeysGetForKind(kind string) sshKeysGetFunc {
+ 		return apiClient.GetUpcloudClusterSSHKeys
+ 	case "digitalocean":
+ 		return apiClient.GetDigitaloceanClusterSSHKeys
++	case "scaleway":
++		return apiClient.GetScalewayClusterSSHKeys
+ 	case "proxmox":
+ 		return apiClient.GetProxmoxClusterSSHKeys
+ 	case "morpheus":
+@@ -62,6 +64,8 @@ func sshKeysSetForKind(kind string) sshKeysSetFunc {
+ 		return apiClient.UpdateUpcloudClusterSSHKeys
+ 	case "digitalocean":
+ 		return apiClient.UpdateDigitaloceanClusterSSHKeys
++	case "scaleway":
++		return apiClient.UpdateScalewayClusterSSHKeys
+ 	case "proxmox":
+ 		return apiClient.UpdateProxmoxClusterSSHKeys
+ 	case "morpheus":
+@@ -80,6 +84,8 @@ func sshKeysResyncForKind(kind string) sshKeysResyncFunc {
+ 		return apiClient.ResyncUpcloudClusterSSHKeys
+ 	case "digitalocean":
+ 		return apiClient.ResyncDigitaloceanClusterSSHKeys
++	case "scaleway":
++		return apiClient.ResyncScalewayClusterSSHKeys
+ 	case "proxmox":
+ 		return apiClient.ResyncProxmoxClusterSSHKeys
+ 	case "morpheus":
+@@ -95,7 +101,7 @@ var clusterSSHKeysCmd = &cobra.Command{
+ 	Long: `Get, set, and re-sync the SSH key credentials authorised to access a cloud
+ cluster's nodes.
+ 
+-The cloud provider (Hetzner, OVH, UpCloud, DigitalOcean, Proxmox VE, or HPE
++The cloud provider (Hetzner, OVH, UpCloud, DigitalOcean, Scaleway, Proxmox VE, or HPE
+ Morpheus) is detected automatically from the cluster.`,
+ }
+ 
+diff --git a/cmd/cluster_upgrade.go b/cmd/cluster_upgrade.go
+index 86d0172c..19de42c3 100644
+--- a/cmd/cluster_upgrade.go
++++ b/cmd/cluster_upgrade.go
+@@ -24,6 +24,8 @@ func upgradeFunctionForKind(kind string) (k8sVersionUpgrade, bool) {
+ 		return apiClient.UpgradeUpcloudK8sVersion, true
+ 	case "digitalocean":
+ 		return apiClient.UpgradeDigitaloceanK8sVersion, true
++	case "scaleway":
++		return apiClient.UpgradeScalewayK8sVersion, true
+ 	case "proxmox":
+ 		return apiClient.UpgradeProxmoxK8sVersion, true
+ 	case "morpheus":
+@@ -40,7 +42,7 @@ var clusterUpgradeCmd = &cobra.Command{
+ 	Short: "Upgrade the Kubernetes version of a cloud cluster",
+ 	Long: `Upgrade the Kubernetes version on all nodes in a cloud cluster.
+ 
+-The cloud provider (Hetzner, OVH, UpCloud, DigitalOcean, Proxmox VE, or HPE
++The cloud provider (Hetzner, OVH, UpCloud, DigitalOcean, Scaleway, Proxmox VE, or HPE
+ Morpheus) is detected automatically from the cluster, so you do not need to
+ remember which provider it runs on. Both
+ k3s and kubeadm clusters are supported; list the available target versions
+@@ -69,7 +71,7 @@ Examples:
+ 		upgrade, supported := upgradeFunctionForKind(cluster.Kind)
+ 		if !supported {
+ 			return fmt.Errorf(
+-				"cluster %q (kind %q) does not support Kubernetes version upgrades. Only Hetzner, OVH, UpCloud, DigitalOcean, Proxmox VE, and HPE Morpheus clusters can be upgraded with this command",
++				"cluster %q (kind %q) does not support Kubernetes version upgrades. Only Hetzner, OVH, UpCloud, DigitalOcean, Scaleway, Proxmox VE, and HPE Morpheus clusters can be upgraded with this command",
+ 				clusterID, cluster.Kind)
+ 		}
+ 
+diff --git a/cmd/control_plane.go b/cmd/control_plane.go
+index b6eb1400..e8a21859 100644
+--- a/cmd/control_plane.go
++++ b/cmd/control_plane.go
+@@ -53,6 +53,15 @@ func digitaloceanControlPlaneOps() controlPlaneOps {
+ 	}
+ }
+ 
++func scalewayControlPlaneOps() controlPlaneOps {
++	return controlPlaneOps{
++		provider:        "scaleway",
++		get:             apiClient.GetScalewayControlPlane,
++		setCount:        apiClient.ChangeScalewayControlPlaneCount,
++		setInstanceType: apiClient.ChangeScalewayControlPlaneInstanceType,
++	}
++}
++
+ func proxmoxControlPlaneOps() controlPlaneOps {
+ 	return controlPlaneOps{
+ 		provider:        "proxmox",
+diff --git a/cmd/delete.go b/cmd/delete.go
+index 6c5a6837..ec4f8816 100644
+--- a/cmd/delete.go
++++ b/cmd/delete.go
+@@ -40,7 +40,7 @@ var deleteClusterCmd = &cobra.Command{
+ 		clusterInfo, lookupErr := apiClient.GetCluster(name)
+ 		if lookupErr == nil {
+ 			switch clusterInfo.Kind {
+-			case "hetzner", "ovh", "upcloud", "digitalocean", "proxmox", "morpheus":
++			case "hetzner", "ovh", "upcloud", "digitalocean", "scaleway", "proxmox", "morpheus":
+ 				fmt.Printf(
+ 					"Cluster %q is a %s cloud cluster and cannot be deleted with this command.\n"+
+ 						"Run 'ankra cluster deprovision %s' instead so the cloud resources are released.\n",
+diff --git a/cmd/e2e_test.go b/cmd/e2e_test.go
+index 3f19e815..4b6193e8 100644
+--- a/cmd/e2e_test.go
++++ b/cmd/e2e_test.go
+@@ -1756,6 +1756,126 @@ func (m baseMock) RestartScalewayClusterNode(clusterID, nodeID string) (*client.
+ 	return nil, errors.New("not implemented")
+ }
+ 
++func (m baseMock) CreateScalewayCluster(request client.CreateScalewayClusterRequest) (*client.CreateScalewayClusterResponse, error) {
++	return nil, errors.New("not implemented")
++}
++
++func (m baseMock) PreflightScalewayCluster(request client.CreateScalewayClusterRequest) (*client.ScalewayPreflightResult, error) {
++	return nil, errors.New("not implemented")
++}
++
++func (m baseMock) DeprovisionScalewayCluster(clusterID string) (*client.ProviderDeprovisionClusterResponse, error) {
++	return nil, errors.New("not implemented")
++}
++
++func (m baseMock) GetScalewayWorkerCount(clusterID string) (*client.WorkerCountResult, error) {
++	return nil, errors.New("not implemented")
++}
++
++func (m baseMock) ScaleScalewayWorkers(clusterID string, workerCount int) (*client.ScaleWorkersResult, error) {
++	return nil, errors.New("not implemented")
++}
++
++func (m baseMock) GetScalewayK8sVersion(clusterID string) (*client.K8sVersionInfo, error) {
++	return nil, errors.New("not implemented")
++}
++
++func (m baseMock) UpgradeScalewayK8sVersion(clusterID, targetVersion string, force bool) (*client.UpgradeK8sVersionResult, error) {
++	return nil, errors.New("not implemented")
++}
++
++func (m baseMock) ListScalewayNodeGroups(clusterID string) (*client.NodeGroupListResult, error) {
++	return nil, errors.New("not implemented")
++}
++
++func (m baseMock) AddScalewayNodeGroup(ctx context.Context, clusterID string, request client.AddNodeGroupRequest, wait bool) (*client.AddNodeGroupResult, bool, error) {
++	return nil, false, errors.New("not implemented")
++}
++
++func (m baseMock) ScaleScalewayNodeGroup(ctx context.Context, clusterID, groupName string, count int, wait bool) (*client.ScaleNodeGroupResult, bool, error) {
++	return nil, false, errors.New("not implemented")
++}
++
++func (m baseMock) UpdateScalewayNodeGroupInstanceType(ctx context.Context, clusterID, groupName, instanceType string, wait bool) (*client.UpdateNodeGroupResult, bool, error) {
++	return nil, false, errors.New("not implemented")
++}
++
++func (m baseMock) UpdateScalewayNodeGroupLabels(ctx context.Context, clusterID, groupName string, labels map[string]string, wait bool) (*client.UpdateNodeGroupResult, bool, error) {
++	return nil, false, errors.New("not implemented")
++}
++
++func (m baseMock) UpdateScalewayNodeGroupTaints(ctx context.Context, clusterID, groupName string, taints []client.NodeTaint, wait bool) (*client.UpdateNodeGroupResult, bool, error) {
++	return nil, false, errors.New("not implemented")
++}
++
++func (m baseMock) DeleteScalewayNodeGroup(ctx context.Context, clusterID, groupName string, wait bool) (*client.DeleteNodeGroupResult, bool, error) {
++	return nil, false, errors.New("not implemented")
++}
++
++func (m baseMock) GetScalewayNodeGroupAutoscaling(clusterID, groupName string) (*client.NodeGroupAutoscalingResult, error) {
++	return nil, errors.New("not implemented")
++}
++
++func (m baseMock) UpdateScalewayNodeGroupAutoscaling(ctx context.Context, clusterID, groupName string, request client.NodeGroupAutoscalingRequest, wait bool) (*client.NodeGroupAutoscalingResult, bool, error) {
++	return nil, false, errors.New("not implemented")
++}
++
++func (m baseMock) GetScalewayControlPlane(clusterID string) (*client.ControlPlaneInfo, error) {
++	return nil, errors.New("not implemented")
++}
++
++func (m baseMock) ChangeScalewayControlPlaneCount(clusterID string, count int) (*client.ChangeControlPlaneCountResult, error) {
++	return nil, errors.New("not implemented")
++}
++
++func (m baseMock) ChangeScalewayControlPlaneInstanceType(clusterID, instanceType string) (*client.ChangeControlPlaneInstanceTypeResult, error) {
++	return nil, errors.New("not implemented")
++}
++
++func (m baseMock) GetScalewayClusterSSHKeys(clusterID string) (*client.ClusterSSHKeysResult, error) {
++	return nil, errors.New("not implemented")
++}
++
++func (m baseMock) UpdateScalewayClusterSSHKeys(clusterID string, sshKeyCredentialIDs []string) (*client.UpdateClusterSSHKeysResult, error) {
++	return nil, errors.New("not implemented")
++}
++
++func (m baseMock) ResyncScalewayClusterSSHKeys(clusterID string) (*client.ResyncSSHKeysResult, error) {
++	return nil, errors.New("not implemented")
++}
++
++func (m baseMock) ListScalewayCredentials() ([]client.ScalewayCredentialListItem, error) {
++	return nil, errors.New("not implemented")
++}
++
++func (m baseMock) CreateScalewayCredential(request client.CreateScalewayCredentialRequest) (*client.CreateScalewayCredentialResponse, error) {
++	return nil, errors.New("not implemented")
++}
++
++func (m baseMock) ListScalewaySSHKeyCredentials() ([]client.ScalewayCredentialListItem, error) {
++	return nil, errors.New("not implemented")
++}
++
++func (m baseMock) CreateScalewaySSHKeyCredential(request client.CreateSSHKeyCredentialRequest) (*client.CreateSSHKeyCredentialResponse, error) {
++	return nil, errors.New("not implemented")
++}
++
++func (m baseMock) ListScalewayLocations(credentialID string) (*client.ScalewayCatalogResult, error) {
++	return nil, errors.New("not implemented")
++}
++
++func (m baseMock) ListScalewayInstanceTypes(credentialID, region, zone string) (*client.ScalewayCatalogResult, error) {
++	return nil, errors.New("not implemented")
++}
++
++func (m baseMock) ListScalewayGatewayTypes(credentialID, region, zone string) (*client.ScalewayCatalogResult, error) {
++	return nil, errors.New("not implemented")
++}
++
++func (m baseMock) ListScalewayNetworks(credentialID, region, zone string) (*client.ScalewayCatalogResult, error) {
++	return nil, errors.New("not implemented")
++}
++
+ func (m baseMock) CreateProxmoxCluster(request client.CreateProxmoxClusterRequest) (*client.CreateProxmoxClusterResponse, error) {
+ 	return nil, errors.New("not implemented")
+ }
+diff --git a/cmd/scaleway_cluster.go b/cmd/scaleway_cluster.go
+index 00a91ebe..e6b6d8ef 100644
+--- a/cmd/scaleway_cluster.go
++++ b/cmd/scaleway_cluster.go
+@@ -2,7 +2,12 @@ package cmd
+ 
+ import (
+ 	"fmt"
++	"os"
++	"strings"
+ 
++	"ankra/internal/client"
++
++	"github.com/jedib0t/go-pretty/v6/table"
+ 	"github.com/jedib0t/go-pretty/v6/text"
+ 	"github.com/spf13/cobra"
+ )
+@@ -72,7 +77,445 @@ var scalewayStartCmd = &cobra.Command{
+ func init() {
+ 	scalewayStartCmd.Flags().String("scope", "all", "Provisioning scope: 'all' or 'control_plane'")
+ 	scalewayStopCmd.Flags().Bool("force", false, "Force stop: cancel every in-flight operation and block new operations for 60 seconds while the stop lands, and also delete the cluster's tagged volumes and load balancers even when retention_policy is retain (destroys persisted data)")
++	registerScalewayCreateFlags(scalewayCreateCmd, scalewayPreflightCmd)
++	registerScalewayCatalogFlags(false, scalewayLocationsCmd)
++	registerScalewayCatalogFlags(true, scalewayInstanceTypesCmd, scalewayGatewayTypesCmd, scalewayNetworksCmd)
++	registerStructuredOutputFlags(
++		scalewayCreateCmd, scalewayPreflightCmd, scalewayDeprovisionCmd,
++		scalewayWorkersCmd, scalewayK8sVersionCmd, scalewayLocationsCmd,
++		scalewayInstanceTypesCmd, scalewayGatewayTypesCmd, scalewayNetworksCmd,
++	)
++
++	scalewayCmd.AddCommand(scalewayCreateCmd)
++	scalewayCmd.AddCommand(scalewayPreflightCmd)
++	scalewayCmd.AddCommand(scalewayDeprovisionCmd)
+ 	scalewayCmd.AddCommand(scalewayStopCmd)
+ 	scalewayCmd.AddCommand(scalewayStartCmd)
++	scalewayCmd.AddCommand(scalewayWorkersCmd)
++	scalewayCmd.AddCommand(scalewayK8sVersionCmd)
++	scalewayCmd.AddCommand(scalewayLocationsCmd)
++	scalewayCmd.AddCommand(scalewayInstanceTypesCmd)
++	scalewayCmd.AddCommand(scalewayGatewayTypesCmd)
++	scalewayCmd.AddCommand(scalewayNetworksCmd)
++	scalewayCmd.AddCommand(newControlPlaneCmd(scalewayControlPlaneOps, "Scaleway"))
+ 	clusterCmd.AddCommand(scalewayCmd)
+ }
++
++// scalewayCreateRequestFromFlags builds the create body shared by `create` and
++// `preflight`. Flags left at their zero value are omitted so the server's
++// documented defaults apply (gateway type VPC-GW-S, bastion port 61000,
++// DEV1-M instance types, k3s, stacked etcd, retain).
++func scalewayCreateRequestFromFlags(cmd *cobra.Command) client.CreateScalewayClusterRequest {
++	name, _ := cmd.Flags().GetString("name")
++	description, _ := cmd.Flags().GetString("description")
++	credentialID, _ := cmd.Flags().GetString("credential-id")
++	runtimeCredentialID, _ := cmd.Flags().GetString("runtime-credential-id")
++	sshKeyCredentialID, _ := cmd.Flags().GetString("ssh-key-credential-id")
++	region, _ := cmd.Flags().GetString("region")
++	zone, _ := cmd.Flags().GetString("zone")
++	privateNetworkID, _ := cmd.Flags().GetString("private-network-id")
++	networkIPRange, _ := cmd.Flags().GetString("network-ip-range")
++	gatewayType, _ := cmd.Flags().GetString("gateway-type")
++	bastionPort, _ := cmd.Flags().GetInt("bastion-port")
++	gatewayAllowedIPs, _ := cmd.Flags().GetStringSlice("gateway-allowed-ips")
++	controlPlaneCount, _ := cmd.Flags().GetInt("control-plane-count")
++	controlPlaneType, _ := cmd.Flags().GetString("control-plane-type")
++	workerType, _ := cmd.Flags().GetString("worker-type")
++	distribution, _ := cmd.Flags().GetString("distribution")
++	kubernetesVersion, _ := cmd.Flags().GetString("kubernetes-version")
++	etcdTopology, _ := cmd.Flags().GetString("etcd-topology")
++	etcdNodeCount, _ := cmd.Flags().GetInt("etcd-node-count")
++	etcdType, _ := cmd.Flags().GetString("etcd-type")
++	cni, _ := cmd.Flags().GetString("cni")
++	retentionPolicy, _ := cmd.Flags().GetString("retention-policy")
++
++	request := client.CreateScalewayClusterRequest{
++		Name:               name,
++		CredentialID:       credentialID,
++		SSHKeyCredentialID: sshKeyCredentialID,
++		Region:             region,
++		Zone:               zone,
++		GatewayType:        gatewayType,
++		BastionPort:        bastionPort,
++		GatewayAllowedIPs:  gatewayAllowedIPs,
++		ControlPlaneCount:  controlPlaneCount,
++		ControlPlaneType:   controlPlaneType,
++		WorkerType:         workerType,
++		Distribution:       distribution,
++		EtcdTopology:       etcdTopology,
++		EtcdNodeCount:      etcdNodeCount,
++		EtcdType:           etcdType,
++		CNI:                cni,
++		RetentionPolicy:    retentionPolicy,
++	}
++	// worker-count is tri-state: 0 is a legitimate value (node-group-only
++	// clusters), so only send it when the user actually set the flag.
++	if cmd.Flags().Changed("worker-count") {
++		workerCount, _ := cmd.Flags().GetInt("worker-count")
++		request.WorkerCount = &workerCount
++	}
++	if cmd.Flags().Changed("include-networking") {
++		includeNetworking, _ := cmd.Flags().GetBool("include-networking")
++		request.IncludeNetworking = &includeNetworking
++	}
++	if cmd.Flags().Changed("include-dns") {
++		includeDNS, _ := cmd.Flags().GetBool("include-dns")
++		request.IncludeDNS = &includeDNS
++	}
++	if description != "" {
++		request.Description = &description
++	}
++	if runtimeCredentialID != "" {
++		request.RuntimeCredentialID = &runtimeCredentialID
++	}
++	if privateNetworkID != "" {
++		request.PrivateNetworkID = &privateNetworkID
++	}
++	if networkIPRange != "" {
++		request.NetworkIPRange = &networkIPRange
++	}
++	if kubernetesVersion != "" {
++		request.KubernetesVersion = &kubernetesVersion
++	}
++	return request
++}
++
++var scalewayCreateCmd = &cobra.Command{
++	Use:   "create",
++	Short: "Create a new Scaleway Instances cluster",
++	Long: `Create an Ankra-managed K3s or kubeadm cluster on Scaleway Instances.
++
++Ankra owns the server graph, security group, Public Gateway v2, generated SSH
++key and (unless --private-network-id adopts an existing one) the Private
++Network. Run 'preflight' first to check region, zone, CIDR and SKU
++availability - it proves availability, not project hard quota.
++
++Examples:
++  ankra cluster scaleway create --name prod --credential-id <id> \
++    --ssh-key-credential-id <id> --region fr-par --zone fr-par-1`,
++	RunE: func(cmd *cobra.Command, args []string) error {
++		result, createError := apiClient.CreateScalewayCluster(scalewayCreateRequestFromFlags(cmd))
++		if createError != nil {
++			return fmt.Errorf("creating Scaleway cluster: %w", createError)
++		}
++
++		if handled, renderError := renderStructured(cmd, result); renderError != nil {
++			return renderError
++		} else if handled {
++			return nil
++		}
++
++		fmt.Printf("Scaleway cluster '%s' created successfully!\n", result.Name)
++		fmt.Printf("  Cluster ID: %s\n", result.ClusterID)
++		fmt.Printf("\nView it in the UI:\n  %s/organisation/clusters/cluster/imported/%s/overview\n",
++			strings.TrimRight(baseURL, "/"), result.ClusterID)
++		return nil
++	},
++}
++
++var scalewayPreflightCmd = &cobra.Command{
++	Use:   "preflight",
++	Short: "Validate a Scaleway cluster create request without provisioning",
++	Long: `Run the Scaleway create preflight: region/zone reachability, CIDR overlap,
++gateway and instance-type availability. A quota warning means SKU stock was
++visible, not that project hard-quota headroom was proven.
++
++Takes the same flags as 'create'.`,
++	RunE: func(cmd *cobra.Command, args []string) error {
++		result, preflightError := apiClient.PreflightScalewayCluster(scalewayCreateRequestFromFlags(cmd))
++		if preflightError != nil {
++			return fmt.Errorf("running Scaleway preflight: %w", preflightError)
++		}
++
++		if handled, renderError := renderStructured(cmd, result); renderError != nil {
++			return renderError
++		} else if handled {
++			return nil
++		}
++
++		t := table.NewWriter()
++		t.SetOutputMirror(os.Stdout)
++		t.SetStyle(table.StyleRounded)
++		t.AppendHeader(table.Row{"Check", "Status", "Message"})
++		for _, item := range result.Items {
++			t.AppendRow(table.Row{item.Check, item.Status, item.Message})
++		}
++		t.Render()
++
++		if result.CanProceed {
++			fmt.Println(text.FgGreen.Sprint("\nPreflight passed: the cluster can be created."))
++			return nil
++		}
++		return fmt.Errorf("preflight failed: resolve the checks above before creating the cluster")
++	},
++}
++
++var scalewayDeprovisionCmd = &cobra.Command{
++	Use:   "deprovision <cluster_id>",
++	Short: "Deprovision a Scaleway cluster and release its cloud resources",
++	Long: `Permanently delete a Scaleway cluster and the provider resources Ankra
++created for it. Volumes and load balancers follow the cluster's
++retention_policy: 'retain' keeps them, 'delete' sweeps the tagged orphans.`,
++	Args: cobra.ExactArgs(1),
++	RunE: func(cmd *cobra.Command, args []string) error {
++		result, deprovisionError := apiClient.DeprovisionScalewayCluster(args[0])
++		if deprovisionError != nil {
++			return fmt.Errorf("deprovisioning Scaleway cluster: %w", deprovisionError)
++		}
++
++		if handled, renderError := renderStructured(cmd, result); renderError != nil {
++			return renderError
++		} else if handled {
++			return nil
++		}
++
++		fmt.Println(text.FgGreen.Sprint("Scaleway cluster deprovision initiated."))
++		fmt.Printf("  Cluster ID: %s\n", result.ClusterID)
++		if result.OperationID != nil {
++			fmt.Printf("  Operation ID: %s\n", *result.OperationID)
++		}
++		return nil
++	},
++}
++
++var scalewayWorkersCmd = &cobra.Command{
++	Use:   "workers <cluster_id>",
++	Short: "Get current worker count for a Scaleway cluster",
++	Args:  cobra.ExactArgs(1),
++	RunE: func(cmd *cobra.Command, args []string) error {
++		result, fetchError := apiClient.GetScalewayWorkerCount(args[0])
++		if fetchError != nil {
++			return fmt.Errorf("fetching worker count: %w", fetchError)
++		}
++
++		if handled, renderError := renderStructured(cmd, result); renderError != nil {
++			return renderError
++		} else if handled {
++			return nil
++		}
++
++		fmt.Printf("Worker Count: %d\n", result.WorkerCount)
++		fmt.Printf("  Min: %d\n", result.Min)
++		fmt.Printf("  Max: %d\n", result.Max)
++		return nil
++	},
++}
++
++var scalewayK8sVersionCmd = &cobra.Command{
++	Use:   "k8s-version <cluster_id>",
++	Short: "Get current Kubernetes version for a Scaleway cluster",
++	Args:  cobra.ExactArgs(1),
++	RunE: func(cmd *cobra.Command, args []string) error {
++		result, fetchError := apiClient.GetScalewayK8sVersion(args[0])
++		if fetchError != nil {
++			return fmt.Errorf("fetching Kubernetes version: %w", fetchError)
++		}
++
++		if handled, renderError := renderStructured(cmd, result); renderError != nil {
++			return renderError
++		} else if handled {
++			return nil
++		}
++
++		version := "not set (using latest stable)"
++		if result.CurrentVersion != nil {
++			version = *result.CurrentVersion
++		}
++		fmt.Printf("Kubernetes Version: %s\n", version)
++		fmt.Printf("  Distribution: %s\n", result.Distribution)
++		return nil
++	},
++}
++
++var scalewayLocationsCmd = &cobra.Command{
++	Use:   "locations",
++	Short: "List Scaleway regions and zones available to a credential",
++	RunE: func(cmd *cobra.Command, args []string) error {
++		credentialID, _ := cmd.Flags().GetString("credential-id")
++		result, listError := apiClient.ListScalewayLocations(credentialID)
++		if listError != nil {
++			return fmt.Errorf("listing Scaleway locations: %w", listError)
++		}
++
++		if handled, renderError := renderStructured(cmd, result); renderError != nil {
++			return renderError
++		} else if handled {
++			return nil
++		}
++
++		if len(result.Locations) == 0 {
++			fmt.Println("No locations available for this credential.")
++			return nil
++		}
++		t := table.NewWriter()
++		t.SetOutputMirror(os.Stdout)
++		t.SetStyle(table.StyleRounded)
++		t.AppendHeader(table.Row{"Region", "Zones"})
++		for _, location := range result.Locations {
++			t.AppendRow(table.Row{location.Region, strings.Join(location.Zones, ", ")})
++		}
++		t.Render()
++		return nil
++	},
++}
++
++var scalewayInstanceTypesCmd = &cobra.Command{
++	Use:   "instance-types",
++	Short: "List Scaleway instance types (commercial types) for a zone",
++	RunE: func(cmd *cobra.Command, args []string) error {
++		credentialID, _ := cmd.Flags().GetString("credential-id")
++		region, _ := cmd.Flags().GetString("region")
++		zone, _ := cmd.Flags().GetString("zone")
++		result, listError := apiClient.ListScalewayInstanceTypes(credentialID, region, zone)
++		if listError != nil {
++			return fmt.Errorf("listing Scaleway instance types: %w", listError)
++		}
++
++		if handled, renderError := renderStructured(cmd, result); renderError != nil {
++			return renderError
++		} else if handled {
++			return nil
++		}
++
++		if len(result.InstanceTypes) == 0 {
++			fmt.Println("No instance types available for this credential and zone.")
++			return nil
++		}
++		t := table.NewWriter()
++		t.SetOutputMirror(os.Stdout)
++		t.SetStyle(table.StyleRounded)
++		t.AppendHeader(table.Row{"Name", "vCPU", "Memory (GB)", "Arch", "Monthly"})
++		for _, instanceType := range result.InstanceTypes {
++			t.AppendRow(table.Row{
++				instanceType.Name, instanceType.CPUs, instanceType.MemoryGB,
++				instanceType.Architecture,
++				fmt.Sprintf("%.2f %s", instanceType.MonthlyPrice, strings.ToUpper(instanceType.Currency)),
++			})
++		}
++		t.Render()
++		if !result.PricingComplete {
++			fmt.Println(text.FgYellow.Sprint("\nPricing is incomplete: gateway, flexible IP and dependent networking prices are not published by Scaleway."))
++		}
++		return nil
++	},
++}
++
++var scalewayGatewayTypesCmd = &cobra.Command{
++	Use:   "gateway-types",
++	Short: "List Scaleway Public Gateway types for a zone",
++	RunE: func(cmd *cobra.Command, args []string) error {
++		credentialID, _ := cmd.Flags().GetString("credential-id")
++		region, _ := cmd.Flags().GetString("region")
++		zone, _ := cmd.Flags().GetString("zone")
++		result, listError := apiClient.ListScalewayGatewayTypes(credentialID, region, zone)
++		if listError != nil {
++			return fmt.Errorf("listing Scaleway gateway types: %w", listError)
++		}
++
++		if handled, renderError := renderStructured(cmd, result); renderError != nil {
++			return renderError
++		} else if handled {
++			return nil
++		}
++
++		if len(result.GatewayTypes) == 0 {
++			fmt.Println("No gateway types available for this credential and zone.")
++			return nil
++		}
++		t := table.NewWriter()
++		t.SetOutputMirror(os.Stdout)
++		t.SetStyle(table.StyleRounded)
++		t.AppendHeader(table.Row{"Name", "Monthly"})
++		for _, gatewayType := range result.GatewayTypes {
++			t.AppendRow(table.Row{
++				gatewayType.Name,
++				fmt.Sprintf("%.2f %s", gatewayType.MonthlyPrice, strings.ToUpper(gatewayType.Currency)),
++			})
++		}
++		t.Render()
++		return nil
++	},
++}
++
++var scalewayNetworksCmd = &cobra.Command{
++	Use:   "networks",
++	Short: "List Scaleway Private Networks a credential can adopt",
++	RunE: func(cmd *cobra.Command, args []string) error {
++		credentialID, _ := cmd.Flags().GetString("credential-id")
++		region, _ := cmd.Flags().GetString("region")
++		zone, _ := cmd.Flags().GetString("zone")
++		result, listError := apiClient.ListScalewayNetworks(credentialID, region, zone)
++		if listError != nil {
++			return fmt.Errorf("listing Scaleway networks: %w", listError)
++		}
++
++		if handled, renderError := renderStructured(cmd, result); renderError != nil {
++			return renderError
++		} else if handled {
++			return nil
++		}
++
++		if len(result.Networks) == 0 {
++			fmt.Println("No private networks available for this credential and region.")
++			return nil
++		}
++		t := table.NewWriter()
++		t.SetOutputMirror(os.Stdout)
++		t.SetStyle(table.StyleRounded)
++		t.AppendHeader(table.Row{"ID", "Name", "Subnets"})
++		for _, network := range result.Networks {
++			t.AppendRow(table.Row{network.ID, network.Name, strings.Join(network.Subnets, ", ")})
++		}
++		t.Render()
++		return nil
++	},
++}
++
++// registerScalewayCreateFlags declares the create/preflight flag set once so
++// the two commands can never drift.
++func registerScalewayCreateFlags(commands ...*cobra.Command) {
++	for _, command := range commands {
++		command.Flags().String("name", "", "Cluster name (required)")
++		command.Flags().String("description", "", "Cluster description")
++		command.Flags().String("credential-id", "", "Scaleway provisioning credential ID (required)")
++		command.Flags().String("runtime-credential-id", "", "Scaleway credential for the in-cluster CCM/CSI (defaults to the provisioning credential)")
++		command.Flags().String("ssh-key-credential-id", "", "SSH key credential ID (required)")
++		command.Flags().String("region", "", "Scaleway region, e.g. fr-par (required)")
++		command.Flags().String("zone", "", "Scaleway zone in that region, e.g. fr-par-1 (required)")
++		command.Flags().String("private-network-id", "", "Adopt an existing Private Network instead of creating one")
++		command.Flags().String("network-ip-range", "", "CIDR for the created Private Network")
++		command.Flags().String("gateway-type", "", "Public Gateway type (server default: VPC-GW-S)")
++		command.Flags().Int("bastion-port", 0, "Public Gateway bastion SSH port (server default: 61000)")
++		command.Flags().StringSlice("gateway-allowed-ips", nil, "CIDRs allowed to reach the gateway bastion")
++		command.Flags().Int("control-plane-count", 0, "Control plane node count (server default: 1)")
++		command.Flags().String("control-plane-type", "", "Control plane commercial type (server default: DEV1-M)")
++		command.Flags().Int("worker-count", 0, "Default-pool worker count (server default: 1)")
++		command.Flags().String("worker-type", "", "Worker commercial type (server default: DEV1-M)")
++		command.Flags().String("distribution", "", "Kubernetes distribution: k3s or kubeadm (server default: k3s). kubeadm on Scaleway is Cilium-only")
++		command.Flags().String("kubernetes-version", "", "Pin a Kubernetes version (default: latest supported)")
++		command.Flags().String("etcd-topology", "", "etcd topology: stacked or external (server default: stacked)")
++		command.Flags().Int("etcd-node-count", 0, "External etcd node count, 3 or 5 (server default: 3)")
++		command.Flags().String("etcd-type", "", "External etcd commercial type (server default: DEV1-M)")
++		command.Flags().String("cni", "", "CNI plugin (default: the platform default; immutable after create)")
++		command.Flags().String("retention-policy", "", "Teardown policy for volumes and load balancers: retain or delete (server default: retain)")
++		command.Flags().Bool("include-networking", true, "Provision the networking stack")
++		command.Flags().Bool("include-dns", true, "Provision the DNS zone")
++		_ = command.MarkFlagRequired("name")
++		_ = command.MarkFlagRequired("credential-id")
++		_ = command.MarkFlagRequired("ssh-key-credential-id")
++		_ = command.MarkFlagRequired("region")
++		_ = command.MarkFlagRequired("zone")
++	}
++}
++
++// registerScalewayCatalogFlags declares the credential-scoped catalog flags.
++func registerScalewayCatalogFlags(zoned bool, commands ...*cobra.Command) {
++	for _, command := range commands {
++		command.Flags().String("credential-id", "", "Scaleway credential ID (required)")
++		_ = command.MarkFlagRequired("credential-id")
++		if zoned {
++			command.Flags().String("region", "", "Scaleway region, e.g. fr-par")
++			command.Flags().String("zone", "", "Scaleway zone, e.g. fr-par-1")
++		}
++	}
++}
+diff --git a/cmd/scaleway_credentials.go b/cmd/scaleway_credentials.go
+new file mode 100644
+index 00000000..28f9dfa8
+--- /dev/null
++++ b/cmd/scaleway_credentials.go
+@@ -0,0 +1,220 @@
++package cmd
++
++import (
++	"errors"
++	"fmt"
++	"os"
++
++	"ankra/internal/client"
++
++	"github.com/jedib0t/go-pretty/v6/table"
++	"github.com/manifoldco/promptui"
++	"github.com/spf13/cobra"
++)
++
++var scalewayCredCmd = &cobra.Command{
++	Use:     "scaleway",
++	Aliases: []string{"scw"},
++	Short:   "Manage Scaleway credentials",
++	Long:    "Commands to list and create Scaleway API credentials and SSH key credentials.",
++}
++
++func renderScalewayCredentials(cmd *cobra.Command, credentials []client.ScalewayCredentialListItem, emptyMessage string) error {
++	if credentials == nil {
++		credentials = []client.ScalewayCredentialListItem{}
++	}
++	if handled, renderError := renderStructured(cmd, credentials); renderError != nil {
++		return renderError
++	} else if handled {
++		return nil
++	}
++
++	if len(credentials) == 0 {
++		fmt.Println(emptyMessage)
++		return nil
++	}
++
++	t := table.NewWriter()
++	t.SetOutputMirror(os.Stdout)
++	t.SetStyle(table.StyleRounded)
++	t.AppendHeader(table.Row{"ID", "Name", "Available", "Created"})
++	t.SetColumnConfigs([]table.ColumnConfig{
++		{Number: 1, WidthMin: 36},
++		{Number: 2, WidthMin: 20},
++		{Number: 3, WidthMin: 10},
++		{Number: 4, WidthMin: 15},
++	})
++
++	for _, credential := range credentials {
++		available := "yes"
++		if !credential.Available {
++			available = "no"
++		}
++		t.AppendRow(table.Row{
++			credential.ID,
++			credential.Name,
++			available,
++			formatTimeAgo(credential.CreatedAt),
++		})
++	}
++	t.Render()
++	return nil
++}
++
++var scalewayCredListCmd = &cobra.Command{
++	Use:   "list",
++	Short: "List Scaleway API credentials",
++	RunE: func(cmd *cobra.Command, args []string) error {
++		credentials, listError := apiClient.ListScalewayCredentials()
++		if listError != nil {
++			return fmt.Errorf("listing Scaleway credentials: %w", listError)
++		}
++		return renderScalewayCredentials(cmd, credentials, "No Scaleway credentials found.")
++	},
++}
++
++var scalewayCredCreateCmd = &cobra.Command{
++	Use:   "create",
++	Short: "Create a Scaleway API credential",
++	Long: `Create a Scaleway API credential from a project-scoped IAM application key.
++The secret key is collected via a masked prompt, never on the command line -
++Scaleway shows it once, so store it in a secret manager.
++
++The project id is required: it is not derivable from the key, and every
++resource Ankra creates is scoped to that one project.
++
++Examples:
++  ankra credentials scaleway create --name scw-production --project-id 11111111-2222-3333-4444-555555555555 --access-key SCWXXXXXXXXXXXXXXXXX`,
++	RunE: func(cmd *cobra.Command, args []string) error {
++		name, _ := cmd.Flags().GetString("name")
++		projectID, _ := cmd.Flags().GetString("project-id")
++		accessKey, _ := cmd.Flags().GetString("access-key")
++
++		prompt := promptui.Prompt{
++			Label: "Scaleway Secret Key",
++			Mask:  '*',
++			Validate: func(input string) error {
++				if len(input) == 0 {
++					return fmt.Errorf("secret key cannot be empty")
++				}
++				return nil
++			},
++		}
++		secretKeyValue, promptError := prompt.Run()
++		if promptError != nil {
++			return errors.New("prompt cancelled")
++		}
++
++		result, createError := apiClient.CreateScalewayCredential(client.CreateScalewayCredentialRequest{
++			Name:      name,
++			AccessKey: accessKey,
++			SecretKey: secretKeyValue,
++			ProjectID: projectID,
++		})
++		if createError != nil {
++			return fmt.Errorf("creating Scaleway credential: %w", createError)
++		}
++
++		if !result.Success {
++			message := "failed to create Scaleway credential:"
++			for _, resourceError := range result.Errors {
++				message += fmt.Sprintf("\n  - %s: %s", resourceError.Key, resourceError.Message)
++			}
++			return errors.New(message)
++		}
++
++		fmt.Printf("Scaleway credential '%s' created successfully!\n", name)
++		return nil
++	},
++}
++
++var scalewaySSHKeyCmd = &cobra.Command{
++	Use:     "ssh-key",
++	Aliases: []string{"ssh-keys", "ssh"},
++	Short:   "Manage SSH key credentials",
++}
++
++var scalewaySSHKeyListCmd = &cobra.Command{
++	Use:   "list",
++	Short: "List SSH key credentials",
++	RunE: func(cmd *cobra.Command, args []string) error {
++		credentials, listError := apiClient.ListScalewaySSHKeyCredentials()
++		if listError != nil {
++			return fmt.Errorf("listing SSH key credentials: %w", listError)
++		}
++		return renderScalewayCredentials(cmd, credentials, "No SSH key credentials found.")
++	},
++}
++
++var scalewaySSHKeyCreateCmd = &cobra.Command{
++	Use:   "create",
++	Short: "Create an SSH key credential",
++	Long: `Create an SSH key credential. Either provide a public key or generate a new keypair.
++
++Examples:
++  ankra credentials scaleway ssh-key create --name my-key --generate
++  ankra credentials scaleway ssh-key create --name my-key --public-key "ssh-ed25519 AAAA..."`,
++	RunE: func(cmd *cobra.Command, args []string) error {
++		name, _ := cmd.Flags().GetString("name")
++		publicKey, _ := cmd.Flags().GetString("public-key")
++		generate, _ := cmd.Flags().GetBool("generate")
++
++		if !generate && publicKey == "" {
++			return errors.New("either --public-key or --generate must be provided")
++		}
++
++		createRequest := client.CreateSSHKeyCredentialRequest{
++			Name:     name,
++			Generate: generate,
++		}
++		if publicKey != "" {
++			createRequest.SSHPublicKey = &publicKey
++		}
++
++		result, createError := apiClient.CreateScalewaySSHKeyCredential(createRequest)
++		if createError != nil {
++			return fmt.Errorf("creating SSH key credential: %w", createError)
++		}
++
++		if !result.Success {
++			message := "failed to create SSH key credential:"
++			for _, resourceError := range result.Errors {
++				message += fmt.Sprintf("\n  - %s: %s", resourceError.Key, resourceError.Message)
++			}
++			return errors.New(message)
++		}
++
++		fmt.Printf("SSH key credential '%s' created successfully!\n", name)
++
++		if result.PrivateKey != nil {
++			fmt.Println("\nGenerated private key (save this, it will not be shown again):")
++			fmt.Println(*result.PrivateKey)
++		}
++		return nil
++	},
++}
++
++func init() {
++	scalewayCredCreateCmd.Flags().String("name", "", "Credential name (required)")
++	scalewayCredCreateCmd.Flags().String("project-id", "", "Scaleway Project ID (required)")
++	scalewayCredCreateCmd.Flags().String("access-key", "", "Scaleway API access key (required)")
++	_ = scalewayCredCreateCmd.MarkFlagRequired("name")
++	_ = scalewayCredCreateCmd.MarkFlagRequired("project-id")
++	_ = scalewayCredCreateCmd.MarkFlagRequired("access-key")
++
++	scalewaySSHKeyCreateCmd.Flags().String("name", "", "Credential name (required)")
++	scalewaySSHKeyCreateCmd.Flags().String("public-key", "", "SSH public key")
++	scalewaySSHKeyCreateCmd.Flags().Bool("generate", false, "Generate a new SSH keypair")
++	_ = scalewaySSHKeyCreateCmd.MarkFlagRequired("name")
++
++	registerStructuredOutputFlags(scalewayCredListCmd, scalewaySSHKeyListCmd)
++
++	scalewaySSHKeyCmd.AddCommand(scalewaySSHKeyListCmd)
++	scalewaySSHKeyCmd.AddCommand(scalewaySSHKeyCreateCmd)
++
++	scalewayCredCmd.AddCommand(scalewayCredListCmd)
++	scalewayCredCmd.AddCommand(scalewayCredCreateCmd)
++	scalewayCredCmd.AddCommand(scalewaySSHKeyCmd)
++
++	credentialsCmd.AddCommand(scalewayCredCmd)
++}
+diff --git a/cmd/services.go b/cmd/services.go
+index 7f7772f5..cdab37ce 100644
+--- a/cmd/services.go
++++ b/cmd/services.go
+@@ -508,6 +508,36 @@ type APIClient interface {
+ 	RestartScalewayClusterNode(clusterID, nodeID string) (*client.RestartNodeResult, error)
+ 	ScalewayNodeCloudInitLog(clusterID, nodeID string) (*client.NodeCloudInitLogResult, error)
+ 	GetScalewayBastionHealth(clusterID string) (*client.BastionHealthResult, error)
++	CreateScalewayCluster(request client.CreateScalewayClusterRequest) (*client.CreateScalewayClusterResponse, error)
++	PreflightScalewayCluster(request client.CreateScalewayClusterRequest) (*client.ScalewayPreflightResult, error)
++	DeprovisionScalewayCluster(clusterID string) (*client.ProviderDeprovisionClusterResponse, error)
++	GetScalewayWorkerCount(clusterID string) (*client.WorkerCountResult, error)
++	ScaleScalewayWorkers(clusterID string, workerCount int) (*client.ScaleWorkersResult, error)
++	GetScalewayK8sVersion(clusterID string) (*client.K8sVersionInfo, error)
++	UpgradeScalewayK8sVersion(clusterID, targetVersion string, force bool) (*client.UpgradeK8sVersionResult, error)
++	ListScalewayNodeGroups(clusterID string) (*client.NodeGroupListResult, error)
++	AddScalewayNodeGroup(ctx context.Context, clusterID string, request client.AddNodeGroupRequest, wait bool) (*client.AddNodeGroupResult, bool, error)
++	ScaleScalewayNodeGroup(ctx context.Context, clusterID, groupName string, count int, wait bool) (*client.ScaleNodeGroupResult, bool, error)
++	UpdateScalewayNodeGroupInstanceType(ctx context.Context, clusterID, groupName, instanceType string, wait bool) (*client.UpdateNodeGroupResult, bool, error)
++	UpdateScalewayNodeGroupLabels(ctx context.Context, clusterID, groupName string, labels map[string]string, wait bool) (*client.UpdateNodeGroupResult, bool, error)
++	UpdateScalewayNodeGroupTaints(ctx context.Context, clusterID, groupName string, taints []client.NodeTaint, wait bool) (*client.UpdateNodeGroupResult, bool, error)
++	DeleteScalewayNodeGroup(ctx context.Context, clusterID, groupName string, wait bool) (*client.DeleteNodeGroupResult, bool, error)
++	GetScalewayNodeGroupAutoscaling(clusterID, groupName string) (*client.NodeGroupAutoscalingResult, error)
++	UpdateScalewayNodeGroupAutoscaling(ctx context.Context, clusterID, groupName string, request client.NodeGroupAutoscalingRequest, wait bool) (*client.NodeGroupAutoscalingResult, bool, error)
++	GetScalewayControlPlane(clusterID string) (*client.ControlPlaneInfo, error)
++	ChangeScalewayControlPlaneCount(clusterID string, count int) (*client.ChangeControlPlaneCountResult, error)
++	ChangeScalewayControlPlaneInstanceType(clusterID, instanceType string) (*client.ChangeControlPlaneInstanceTypeResult, error)
++	GetScalewayClusterSSHKeys(clusterID string) (*client.ClusterSSHKeysResult, error)
++	UpdateScalewayClusterSSHKeys(clusterID string, sshKeyCredentialIDs []string) (*client.UpdateClusterSSHKeysResult, error)
++	ResyncScalewayClusterSSHKeys(clusterID string) (*client.ResyncSSHKeysResult, error)
++	ListScalewayCredentials() ([]client.ScalewayCredentialListItem, error)
++	CreateScalewayCredential(request client.CreateScalewayCredentialRequest) (*client.CreateScalewayCredentialResponse, error)
++	ListScalewaySSHKeyCredentials() ([]client.ScalewayCredentialListItem, error)
++	CreateScalewaySSHKeyCredential(request client.CreateSSHKeyCredentialRequest) (*client.CreateSSHKeyCredentialResponse, error)
++	ListScalewayLocations(credentialID string) (*client.ScalewayCatalogResult, error)
++	ListScalewayInstanceTypes(credentialID, region, zone string) (*client.ScalewayCatalogResult, error)
++	ListScalewayGatewayTypes(credentialID, region, zone string) (*client.ScalewayCatalogResult, error)
++	ListScalewayNetworks(credentialID, region, zone string) (*client.ScalewayCatalogResult, error)
+ 	CreateProxmoxCluster(request client.CreateProxmoxClusterRequest) (*client.CreateProxmoxClusterResponse, error)
+ 	DeprovisionProxmoxCluster(clusterID string) (*client.ProviderDeprovisionClusterResponse, error)
+ 	StopProxmoxCluster(clusterID string, force bool) (*client.ProviderStopClusterResponse, error)
+diff --git a/internal/client/scaleway_clusters.go b/internal/client/scaleway_clusters.go
+index df59408f..b6adcf6b 100644
+--- a/internal/client/scaleway_clusters.go
++++ b/internal/client/scaleway_clusters.go
+@@ -1,7 +1,166 @@
+ package client
+ 
++import (
++	"bytes"
++	"context"
++	"encoding/json"
++	"fmt"
++	"net/http"
++	"net/url"
++)
++
+ const scalewayKind = "scaleway"
+ 
++// CreateScalewayClusterRequest mirrors the cluster-api decoder for
++// POST /api/v1/clusters/scaleway (providerapi.decodeCreateScalewayClusterRequest).
++// Omitted optional members take the server's default, so the zero value of an
++// omitempty field means "let the server decide" rather than "send zero":
++// gateway_type VPC-GW-S, bastion_port 61000, control_plane_type / worker_type /
++// etcd_type DEV1-M, distribution k3s, etcd_topology stacked, etcd_node_count 3,
++// gitops_branch master, retention_policy retain.
++//
++// Scaleway has no external_cloud_provider member: its networking rides the
++// Public Gateway rather than a CCM.
++type CreateScalewayClusterRequest struct {
++	Name                 string                `json:"name"`
++	Description          *string               `json:"description,omitempty"`
++	CredentialID         string                `json:"credential_id"`
++	RuntimeCredentialID  *string               `json:"runtime_credential_id,omitempty"`
++	SSHKeyCredentialID   string                `json:"ssh_key_credential_id"`
++	Region               string                `json:"region"`
++	Zone                 string                `json:"zone"`
++	PrivateNetworkID     *string               `json:"private_network_id,omitempty"`
++	NetworkIPRange       *string               `json:"network_ip_range,omitempty"`
++	GatewayType          string                `json:"gateway_type,omitempty"`
++	BastionPort          int                   `json:"bastion_port,omitempty"`
++	GatewayAllowedIPs    []string              `json:"gateway_allowed_ips,omitempty"`
++	ControlPlaneCount    int                   `json:"control_plane_count,omitempty"`
++	ControlPlaneType     string                `json:"control_plane_type,omitempty"`
++	WorkerCount          *int                  `json:"worker_count,omitempty"`
++	WorkerType           string                `json:"worker_type,omitempty"`
++	Distribution         string                `json:"distribution,omitempty"`
++	KubernetesVersion    *string               `json:"kubernetes_version,omitempty"`
++	EtcdTopology         string                `json:"etcd_topology,omitempty"`
++	EtcdNodeCount        int                   `json:"etcd_node_count,omitempty"`
++	EtcdType             string                `json:"etcd_type,omitempty"`
++	CNI                  string                `json:"cni,omitempty"`
++	NodeGroups           []AddNodeGroupRequest `json:"node_groups,omitempty"`
++	GitopsCredentialName *string               `json:"gitops_credential_name,omitempty"`
++	GitopsRepository     *string               `json:"gitops_repository,omitempty"`
++	GitopsBranch         *string               `json:"gitops_branch,omitempty"`
++	IncludeNetworking    *bool                 `json:"include_networking,omitempty"`
++	IncludeDNS           *bool                 `json:"include_dns,omitempty"`
++	RetentionPolicy      string                `json:"retention_policy,omitempty"`
++}
++
++type CreateScalewayClusterResponse struct {
++	ClusterID string `json:"cluster_id"`
++	Name      string `json:"name"`
++}
++
++// ScalewayPreflightItem is one check from POST /clusters/scaleway/preflight.
++// Scaleway is the only provider exposing preflight as a route; the check
++// proves availability, not hard quota.
++type ScalewayPreflightItem struct {
++	Check   string `json:"check"`
++	Status  string `json:"status"`
++	Message string `json:"message"`
++}
++
++type ScalewayPreflightResult struct {
++	CanProceed bool                    `json:"can_proceed"`
++	Items      []ScalewayPreflightItem `json:"items"`
++}
++
++// ScalewayLocation is one region/zone pair from the locations catalog.
++type ScalewayLocation struct {
++	Region string   `json:"region"`
++	Zones  []string `json:"zones"`
++}
++
++// ScalewayInstanceType is one commercial type from the instance-types catalog.
++type ScalewayInstanceType struct {
++	Name         string  `json:"name"`
++	CPUs         int     `json:"cpus"`
++	MemoryGB     float64 `json:"memory_gb"`
++	Architecture string  `json:"architecture"`
++	MonthlyPrice float64 `json:"monthly_price"`
++	Currency     string  `json:"currency"`
++}
++
++type ScalewayGatewayType struct {
++	Name         string  `json:"name"`
++	MonthlyPrice float64 `json:"monthly_price"`
++	Currency     string  `json:"currency"`
++}
++
++type ScalewayNetwork struct {
++	ID      string   `json:"id"`
++	Name    string   `json:"name"`
++	Subnets []string `json:"subnets"`
++}
++
++// ScalewayCatalogResult is the envelope the catalog routes return. Pricing is
++// deliberately allowed to be incomplete: gateway, flexible IP and dependent
++// networking prices are not published, so PricingComplete can be false with
++// IncompleteReasons naming what is missing.
++type ScalewayCatalogResult struct {
++	Locations        []ScalewayLocation     `json:"locations,omitempty"`
++	InstanceTypes    []ScalewayInstanceType `json:"instance_types,omitempty"`
++	GatewayTypes     []ScalewayGatewayType  `json:"gateway_types,omitempty"`
++	Networks         []ScalewayNetwork      `json:"networks,omitempty"`
++	PricingComplete  bool                   `json:"pricing_complete"`
++	IncompleteReason []string               `json:"incomplete_reasons,omitempty"`
++}
++
++func (c *Client) CreateScalewayCluster(request CreateScalewayClusterRequest) (*CreateScalewayClusterResponse, error) {
++	var result CreateScalewayClusterResponse
++	if createError := c.createProviderCluster(scalewayKind, request, &result); createError != nil {
++		return nil, createError
++	}
++	return &result, nil
++}
++
++// PreflightScalewayCluster validates a create request without provisioning.
++func (c *Client) PreflightScalewayCluster(request CreateScalewayClusterRequest) (*ScalewayPreflightResult, error) {
++	endpoint := c.BaseURL + "/api/v1/clusters/scaleway/preflight"
++	payload, marshalError := json.Marshal(request)
++	if marshalError != nil {
++		return nil, fmt.Errorf("marshal request: %w", marshalError)
++	}
++
++	httpRequest, requestError := http.NewRequest(http.MethodPost, endpoint, bytes.NewReader(payload))
++	if requestError != nil {
++		return nil, fmt.Errorf("create request: %w", requestError)
++	}
++	httpRequest.Header.Set("Content-Type", "application/json")
++	httpRequest.Header.Set("Authorization", "Bearer "+c.Token)
++
++	httpResponse, sendError := c.HTTP.Do(httpRequest)
++	if sendError != nil {
++		return nil, fmt.Errorf("request failed: %w", sendError)
++	}
++	defer closeBody(httpResponse)
++
++	body, readError := readResponseBody(httpResponse)
++	if readError != nil {
++		return nil, fmt.Errorf("read response: %w", readError)
++	}
++	if httpResponse.StatusCode != http.StatusOK {
++		return nil, newUnexpectedResponseError("preflight failed", httpResponse.StatusCode, redactedBodyForError(body, 500))
++	}
++
++	var result ScalewayPreflightResult
++	if decodeError := json.Unmarshal(body, &result); decodeError != nil {
++		return nil, fmt.Errorf("parse response: %w", decodeError)
++	}
++	return &result, nil
++}
++
++func (c *Client) DeprovisionScalewayCluster(clusterID string) (*ProviderDeprovisionClusterResponse, error) {
++	return c.deprovisionProviderCluster(scalewayKind, clusterID, false)
++}
++
+ func (c *Client) StopScalewayCluster(clusterID string, force bool) (*ProviderStopClusterResponse, error) {
+ 	return c.stopProviderCluster(scalewayKind, clusterID, force)
+ }
+@@ -10,6 +169,80 @@ func (c *Client) StartScalewayCluster(clusterID, scope string) (*ProviderStartCl
+ 	return c.startProviderCluster(scalewayKind, clusterID, scope)
+ }
+ 
++func (c *Client) GetScalewayWorkerCount(clusterID string) (*WorkerCountResult, error) {
++	return c.getProviderWorkerCount(scalewayKind, clusterID)
++}
++
++func (c *Client) ScaleScalewayWorkers(clusterID string, workerCount int) (*ScaleWorkersResult, error) {
++	return c.scaleProviderWorkers(scalewayKind, clusterID, workerCount)
++}
++
++func (c *Client) GetScalewayK8sVersion(clusterID string) (*K8sVersionInfo, error) {
++	return c.getProviderK8sVersion(scalewayKind, clusterID)
++}
++
++func (c *Client) UpgradeScalewayK8sVersion(clusterID, targetVersion string, force bool) (*UpgradeK8sVersionResult, error) {
++	return c.upgradeProviderK8sVersion(scalewayKind, clusterID, targetVersion, force)
++}
++
++func (c *Client) ListScalewayNodeGroups(clusterID string) (*NodeGroupListResult, error) {
++	return c.listProviderNodeGroups(scalewayKind, clusterID)
++}
++
++func (c *Client) AddScalewayNodeGroup(ctx context.Context, clusterID string, request AddNodeGroupRequest, wait bool) (*AddNodeGroupResult, bool, error) {
++	return c.addProviderNodeGroup(ctx, scalewayKind, clusterID, request, wait)
++}
++
++func (c *Client) ScaleScalewayNodeGroup(ctx context.Context, clusterID, groupName string, count int, wait bool) (*ScaleNodeGroupResult, bool, error) {
++	return c.scaleProviderNodeGroup(ctx, scalewayKind, clusterID, groupName, count, wait)
++}
++
++func (c *Client) UpdateScalewayNodeGroupInstanceType(ctx context.Context, clusterID, groupName, instanceType string, wait bool) (*UpdateNodeGroupResult, bool, error) {
++	return c.updateProviderNodeGroupInstanceType(ctx, scalewayKind, clusterID, groupName, instanceType, wait)
++}
++
++func (c *Client) UpdateScalewayNodeGroupLabels(ctx context.Context, clusterID, groupName string, labels map[string]string, wait bool) (*UpdateNodeGroupResult, bool, error) {
++	endpoint := fmt.Sprintf("%s/api/v1/clusters/scaleway/%s/node-groups/%s/labels", c.BaseURL, clusterID, groupName)
++	payload, marshalError := json.Marshal(UpdateLabelsRequest{Labels: labels})
++	if marshalError != nil {
++		return nil, false, fmt.Errorf("marshal request: %w", marshalError)
++	}
++	return c.doUpdateNodeGroup(ctx, endpoint, payload, wait)
++}
++
++func (c *Client) UpdateScalewayNodeGroupTaints(ctx context.Context, clusterID, groupName string, taints []NodeTaint, wait bool) (*UpdateNodeGroupResult, bool, error) {
++	endpoint := fmt.Sprintf("%s/api/v1/clusters/scaleway/%s/node-groups/%s/taints", c.BaseURL, clusterID, groupName)
++	payload, marshalError := json.Marshal(UpdateTaintsRequest{Taints: taints})
++	if marshalError != nil {
++		return nil, false, fmt.Errorf("marshal request: %w", marshalError)
++	}
++	return c.doUpdateNodeGroup(ctx, endpoint, payload, wait)
++}
++
++func (c *Client) DeleteScalewayNodeGroup(ctx context.Context, clusterID, groupName string, wait bool) (*DeleteNodeGroupResult, bool, error) {
++	return c.deleteProviderNodeGroup(ctx, scalewayKind, clusterID, groupName, wait)
++}
++
++func (c *Client) GetScalewayNodeGroupAutoscaling(clusterID, groupName string) (*NodeGroupAutoscalingResult, error) {
++	return c.getProviderNodeGroupAutoscaling(scalewayKind, clusterID, groupName)
++}
++
++func (c *Client) UpdateScalewayNodeGroupAutoscaling(ctx context.Context, clusterID, groupName string, request NodeGroupAutoscalingRequest, wait bool) (*NodeGroupAutoscalingResult, bool, error) {
++	return c.updateProviderNodeGroupAutoscaling(ctx, scalewayKind, clusterID, groupName, request, wait)
++}
++
++func (c *Client) GetScalewayControlPlane(clusterID string) (*ControlPlaneInfo, error) {
++	return c.getControlPlane(scalewayKind, clusterID)
++}
++
++func (c *Client) ChangeScalewayControlPlaneCount(clusterID string, count int) (*ChangeControlPlaneCountResult, error) {
++	return c.changeControlPlaneCount(scalewayKind, clusterID, count)
++}
++
++func (c *Client) ChangeScalewayControlPlaneInstanceType(clusterID, instanceType string) (*ChangeControlPlaneInstanceTypeResult, error) {
++	return c.changeControlPlaneInstanceType(scalewayKind, clusterID, instanceType)
++}
++
+ func (c *Client) ListScalewayClusterNodes(clusterID string) (*NodeListResult, error) {
+ 	return c.listClusterNodes(scalewayKind, clusterID)
+ }
+@@ -21,3 +254,49 @@ func (c *Client) GetScalewayClusterNode(clusterID, nodeID string) (*NodeDetail,
+ func (c *Client) RestartScalewayClusterNode(clusterID, nodeID string) (*RestartNodeResult, error) {
+ 	return c.restartClusterNode(scalewayKind, clusterID, nodeID)
+ }
++
++func (c *Client) GetScalewayClusterSSHKeys(clusterID string) (*ClusterSSHKeysResult, error) {
++	return c.getClusterSSHKeys(scalewayKind, clusterID)
++}
++
++func (c *Client) UpdateScalewayClusterSSHKeys(clusterID string, sshKeyCredentialIDs []string) (*UpdateClusterSSHKeysResult, error) {
++	return c.updateClusterSSHKeys(scalewayKind, clusterID, sshKeyCredentialIDs)
++}
++
++func (c *Client) ResyncScalewayClusterSSHKeys(clusterID string) (*ResyncSSHKeysResult, error) {
++	return c.resyncClusterSSHKeys(scalewayKind, clusterID)
++}
++
++// scalewayCatalog reads one of the credential-scoped provider catalogs.
++func (c *Client) scalewayCatalog(catalog, credentialID, region, zone string) (*ScalewayCatalogResult, error) {
++	query := url.Values{}
++	query.Set("credential_id", credentialID)
++	if region != "" {
++		query.Set("region", region)
++	}
++	if zone != "" {
++		query.Set("zone", zone)
++	}
++	endpoint := fmt.Sprintf("%s/api/v1/clusters/scaleway/%s?%s", c.BaseURL, catalog, query.Encode())
++	var result ScalewayCatalogResult
++	if getError := c.getJSON(endpoint, &result); getError != nil {
++		return nil, getError
++	}
++	return &result, nil
++}
++
++func (c *Client) ListScalewayLocations(credentialID string) (*ScalewayCatalogResult, error) {
++	return c.scalewayCatalog("locations", credentialID, "", "")
++}
++
++func (c *Client) ListScalewayInstanceTypes(credentialID, region, zone string) (*ScalewayCatalogResult, error) {
++	return c.scalewayCatalog("instance-types", credentialID, region, zone)
++}
++
++func (c *Client) ListScalewayGatewayTypes(credentialID, region, zone string) (*ScalewayCatalogResult, error) {
++	return c.scalewayCatalog("gateway-types", credentialID, region, zone)
++}
++
++func (c *Client) ListScalewayNetworks(credentialID, region, zone string) (*ScalewayCatalogResult, error) {
++	return c.scalewayCatalog("networks", credentialID, region, zone)
++}
+diff --git a/internal/client/scaleway_credentials.go b/internal/client/scaleway_credentials.go
+new file mode 100644
+index 00000000..4988d0f4
+--- /dev/null
++++ b/internal/client/scaleway_credentials.go
+@@ -0,0 +1,93 @@
++package client
++
++import (
++	"bytes"
++	"encoding/json"
++	"fmt"
++	"net/http"
++)
++
++type ScalewayCredentialListItem struct {
++	ID             string `json:"id"`
++	Name           string `json:"name"`
++	Provider       string `json:"provider"`
++	OrganisationID string `json:"organisation_id"`
++	System         bool   `json:"system"`
++	Available      bool   `json:"available"`
++	CreatedAt      string `json:"created_at"`
++	UpdatedAt      string `json:"updated_at"`
++}
++
++// CreateScalewayCredentialRequest mirrors enginekit/scalewayapi.Credential:
++// a project-scoped IAM application key. The project id is not derivable from
++// the key, so it is a required member rather than something the server can
++// look up.
++type CreateScalewayCredentialRequest struct {
++	Name      string `json:"name"`
++	AccessKey string `json:"access_key"`
++	SecretKey string `json:"secret_key"`
++	ProjectID string `json:"project_id"`
++}
++
++type CreateScalewayCredentialResponse struct {
++	Success bool            `json:"success"`
++	Errors  []ResourceError `json:"errors,omitempty"`
++}
++
++func (c *Client) ListScalewayCredentials() ([]ScalewayCredentialListItem, error) {
++	url := c.BaseURL + "/api/v1/credentials/scaleway"
++	var credentials []ScalewayCredentialListItem
++	if listError := c.getJSON(url, &credentials); listError != nil {
++		return nil, listError
++	}
++	return credentials, nil
++}
++
++func (c *Client) CreateScalewayCredential(createRequest CreateScalewayCredentialRequest) (*CreateScalewayCredentialResponse, error) {
++	url := c.BaseURL + "/api/v1/credentials/scaleway"
++	payload, marshalError := json.Marshal(createRequest)
++	if marshalError != nil {
++		return nil, fmt.Errorf("marshal request: %w", marshalError)
++	}
++
++	httpRequest, requestError := http.NewRequest(http.MethodPost, url, bytes.NewReader(payload))
++	if requestError != nil {
++		return nil, fmt.Errorf("create request: %w", requestError)
++	}
++	httpRequest.Header.Set("Content-Type", "application/json")
++	httpRequest.Header.Set("Authorization", "Bearer "+c.Token)
++
++	httpResponse, sendError := c.HTTP.Do(httpRequest)
++	if sendError != nil {
++		return nil, fmt.Errorf("request failed: %w", sendError)
++	}
++	defer closeBody(httpResponse)
++
++	body, readError := readResponseBody(httpResponse)
++	if readError != nil {
++		return nil, fmt.Errorf("read response: %w", readError)
++	}
++	if httpResponse.StatusCode != http.StatusOK && httpResponse.StatusCode != http.StatusCreated {
++		return nil, newUnexpectedResponseError("create failed", httpResponse.StatusCode, redactedBodyForError(body, 500))
++	}
++
++	var result CreateScalewayCredentialResponse
++	if decodeError := json.Unmarshal(body, &result); decodeError != nil {
++		return nil, fmt.Errorf("parse response: %w", decodeError)
++	}
++	return &result, nil
++}
++
++func (c *Client) ListScalewaySSHKeyCredentials() ([]ScalewayCredentialListItem, error) {
++	url := c.BaseURL + "/api/v1/credentials/scaleway/ssh-keys"
++	var credentials []ScalewayCredentialListItem
++	if listError := c.getJSON(url, &credentials); listError != nil {
++		return nil, listError
++	}
++	return credentials, nil
++}
++
++func (c *Client) CreateScalewaySSHKeyCredential(createRequest CreateSSHKeyCredentialRequest) (*CreateSSHKeyCredentialResponse, error) {
++	url := c.BaseURL + "/api/v1/credentials/scaleway/ssh-key"
++	return c.doCreateSSHKeyCredential(url, createRequest)
++}

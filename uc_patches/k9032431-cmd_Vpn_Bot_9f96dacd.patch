@@ -1,0 +1,1863 @@
+From 9f96dacd31329357ca8afd0df6817c1376cc9727 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sat, 5 Sep 2026 02:27:18 +0000
+Subject: [PATCH] Rename Cloud VPN to Cloud VPS and add UpCloud server
+ management
+
+Cloud VPS now lists popular cloud providers (AWS, Azure, Linode, UpCloud,
+Kamatera) and lets users connect an UpCloud account (API sub-account
+username/password) to manage servers straight from the bot: list, create
+(zone/plan/OS wizard with a cost-confirmation screen), view detail,
+start/stop/restart, and delete (with an irreversible-action confirmation).
+Other providers are shown as "coming soon" for now.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01NFMuHFMb7r1xEwqxGw4pZn
+---
+ README.md                   |  45 +++-
+ bot/handlers/cloud.py       | 483 ++++++++++++++++++++++++++++++++++++
+ bot/keyboards/cloud.py      | 129 ++++++++++
+ bot/keyboards/main_menu.py  |   2 +-
+ bot/main.py                 |   3 +-
+ bot/services/cloud_store.py |  82 ++++++
+ bot/services/upcloud_api.py | 371 +++++++++++++++++++++++++++
+ bot/states/cloud_setup.py   |  15 ++
+ bot/texts/cloud.py          | 208 ++++++++++++++++
+ bot/texts/main.py           |   1 -
+ bot/texts/premium_emoji.py  |   4 +-
+ bot/texts/translations.py   | 337 +++++++++++++++++++++++--
+ 12 files changed, 1655 insertions(+), 25 deletions(-)
+ create mode 100644 bot/handlers/cloud.py
+ create mode 100644 bot/keyboards/cloud.py
+ create mode 100644 bot/services/cloud_store.py
+ create mode 100644 bot/services/upcloud_api.py
+ create mode 100644 bot/states/cloud_setup.py
+ create mode 100644 bot/texts/cloud.py
+
+diff --git a/README.md b/README.md
+index 4b47bd8..1fbcf62 100644
+--- a/README.md
++++ b/README.md
+@@ -15,7 +15,11 @@ Telegram-бот для управления VPN: ноды, облачные по
+   добавится баланс;
+ - **три языка интерфейса** — русский, английский, туркменский (подробности ниже);
+ - кнопка **SOS**, ведущая прямо в личку админу с готовым приветствием;
+-- кнопки-заглушки: **Cloud VPN**, **Cloud Account**, **Crypt/Decrypt**,
++- раздел **Cloud VPS** — покупка и управление VPS-серверами через API
++  облачных провайдеров прямо из бота, начиная с **UpCloud** (подробности
++  ниже); другие провайдеры (AWS, Azure, Linode, Kamatera и т.д.) показаны
++  в списке как "скоро";
++- кнопки-заглушки: **Cloud Account**, **Crypt/Decrypt**,
+   **Info** (каждая открывает свой экран с кнопкой "Назад" — функциональность
+   будет добавляться дальше).
+ 
+@@ -219,6 +223,40 @@ URL API. Если панель развёрнута под собственны
+ проверяет known_hosts) — можно подключать панель хоть по голому IP с
+ самоподписанным https.
+ 
++## Раздел Cloud VPS — покупка и управление серверами в облаке
++
++В главном меню → **☁️ Cloud VPS** бот показывает список популярных
++облачных провайдеров (AWS, Azure, Linode, UpCloud, Kamatera и т.д.) —
++пока полноценно реализован **UpCloud**, остальные показаны как "скоро" и
++не мешают выбору активного провайдера.
++
++Подключение аккаунта UpCloud происходит так же, как подключение панели:
++бот просит **API-логин и пароль** — это не email от основного аккаунта, а
++имя и пароль отдельного суб-аккаунта с правами API (создаётся в панели
++UpCloud: *People → сотрудник с доступом к API*). Один пользователь бота
++может подключить несколько аккаунтов UpCloud.
++
++После подключения аккаунта доступно управление сервером почти один в
++один как на самом сайте UpCloud:
++- **баланс аккаунта** (кредиты);
++- **список серверов** с их статусом (🟢 запущен / 🔴 остановлен);
++- по каждому серверу — **старт / стоп / перезагрузка / удаление** (удаление
++  требует явного подтверждения — это необратимое платное действие) и
++  просмотр деталей (hostname, зона, план, CPU/RAM, публичный IP);
++- **создание нового сервера** пошаговым мастером: зона (дата-центр) →
++  тарифный план → операционная система (шаблон) → hostname → экран
++  подтверждения с итоговыми параметрами. Пароль root, который UpCloud
++  генерирует при создании, показывается один раз сразу после успешного
++  создания сервера и больше нигде не хранится и не логируется;
++- **отключение аккаунта от бота** (сами сервера в облаке при этом не
++  трогаются — это просто убирает сохранённые учётные данные).
++
++Как и в разделе Panel, HTTP-клиент к UpCloud API (`bot/services/upcloud_api.py`)
++переиспользует общий подход: любое изменение сервера отправляет только
++изменившиеся поля, ничего лишнего не перезаписывается. Подключённые
++аккаунты хранятся в `data/cloud_accounts.json` (список записей на
++пользователя, тот же принцип, что и `panel_connections.json`).
++
+ ## Раздел Arsi WhoIs — инфо об IP и доменах
+ 
+ В главном меню → **🌐 Arsi WhoIs** бот просит прислать IP-адрес или домен и
+@@ -302,6 +340,7 @@ bot/
+     language.py                  # выбор языка интерфейса
+     node.py                      # установка нод по SSH + уведомление админов
+     panel.py                     # список/подключение/управление панелями + уведомление админов
++    cloud.py                     # провайдеры Cloud VPS (UpCloud) + управление серверами
+     profile.py                   # раздел Профиль
+   keyboards/                # инлайн-клавиатуры (все принимают lang)
+   services/
+@@ -310,10 +349,12 @@ bot/
+     node_installer.py             # установка Marzban Node / PasarGuard
+     panel_api.py                  # HTTP-клиенты Marzban/PasarGuard/3X-UI API
+     panel_store.py                # список панелей на пользователя (data/*.json)
++    upcloud_api.py                 # HTTP-клиент UpCloud API (Basic Auth)
++    cloud_store.py                 # список облачных аккаунтов на пользователя (data/*.json)
+   texts/
+     translations.py                # все переводы (ru/en/tk) в одном месте
+     premium_emoji.py                # ID премиум-эмодзи (см. ниже)
+-    main.py, node.py, panel.py, profile.py, support.py   # сборка текстов
++    main.py, node.py, panel.py, cloud.py, profile.py, support.py   # сборка текстов
+ data/                       # том с персистентными данными (язык и т.п.)
+ Dockerfile
+ docker-compose.yml
+diff --git a/bot/handlers/cloud.py b/bot/handlers/cloud.py
+new file mode 100644
+index 0000000..fb71eb4
+--- /dev/null
++++ b/bot/handlers/cloud.py
+@@ -0,0 +1,483 @@
++from __future__ import annotations
++
++import re
++
++from aiogram import F, Router
++from aiogram.fsm.context import FSMContext
++from aiogram.types import CallbackQuery, Message
++
++from bot.keyboards.cloud import (
++    account_dashboard_keyboard,
++    account_list_keyboard,
++    account_remove_confirm_keyboard,
++    cloud_cancel_keyboard,
++    cloud_error_keyboard,
++    create_cancel_keyboard,
++    create_confirm_keyboard,
++    create_pick_keyboard,
++    provider_list_keyboard,
++    provider_soon_keyboard,
++    server_delete_confirm_keyboard,
++    server_detail_keyboard,
++    servers_list_keyboard,
++)
++from bot.services.cloud_store import cloud_store
++from bot.services.upcloud_api import (
++    UpCloudAPIError,
++    upcloud_create_server,
++    upcloud_delete_server,
++    upcloud_get_account,
++    upcloud_get_server,
++    upcloud_list_plans,
++    upcloud_list_servers,
++    upcloud_list_templates,
++    upcloud_list_zones,
++    upcloud_login,
++    upcloud_restart_server,
++    upcloud_start_server,
++    upcloud_stop_server,
++)
++from bot.states.cloud_setup import CloudServerCreateStates, CloudSetupStates
++from bot.texts import cloud as texts
++from bot.texts.cloud import ACTIVE_PROVIDERS, PROVIDERS
++
++router = Router(name="cloud")
++
++HOSTNAME_RE = re.compile(r"^[a-zA-Z0-9]([a-zA-Z0-9\-.]{0,251}[a-zA-Z0-9])?$")
++
++
++async def _login(provider: str, username: str, password: str):
++    if provider == "upcloud":
++        return await upcloud_login(username, password)
++    raise UpCloudAPIError("bad_response")
++
++
++async def _show_provider_list(callback: CallbackQuery, lang: str) -> None:
++    await callback.message.edit_text(texts.provider_list_text(lang), reply_markup=provider_list_keyboard(lang))
++
++
++async def _show_account_list(callback: CallbackQuery, lang: str, provider: str) -> None:
++    accounts = await cloud_store.list(callback.from_user.id, provider)
++    await callback.message.edit_text(
++        texts.account_list_text(lang, provider, accounts),
++        reply_markup=account_list_keyboard(lang, provider, accounts),
++    )
++
++
++async def _show_servers(callback: CallbackQuery, lang: str, account: dict) -> None:
++    try:
++        servers = await upcloud_list_servers(account["username"], account["password"])
++    except UpCloudAPIError as exc:
++        await callback.message.edit_text(texts.action_error_text(lang, str(exc)), reply_markup=cloud_error_keyboard(lang))
++        return
++    await callback.message.edit_text(
++        texts.servers_header_text(lang, account, bool(servers)),
++        reply_markup=servers_list_keyboard(lang, account["id"], servers),
++    )
++
++
++# --- Provider list & account connect ---
++
++
++@router.callback_query(F.data == "menu:cloud_vps")
++async def cb_cloud_menu(callback: CallbackQuery, state: FSMContext, lang: str) -> None:
++    await state.clear()
++    await _show_provider_list(callback, lang)
++    await callback.answer()
++
++
++@router.callback_query(F.data.in_({f"cprov:{name}" for name in PROVIDERS}))
++async def cb_choose_provider(callback: CallbackQuery, state: FSMContext, lang: str) -> None:
++    provider = callback.data.split(":", 1)[1]
++    await state.clear()
++    if provider not in ACTIVE_PROVIDERS:
++        await callback.message.edit_text(texts.provider_soon_text(lang), reply_markup=provider_soon_keyboard(lang))
++        await callback.answer()
++        return
++    await _show_account_list(callback, lang, provider)
++    await callback.answer()
++
++
++@router.callback_query(F.data.in_({f"cadd:{name}" for name in ACTIVE_PROVIDERS}))
++async def cb_add_account(callback: CallbackQuery, state: FSMContext, lang: str) -> None:
++    provider = callback.data.split(":", 1)[1]
++    await state.clear()
++    await state.update_data(provider=provider)
++    await state.set_state(CloudSetupStates.waiting_username)
++    await callback.message.edit_text(
++        texts.step_username_text(lang, provider), reply_markup=cloud_cancel_keyboard(lang)
++    )
++    await callback.answer()
++
++
++@router.callback_query(F.data == "csetup:cancel")
++async def cb_cancel_setup(callback: CallbackQuery, state: FSMContext, lang: str) -> None:
++    data = await state.get_data()
++    await state.clear()
++    provider = data.get("provider", "upcloud")
++    await _show_account_list(callback, lang, provider)
++    await callback.answer()
++
++
++@router.message(CloudSetupStates.waiting_username)
++async def process_username(message: Message, state: FSMContext, lang: str) -> None:
++    username = message.text.strip() if message.text else ""
++    if not username:
++        await message.answer(texts.step_username_text(lang, (await state.get_data())["provider"]))
++        return
++    await state.update_data(username=username)
++    await state.set_state(CloudSetupStates.waiting_password)
++    await message.answer(texts.step_password_text(lang), reply_markup=cloud_cancel_keyboard(lang))
++
++
++@router.message(CloudSetupStates.waiting_password)
++async def process_password(message: Message, state: FSMContext, lang: str) -> None:
++    password = message.text or ""
++    try:
++        await message.delete()
++    except Exception:
++        pass
++
++    if not password:
++        await message.answer(texts.empty_password_text(lang), reply_markup=cloud_cancel_keyboard(lang))
++        return
++
++    data = await state.update_data(password=password)
++    await state.set_state(CloudSetupStates.connecting)
++    status_message = await message.answer(texts.connecting_text(lang))
++
++    try:
++        await _login(data["provider"], data["username"], password)
++    except UpCloudAPIError as exc:
++        await state.clear()
++        await status_message.edit_text(texts.login_error_text(lang, str(exc)), reply_markup=cloud_error_keyboard(lang))
++        return
++    except Exception:  # noqa: BLE001 - surface unexpected errors to the user
++        await state.clear()
++        await status_message.edit_text(
++            texts.login_error_text(lang, "bad_response"), reply_markup=cloud_error_keyboard(lang)
++        )
++        return
++
++    account_id = await cloud_store.add(message.from_user.id, data["provider"], data["username"], password)
++    await state.clear()
++    await status_message.edit_text(
++        texts.connected_text(lang, data["provider"]),
++        reply_markup=account_dashboard_keyboard(lang, account_id, data["provider"]),
++    )
++
++
++# --- Account dashboard ---
++
++
++@router.callback_query(F.data.startswith("cview:"))
++async def cb_view_account(callback: CallbackQuery, state: FSMContext, lang: str) -> None:
++    await state.clear()
++    account_id = callback.data.split(":", 1)[1]
++    account = await cloud_store.get(callback.from_user.id, account_id)
++    if not account:
++        await _show_provider_list(callback, lang)
++        await callback.answer()
++        return
++    await callback.answer()
++    try:
++        info = await upcloud_get_account(account["username"], account["password"])
++    except UpCloudAPIError as exc:
++        await callback.message.edit_text(texts.action_error_text(lang, str(exc)), reply_markup=cloud_error_keyboard(lang))
++        return
++    await callback.message.edit_text(
++        texts.account_dashboard_text(lang, account, info.credits),
++        reply_markup=account_dashboard_keyboard(lang, account_id, account["provider"]),
++    )
++
++
++@router.callback_query(F.data.startswith("cacc:rmask:"))
++async def cb_remove_account_ask(callback: CallbackQuery, lang: str) -> None:
++    account_id = callback.data.split(":", 2)[2]
++    account = await cloud_store.get(callback.from_user.id, account_id)
++    if not account:
++        await _show_provider_list(callback, lang)
++        await callback.answer()
++        return
++    await callback.message.edit_text(
++        texts.account_remove_confirm_text(lang, account),
++        reply_markup=account_remove_confirm_keyboard(lang, account_id),
++    )
++    await callback.answer()
++
++
++@router.callback_query(F.data.startswith("cacc:rm:"))
++async def cb_remove_account(callback: CallbackQuery, lang: str) -> None:
++    account_id = callback.data.split(":", 2)[2]
++    await cloud_store.remove(callback.from_user.id, account_id)
++    await callback.message.edit_text(texts.account_removed_text(lang), reply_markup=provider_list_keyboard(lang))
++    await callback.answer()
++
++
++@router.callback_query(F.data.startswith("cacc:servers:"))
++async def cb_account_servers(callback: CallbackQuery, state: FSMContext, lang: str) -> None:
++    await state.clear()
++    account_id = callback.data.split(":", 2)[2]
++    account = await cloud_store.get(callback.from_user.id, account_id)
++    if not account:
++        await _show_provider_list(callback, lang)
++        await callback.answer()
++        return
++    await callback.answer()
++    await _show_servers(callback, lang, account)
++
++
++# --- Server detail & actions ---
++
++
++@router.callback_query(F.data.startswith("csrv:view:"))
++async def cb_server_view(callback: CallbackQuery, state: FSMContext, lang: str) -> None:
++    await state.clear()
++    _, _, account_id, server_uuid = callback.data.split(":", 3)
++    account = await cloud_store.get(callback.from_user.id, account_id)
++    if not account:
++        await _show_provider_list(callback, lang)
++        await callback.answer()
++        return
++    await callback.answer()
++    try:
++        server = await upcloud_get_server(account["username"], account["password"], server_uuid)
++    except UpCloudAPIError as exc:
++        await callback.message.edit_text(texts.action_error_text(lang, str(exc)), reply_markup=cloud_error_keyboard(lang))
++        return
++    await callback.message.edit_text(
++        texts.server_detail_text(lang, server), reply_markup=server_detail_keyboard(lang, account_id, server)
++    )
++
++
++async def _run_server_action(callback: CallbackQuery, lang: str, action, account_id: str, server_uuid: str) -> None:
++    account = await cloud_store.get(callback.from_user.id, account_id)
++    if not account:
++        await _show_provider_list(callback, lang)
++        await callback.answer()
++        return
++    await callback.answer(texts.server_action_ok_text(lang))
++    try:
++        server = await action(account["username"], account["password"], server_uuid)
++    except UpCloudAPIError as exc:
++        await callback.message.edit_text(texts.action_error_text(lang, str(exc)), reply_markup=cloud_error_keyboard(lang))
++        return
++    await callback.message.edit_text(
++        texts.server_detail_text(lang, server), reply_markup=server_detail_keyboard(lang, account_id, server)
++    )
++
++
++@router.callback_query(F.data.startswith("csrv:start:"))
++async def cb_server_start(callback: CallbackQuery, lang: str) -> None:
++    _, _, account_id, server_uuid = callback.data.split(":", 3)
++    await _run_server_action(callback, lang, upcloud_start_server, account_id, server_uuid)
++
++
++@router.callback_query(F.data.startswith("csrv:stop:"))
++async def cb_server_stop(callback: CallbackQuery, lang: str) -> None:
++    _, _, account_id, server_uuid = callback.data.split(":", 3)
++    await _run_server_action(callback, lang, upcloud_stop_server, account_id, server_uuid)
++
++
++@router.callback_query(F.data.startswith("csrv:restart:"))
++async def cb_server_restart(callback: CallbackQuery, lang: str) -> None:
++    _, _, account_id, server_uuid = callback.data.split(":", 3)
++    await _run_server_action(callback, lang, upcloud_restart_server, account_id, server_uuid)
++
++
++@router.callback_query(F.data.startswith("csrv:delask:"))
++async def cb_server_delete_ask(callback: CallbackQuery, lang: str) -> None:
++    _, _, account_id, server_uuid = callback.data.split(":", 3)
++    account = await cloud_store.get(callback.from_user.id, account_id)
++    if not account:
++        await _show_provider_list(callback, lang)
++        await callback.answer()
++        return
++    await callback.answer()
++    try:
++        server = await upcloud_get_server(account["username"], account["password"], server_uuid)
++    except UpCloudAPIError as exc:
++        await callback.message.edit_text(texts.action_error_text(lang, str(exc)), reply_markup=cloud_error_keyboard(lang))
++        return
++    await callback.message.edit_text(
++        texts.server_delete_confirm_text(lang, server),
++        reply_markup=server_delete_confirm_keyboard(lang, account_id, server_uuid),
++    )
++
++
++@router.callback_query(F.data.startswith("csrv:del:"))
++async def cb_server_delete(callback: CallbackQuery, lang: str) -> None:
++    _, _, account_id, server_uuid = callback.data.split(":", 3)
++    account = await cloud_store.get(callback.from_user.id, account_id)
++    if not account:
++        await _show_provider_list(callback, lang)
++        await callback.answer()
++        return
++    await callback.answer()
++    try:
++        await upcloud_delete_server(account["username"], account["password"], server_uuid)
++    except UpCloudAPIError as exc:
++        await callback.message.edit_text(texts.action_error_text(lang, str(exc)), reply_markup=cloud_error_keyboard(lang))
++        return
++    await callback.message.edit_text(texts.server_deleted_text(lang), reply_markup=None)
++    await _show_servers(callback, lang, account)
++
++
++# --- Server creation ---
++
++
++@router.callback_query(F.data.startswith("csrv:add:"))
++async def cb_server_add(callback: CallbackQuery, state: FSMContext, lang: str) -> None:
++    account_id = callback.data.split(":", 2)[2]
++    account = await cloud_store.get(callback.from_user.id, account_id)
++    if not account:
++        await _show_provider_list(callback, lang)
++        await callback.answer()
++        return
++    await callback.answer()
++    try:
++        zones = await upcloud_list_zones(account["username"], account["password"])
++    except UpCloudAPIError as exc:
++        await callback.message.edit_text(texts.action_error_text(lang, str(exc)), reply_markup=cloud_error_keyboard(lang))
++        return
++
++    await state.clear()
++    await state.update_data(account_id=account_id, zones=[{"id": z.id, "description": z.description} for z in zones])
++    await state.set_state(CloudServerCreateStates.choosing_zone)
++    options = [(f"{z.description} ({z.id})", f"ccreate:zone:{i}") for i, z in enumerate(zones)]
++    await callback.message.edit_text(texts.create_choose_zone_text(lang), reply_markup=create_pick_keyboard(lang, options))
++
++
++@router.callback_query(F.data == "ccreate:cancel", CloudServerCreateStates)
++async def cb_create_cancel(callback: CallbackQuery, state: FSMContext, lang: str) -> None:
++    data = await state.get_data()
++    account_id = data.get("account_id")
++    await state.clear()
++    account = await cloud_store.get(callback.from_user.id, account_id) if account_id else None
++    await callback.answer()
++    if not account:
++        await _show_provider_list(callback, lang)
++        return
++    await _show_servers(callback, lang, account)
++
++
++@router.callback_query(F.data.startswith("ccreate:zone:"), CloudServerCreateStates.choosing_zone)
++async def cb_create_pick_zone(callback: CallbackQuery, state: FSMContext, lang: str) -> None:
++    index = int(callback.data.split(":", 2)[2])
++    data = await state.get_data()
++    zone = data["zones"][index]
++    account = await cloud_store.get(callback.from_user.id, data["account_id"])
++    if not account:
++        await state.clear()
++        await _show_provider_list(callback, lang)
++        await callback.answer()
++        return
++    await callback.answer()
++    try:
++        plans = await upcloud_list_plans(account["username"], account["password"])
++    except UpCloudAPIError as exc:
++        await callback.message.edit_text(texts.action_error_text(lang, str(exc)), reply_markup=cloud_error_keyboard(lang))
++        return
++
++    await state.update_data(
++        zone=zone["id"],
++        plans=[{"name": p.name, "core_number": p.core_number, "memory_amount": p.memory_amount} for p in plans],
++    )
++    await state.set_state(CloudServerCreateStates.choosing_plan)
++    options = [
++        (f"{p.name} ({p.core_number} CPU / {p.memory_amount} MB)", f"ccreate:plan:{i}")
++        for i, p in enumerate(plans)
++    ]
++    await callback.message.edit_text(texts.create_choose_plan_text(lang), reply_markup=create_pick_keyboard(lang, options))
++
++
++@router.callback_query(F.data.startswith("ccreate:plan:"), CloudServerCreateStates.choosing_plan)
++async def cb_create_pick_plan(callback: CallbackQuery, state: FSMContext, lang: str) -> None:
++    index = int(callback.data.split(":", 2)[2])
++    data = await state.get_data()
++    plan = data["plans"][index]
++    account = await cloud_store.get(callback.from_user.id, data["account_id"])
++    if not account:
++        await state.clear()
++        await _show_provider_list(callback, lang)
++        await callback.answer()
++        return
++    await callback.answer()
++    try:
++        templates = await upcloud_list_templates(account["username"], account["password"])
++    except UpCloudAPIError as exc:
++        await callback.message.edit_text(texts.action_error_text(lang, str(exc)), reply_markup=cloud_error_keyboard(lang))
++        return
++
++    # UpCloud's public template catalog can be long — show the most common
++    # ones first, capped so the keyboard stays on one screen.
++    templates = templates[:20]
++    await state.update_data(
++        plan=plan["name"],
++        templates=[{"uuid": tpl.uuid, "title": tpl.title} for tpl in templates],
++    )
++    await state.set_state(CloudServerCreateStates.choosing_template)
++    options = [(tpl.title, f"ccreate:tmpl:{i}") for i, tpl in enumerate(templates)]
++    await callback.message.edit_text(
++        texts.create_choose_template_text(lang), reply_markup=create_pick_keyboard(lang, options)
++    )
++
++
++@router.callback_query(F.data.startswith("ccreate:tmpl:"), CloudServerCreateStates.choosing_template)
++async def cb_create_pick_template(callback: CallbackQuery, state: FSMContext, lang: str) -> None:
++    index = int(callback.data.split(":", 2)[2])
++    data = await state.get_data()
++    template = data["templates"][index]
++    await state.update_data(template_uuid=template["uuid"], template_title=template["title"])
++    await state.set_state(CloudServerCreateStates.waiting_hostname)
++    await callback.message.edit_text(texts.create_waiting_hostname_text(lang), reply_markup=create_cancel_keyboard(lang))
++    await callback.answer()
++
++
++@router.message(CloudServerCreateStates.waiting_hostname)
++async def process_hostname(message: Message, state: FSMContext, lang: str) -> None:
++    hostname = message.text.strip() if message.text else ""
++    if not hostname or not HOSTNAME_RE.match(hostname) or len(hostname) > 253:
++        await message.answer(texts.create_invalid_hostname_text(lang), reply_markup=create_cancel_keyboard(lang))
++        return
++
++    data = await state.update_data(hostname=hostname)
++    await state.set_state(CloudServerCreateStates.confirming)
++    await message.answer(
++        texts.create_confirm_text(lang, hostname, data["zone"], data["plan"], data["template_title"]),
++        reply_markup=create_confirm_keyboard(lang),
++    )
++
++
++@router.callback_query(F.data == "ccreate:confirm", CloudServerCreateStates.confirming)
++async def cb_create_confirm(callback: CallbackQuery, state: FSMContext, lang: str) -> None:
++    data = await state.get_data()
++    account = await cloud_store.get(callback.from_user.id, data["account_id"])
++    if not account:
++        await state.clear()
++        await _show_provider_list(callback, lang)
++        await callback.answer()
++        return
++    await callback.answer()
++    await callback.message.edit_text(texts.creating_text(lang))
++
++    try:
++        server = await upcloud_create_server(
++            account["username"],
++            account["password"],
++            zone=data["zone"],
++            hostname=data["hostname"],
++            title=data["hostname"],
++            plan=data["plan"],
++            template_uuid=data["template_uuid"],
++        )
++    except UpCloudAPIError as exc:
++        await state.clear()
++        await callback.message.edit_text(texts.action_error_text(lang, str(exc)), reply_markup=cloud_error_keyboard(lang))
++        return
++
++    await state.clear()
++    await callback.message.edit_text(
++        texts.create_success_text(lang, server),
++        reply_markup=server_detail_keyboard(lang, data["account_id"], server),
++    )
+diff --git a/bot/keyboards/cloud.py b/bot/keyboards/cloud.py
+new file mode 100644
+index 0000000..27ad591
+--- /dev/null
++++ b/bot/keyboards/cloud.py
+@@ -0,0 +1,129 @@
++from aiogram.types import InlineKeyboardMarkup
++from aiogram.utils.keyboard import InlineKeyboardBuilder
++
++from bot.texts.cloud import ACTIVE_PROVIDERS, PROVIDERS, account_list_label, server_list_label
++from bot.texts.translations import t
++
++
++def provider_list_keyboard(lang: str) -> InlineKeyboardMarkup:
++    builder = InlineKeyboardBuilder()
++    for provider in PROVIDERS:
++        builder.button(text=t(lang, f"btn_cloud_provider_{provider}"), callback_data=f"cprov:{provider}")
++    builder.button(text=t(lang, "btn_back"), callback_data="menu:back")
++    builder.adjust(*([1] * len(PROVIDERS)), 1)
++    return builder.as_markup()
++
++
++def provider_soon_keyboard(lang: str) -> InlineKeyboardMarkup:
++    builder = InlineKeyboardBuilder()
++    builder.button(text=t(lang, "btn_cloud_provider_list"), callback_data="menu:cloud_vps")
++    builder.adjust(1)
++    return builder.as_markup()
++
++
++def account_list_keyboard(lang: str, provider: str, accounts: list[dict]) -> InlineKeyboardMarkup:
++    builder = InlineKeyboardBuilder()
++    rows: list[int] = []
++    for account in accounts:
++        builder.button(text=account_list_label(account), callback_data=f"cview:{account['id']}")
++        rows.append(1)
++    if provider in ACTIVE_PROVIDERS:
++        builder.button(text=t(lang, "btn_cloud_account_add"), callback_data=f"cadd:{provider}")
++        rows.append(1)
++    builder.button(text=t(lang, "btn_cloud_provider_list"), callback_data="menu:cloud_vps")
++    rows.append(1)
++    builder.adjust(*rows)
++    return builder.as_markup()
++
++
++def cloud_cancel_keyboard(lang: str) -> InlineKeyboardMarkup:
++    builder = InlineKeyboardBuilder()
++    builder.button(text=t(lang, "btn_cloud_cancel"), callback_data="csetup:cancel")
++    return builder.as_markup()
++
++
++def cloud_error_keyboard(lang: str) -> InlineKeyboardMarkup:
++    builder = InlineKeyboardBuilder()
++    builder.button(text=t(lang, "btn_cloud_provider_list"), callback_data="menu:cloud_vps")
++    builder.button(text=t(lang, "btn_main_menu"), callback_data="menu:back")
++    builder.adjust(1, 1)
++    return builder.as_markup()
++
++
++def account_dashboard_keyboard(lang: str, account_id: str, provider: str) -> InlineKeyboardMarkup:
++    builder = InlineKeyboardBuilder()
++    builder.button(text=t(lang, "btn_cloud_servers"), callback_data=f"cacc:servers:{account_id}")
++    builder.button(text=t(lang, "btn_cloud_account_remove"), callback_data=f"cacc:rmask:{account_id}")
++    builder.button(text=t(lang, "btn_cloud_account_list"), callback_data=f"cprov:{provider}")
++    builder.adjust(1, 1, 1)
++    return builder.as_markup()
++
++
++def account_remove_confirm_keyboard(lang: str, account_id: str) -> InlineKeyboardMarkup:
++    builder = InlineKeyboardBuilder()
++    builder.button(text=t(lang, "btn_cloud_account_remove_confirm"), callback_data=f"cacc:rm:{account_id}")
++    builder.button(text=t(lang, "btn_cloud_account_dashboard"), callback_data=f"cview:{account_id}")
++    builder.adjust(1, 1)
++    return builder.as_markup()
++
++
++def servers_list_keyboard(lang: str, account_id: str, servers: list) -> InlineKeyboardMarkup:
++    builder = InlineKeyboardBuilder()
++    rows: list[int] = []
++    for server in servers:
++        builder.button(text=server_list_label(server), callback_data=f"csrv:view:{account_id}:{server.uuid}")
++        rows.append(1)
++    builder.button(text=t(lang, "btn_cloud_server_add"), callback_data=f"csrv:add:{account_id}")
++    rows.append(1)
++    builder.button(text=t(lang, "btn_cloud_account_dashboard"), callback_data=f"cview:{account_id}")
++    rows.append(1)
++    builder.adjust(*rows)
++    return builder.as_markup()
++
++
++def server_detail_keyboard(lang: str, account_id: str, server) -> InlineKeyboardMarkup:
++    builder = InlineKeyboardBuilder()
++    if server.state == "stopped":
++        builder.button(text=t(lang, "btn_cloud_server_start"), callback_data=f"csrv:start:{account_id}:{server.uuid}")
++    else:
++        builder.button(text=t(lang, "btn_cloud_server_stop"), callback_data=f"csrv:stop:{account_id}:{server.uuid}")
++    builder.button(text=t(lang, "btn_cloud_server_restart"), callback_data=f"csrv:restart:{account_id}:{server.uuid}")
++    builder.button(text=t(lang, "btn_cloud_server_delete"), callback_data=f"csrv:delask:{account_id}:{server.uuid}")
++    builder.button(text=t(lang, "btn_cloud_servers_list"), callback_data=f"cacc:servers:{account_id}")
++    builder.adjust(2, 1, 1)
++    return builder.as_markup()
++
++
++def server_delete_confirm_keyboard(lang: str, account_id: str, server_uuid: str) -> InlineKeyboardMarkup:
++    builder = InlineKeyboardBuilder()
++    builder.button(
++        text=t(lang, "btn_cloud_server_delete_confirm"), callback_data=f"csrv:del:{account_id}:{server_uuid}"
++    )
++    builder.button(text=t(lang, "btn_cloud_servers_list"), callback_data=f"cacc:servers:{account_id}")
++    builder.adjust(1, 1)
++    return builder.as_markup()
++
++
++def create_pick_keyboard(lang: str, options: list[tuple[str, str]]) -> InlineKeyboardMarkup:
++    """options: list of (label, callback_data) pairs, e.g. zones/plans/templates."""
++    builder = InlineKeyboardBuilder()
++    for label, callback_data in options:
++        builder.button(text=label, callback_data=callback_data)
++    builder.button(text=t(lang, "btn_cloud_cancel"), callback_data="ccreate:cancel")
++    builder.adjust(*([1] * len(options)), 1)
++    return builder.as_markup()
++
++
++def create_cancel_keyboard(lang: str) -> InlineKeyboardMarkup:
++    builder = InlineKeyboardBuilder()
++    builder.button(text=t(lang, "btn_cloud_cancel"), callback_data="ccreate:cancel")
++    builder.adjust(1)
++    return builder.as_markup()
++
++
++def create_confirm_keyboard(lang: str) -> InlineKeyboardMarkup:
++    builder = InlineKeyboardBuilder()
++    builder.button(text=t(lang, "btn_cloud_create_confirm"), callback_data="ccreate:confirm")
++    builder.button(text=t(lang, "btn_cloud_cancel"), callback_data="ccreate:cancel")
++    builder.adjust(1, 1)
++    return builder.as_markup()
+diff --git a/bot/keyboards/main_menu.py b/bot/keyboards/main_menu.py
+index d1175c9..2f5a7ed 100644
+--- a/bot/keyboards/main_menu.py
++++ b/bot/keyboards/main_menu.py
+@@ -12,7 +12,7 @@ def main_menu_keyboard(lang: str) -> InlineKeyboardMarkup:
+     builder.button(text=t(lang, "btn_panel"), callback_data="menu:panel")
+     builder.button(text=t(lang, "btn_profile"), callback_data="menu:profile")
+     builder.button(text=t(lang, "btn_whois"), callback_data="menu:whois")
+-    builder.button(text=t(lang, "btn_cloud_vpn"), callback_data="menu:cloud_vpn")
++    builder.button(text=t(lang, "btn_cloud_vps"), callback_data="menu:cloud_vps")
+     builder.button(text=t(lang, "btn_cloud_account"), callback_data="menu:cloud_account")
+     builder.button(text=t(lang, "btn_crypt"), callback_data="menu:crypt")
+     builder.button(text=t(lang, "btn_language"), callback_data="menu:language")
+diff --git a/bot/main.py b/bot/main.py
+index 8510dba..2f2b9f7 100644
+--- a/bot/main.py
++++ b/bot/main.py
+@@ -6,7 +6,7 @@
+ from aiogram.enums import ParseMode
+ 
+ from bot.config import config
+-from bot.handlers import language, menu, node, panel, profile, start, whois
++from bot.handlers import cloud, language, menu, node, panel, profile, start, whois
+ from bot.middlewares.language import LanguageMiddleware
+ 
+ 
+@@ -23,6 +23,7 @@ async def main() -> None:
+     dp.include_router(start.router)
+     dp.include_router(node.router)
+     dp.include_router(panel.router)
++    dp.include_router(cloud.router)
+     dp.include_router(profile.router)
+     dp.include_router(whois.router)
+     dp.include_router(language.router)
+diff --git a/bot/services/cloud_store.py b/bot/services/cloud_store.py
+new file mode 100644
+index 0000000..f85b5c1
+--- /dev/null
++++ b/bot/services/cloud_store.py
+@@ -0,0 +1,82 @@
++from __future__ import annotations
++
++import asyncio
++import json
++import secrets
++from pathlib import Path
++
++from bot.config import config
++
++
++class CloudStore:
++    """Tiny JSON-backed store for the cloud-provider accounts each user has
++    connected (provider, login, password). A user can connect several
++    accounts — including several with the same provider — each identified
++    by a short random id used in callback_data.
++
++    Mirrors bot.services.panel_store.PanelStore: the stored password lets
++    the bot re-authenticate on demand, since the provider APIs used here
++    (UpCloud's HTTP Basic Auth) don't hand out a long-lived token to cache.
++    """
++
++    def __init__(self, path: Path) -> None:
++        self._path = path
++        self._lock = asyncio.Lock()
++        self._data: dict[str, list[dict]] | None = None
++
++    async def _load(self) -> dict[str, list[dict]]:
++        if self._data is None:
++            async with self._lock:
++                if self._data is None:
++                    try:
++                        raw = json.loads(self._path.read_text(encoding="utf-8"))
++                    except (FileNotFoundError, json.JSONDecodeError, OSError):
++                        raw = {}
++                    self._data = raw
++        return self._data
++
++    async def _write(self, data: dict[str, list[dict]]) -> None:
++        self._path.parent.mkdir(parents=True, exist_ok=True)
++        self._path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
++
++    async def list(self, user_id: int, provider: str | None = None) -> list[dict]:
++        data = await self._load()
++        accounts = data.get(str(user_id), [])
++        if provider is None:
++            return accounts
++        return [a for a in accounts if a["provider"] == provider]
++
++    async def get(self, user_id: int, account_id: str) -> dict | None:
++        for account in await self.list(user_id):
++            if account["id"] == account_id:
++                return account
++        return None
++
++    async def add(self, user_id: int, provider: str, username: str, password: str) -> str:
++        data = await self._load()
++        async with self._lock:
++            accounts = data.setdefault(str(user_id), [])
++            existing_ids = {a["id"] for a in accounts}
++            account_id = secrets.token_hex(4)
++            while account_id in existing_ids:
++                account_id = secrets.token_hex(4)
++            accounts.append(
++                {
++                    "id": account_id,
++                    "provider": provider,
++                    "username": username,
++                    "password": password,
++                }
++            )
++            await self._write(data)
++        return account_id
++
++    async def remove(self, user_id: int, account_id: str) -> None:
++        data = await self._load()
++        async with self._lock:
++            accounts = data.get(str(user_id), [])
++            data[str(user_id)] = [a for a in accounts if a["id"] != account_id]
++            await self._write(data)
++
++
++cloud_store = CloudStore(config.data_dir / "cloud_accounts.json")
+diff --git a/bot/services/upcloud_api.py b/bot/services/upcloud_api.py
+new file mode 100644
+index 0000000..f383533
+--- /dev/null
++++ b/bot/services/upcloud_api.py
+@@ -0,0 +1,371 @@
++from __future__ import annotations
++
++import json
++from dataclasses import dataclass, field
++
++import aiohttp
++
++REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=20)
++
++# UpCloud's REST API lives at one fixed address for every account — unlike
++# Marzban/3X-UI there is no per-user "panel URL" to store. Kept as a
++# parameter (not hardcoded into every call) purely so fake-server tests can
++# point it elsewhere.
++UPCLOUD_API_BASE = "https://api.upcloud.com/1.3"
++
++
++class UpCloudAPIError(Exception):
++    """Raised when an UpCloud API call fails.
++
++    ``str(exc)`` is one of a small set of reason codes, or ``detail:<msg>``
++    carrying UpCloud's own error message — the texts layer translates these
++    into a human message, so it's always safe to show directly.
++    """
++
++
++@dataclass
++class AccountInfo:
++    username: str
++    credits: float
++    currency: str = "EUR"
++
++
++@dataclass
++class ZoneInfo:
++    id: str
++    description: str
++
++
++@dataclass
++class PlanInfo:
++    name: str
++    core_number: int
++    memory_amount: int
++    storage_size: int
++    price_per_hour: float | None = None
++
++
++@dataclass
++class TemplateInfo:
++    uuid: str
++    title: str
++    os: str = ""
++
++
++@dataclass
++class IPAddressInfo:
++    address: str
++    access: str  # "public" | "private" | "utility"
++    family: str  # "IPv4" | "IPv6"
++
++
++@dataclass
++class ServerInfo:
++    uuid: str
++    title: str
++    hostname: str
++    state: str
++    zone: str
++    plan: str
++    core_number: int = 0
++    memory_amount: int = 0
++    ip_addresses: list[IPAddressInfo] = field(default_factory=list)
++    password: str | None = None  # only set right after creation
++
++
++def _connector() -> aiohttp.TCPConnector:
++    return aiohttp.TCPConnector(ssl=True)
++
++
++async def _request(
++    method: str,
++    path: str,
++    username: str,
++    password: str,
++    *,
++    base_url: str | None = None,
++    json_body: dict | None = None,
++    params: dict | None = None,
++) -> object:
++    url = f"{(base_url or UPCLOUD_API_BASE).rstrip('/')}{path}"
++    auth = aiohttp.BasicAuth(username, password)
++    try:
++        async with aiohttp.ClientSession(
++            connector=_connector(), timeout=REQUEST_TIMEOUT, auth=auth
++        ) as session:
++            async with session.request(method, url, json=json_body, params=params) as resp:
++                try:
++                    payload = await resp.json(content_type=None)
++                except (json.JSONDecodeError, aiohttp.ContentTypeError):
++                    payload = None
++                if resp.status == 401:
++                    raise UpCloudAPIError("wrong_credentials")
++                if resp.status >= 400:
++                    detail = _extract_detail(payload)
++                    if detail:
++                        raise UpCloudAPIError(f"detail:{detail}")
++                    raise UpCloudAPIError("bad_response")
++                return payload
++    except (aiohttp.ClientError, TimeoutError) as exc:
++        raise UpCloudAPIError("connect_failed") from exc
++
++
++def _extract_detail(payload: object) -> str | None:
++    if not isinstance(payload, dict):
++        return None
++    error = payload.get("error")
++    if isinstance(error, dict):
++        msg = error.get("error_message")
++        if isinstance(msg, str) and msg:
++            return msg
++    return None
++
++
++# --- Account ---
++
++
++async def upcloud_login(username: str, password: str, *, base_url: str | None = None) -> AccountInfo:
++    """Validates credentials and returns the account snapshot, same as
++    Marzban/3X-UI login — a wrong sub-account username/password raises
++    UpCloudAPIError("wrong_credentials")."""
++    return await upcloud_get_account(username, password, base_url=base_url)
++
++
++async def upcloud_get_account(
++    username: str, password: str, *, base_url: str | None = None
++) -> AccountInfo:
++    payload = await _request("GET", "/account", username, password, base_url=base_url)
++    account = payload.get("account", {}) if isinstance(payload, dict) else {}
++    return AccountInfo(
++        username=account.get("username", username),
++        credits=float(account.get("credits", 0) or 0),
++    )
++
++
++# --- Servers ---
++
++
++def _parse_ip(raw: dict) -> IPAddressInfo:
++    return IPAddressInfo(
++        address=raw.get("address", ""),
++        access=raw.get("access", ""),
++        family=raw.get("family", ""),
++    )
++
++
++def _parse_server_summary(raw: dict) -> ServerInfo:
++    return ServerInfo(
++        uuid=raw.get("uuid", ""),
++        title=raw.get("title", ""),
++        hostname=raw.get("hostname", ""),
++        state=raw.get("state", ""),
++        zone=raw.get("zone", ""),
++        plan=raw.get("plan", ""),
++        core_number=int(raw.get("core_number", 0) or 0),
++        memory_amount=int(raw.get("memory_amount", 0) or 0),
++    )
++
++
++def _parse_server_detail(raw: dict) -> ServerInfo:
++    server = _parse_server_summary(raw)
++    ip_addresses = raw.get("ip_addresses", {})
++    entries = ip_addresses.get("ip_address", []) if isinstance(ip_addresses, dict) else []
++    server.ip_addresses = [_parse_ip(item) for item in entries if isinstance(item, dict)]
++    return server
++
++
++async def upcloud_list_servers(
++    username: str, password: str, *, base_url: str | None = None
++) -> list[ServerInfo]:
++    payload = await _request("GET", "/server", username, password, base_url=base_url)
++    servers = payload.get("servers", {}) if isinstance(payload, dict) else {}
++    entries = servers.get("server", []) if isinstance(servers, dict) else []
++    return [_parse_server_summary(item) for item in entries if isinstance(item, dict)]
++
++
++async def upcloud_get_server(
++    username: str, password: str, server_uuid: str, *, base_url: str | None = None
++) -> ServerInfo:
++    payload = await _request(
++        "GET", f"/server/{server_uuid}", username, password, base_url=base_url
++    )
++    server = payload.get("server", {}) if isinstance(payload, dict) else {}
++    return _parse_server_detail(server)
++
++
++async def upcloud_create_server(
++    username: str,
++    password: str,
++    *,
++    zone: str,
++    hostname: str,
++    title: str,
++    plan: str,
++    template_uuid: str,
++    storage_size: int = 25,
++    ssh_public_key: str | None = None,
++    base_url: str | None = None,
++) -> ServerInfo:
++    """Creates a server, cloning the given storage template. Uses
++    ``password_delivery: none`` + a generated root password returned in the
++    response when no SSH key is given (fetched separately by the caller and
++    shown once), matching UpCloud's own "create server" defaults."""
++    login_user: dict = {"create_password": "yes" if not ssh_public_key else "no"}
++    if ssh_public_key:
++        login_user["ssh_keys"] = {"ssh_key": [ssh_public_key]}
++
++    body = {
++        "server": {
++            "zone": zone,
++            "title": title,
++            "hostname": hostname,
++            "plan": plan,
++            "password_delivery": "none",
++            "login_user": login_user,
++            "storage_devices": {
++                "storage_device": [
++                    {
++                        "action": "clone",
++                        "storage": template_uuid,
++                        "title": f"{title}-disk1",
++                        "size": storage_size,
++                        "tier": "maxiops",
++                    }
++                ]
++            },
++        }
++    }
++    payload = await _request("POST", "/server", username, password, base_url=base_url, json_body=body)
++    server = payload.get("server", {}) if isinstance(payload, dict) else {}
++    info = _parse_server_detail(server)
++    password_field = server.get("password")
++    if isinstance(password_field, str) and password_field:
++        info.password = password_field
++    return info
++
++
++async def upcloud_modify_server(
++    username: str,
++    password: str,
++    server_uuid: str,
++    *,
++    title: str | None = None,
++    plan: str | None = None,
++    base_url: str | None = None,
++) -> ServerInfo:
++    fields: dict = {}
++    if title is not None:
++        fields["title"] = title
++    if plan is not None:
++        fields["plan"] = plan
++    payload = await _request(
++        "PUT",
++        f"/server/{server_uuid}",
++        username,
++        password,
++        base_url=base_url,
++        json_body={"server": fields},
++    )
++    server = payload.get("server", {}) if isinstance(payload, dict) else {}
++    return _parse_server_detail(server)
++
++
++async def upcloud_start_server(
++    username: str, password: str, server_uuid: str, *, base_url: str | None = None
++) -> ServerInfo:
++    payload = await _request(
++        "POST", f"/server/{server_uuid}/start", username, password, base_url=base_url
++    )
++    server = payload.get("server", {}) if isinstance(payload, dict) else {}
++    return _parse_server_detail(server)
++
++
++async def upcloud_stop_server(
++    username: str, password: str, server_uuid: str, *, base_url: str | None = None
++) -> ServerInfo:
++    payload = await _request(
++        "POST",
++        f"/server/{server_uuid}/stop",
++        username,
++        password,
++        base_url=base_url,
++        json_body={"stop_server": {"stop_type": "hard"}},
++    )
++    server = payload.get("server", {}) if isinstance(payload, dict) else {}
++    return _parse_server_detail(server)
++
++
++async def upcloud_restart_server(
++    username: str, password: str, server_uuid: str, *, base_url: str | None = None
++) -> ServerInfo:
++    payload = await _request(
++        "POST",
++        f"/server/{server_uuid}/restart",
++        username,
++        password,
++        base_url=base_url,
++        json_body={"restart_server": {"stop_type": "hard"}},
++    )
++    server = payload.get("server", {}) if isinstance(payload, dict) else {}
++    return _parse_server_detail(server)
++
++
++async def upcloud_delete_server(
++    username: str,
++    password: str,
++    server_uuid: str,
++    *,
++    delete_storages: bool = True,
++    base_url: str | None = None,
++) -> None:
++    params = {"storages": "1"} if delete_storages else None
++    await _request(
++        "DELETE", f"/server/{server_uuid}", username, password, base_url=base_url, params=params
++    )
++
++
++# --- Catalog: zones, plans, templates ---
++
++
++async def upcloud_list_zones(
++    username: str, password: str, *, base_url: str | None = None
++) -> list[ZoneInfo]:
++    payload = await _request("GET", "/zone", username, password, base_url=base_url)
++    zones = payload.get("zones", {}) if isinstance(payload, dict) else {}
++    entries = zones.get("zone", []) if isinstance(zones, dict) else []
++    return [
++        ZoneInfo(id=item.get("id", ""), description=item.get("description", ""))
++        for item in entries
++        if isinstance(item, dict)
++    ]
++
++
++async def upcloud_list_plans(
++    username: str, password: str, *, base_url: str | None = None
++) -> list[PlanInfo]:
++    payload = await _request("GET", "/plan", username, password, base_url=base_url)
++    plans = payload.get("plans", {}) if isinstance(payload, dict) else {}
++    entries = plans.get("plan", []) if isinstance(plans, dict) else []
++    return [
++        PlanInfo(
++            name=item.get("name", ""),
++            core_number=int(item.get("core_number", 0) or 0),
++            memory_amount=int(item.get("memory_amount", 0) or 0),
++            storage_size=int(item.get("storage_size", 0) or 0),
++        )
++        for item in entries
++        if isinstance(item, dict)
++    ]
++
++
++async def upcloud_list_templates(
++    username: str, password: str, *, base_url: str | None = None
++) -> list[TemplateInfo]:
++    payload = await _request("GET", "/storage/template", username, password, base_url=base_url)
++    storages = payload.get("storages", {}) if isinstance(payload, dict) else {}
++    entries = storages.get("storage", []) if isinstance(storages, dict) else []
++    return [
++        TemplateInfo(uuid=item.get("uuid", ""), title=item.get("title", ""), os=item.get("os", ""))
++        for item in entries
++        if isinstance(item, dict)
++    ]
+diff --git a/bot/states/cloud_setup.py b/bot/states/cloud_setup.py
+new file mode 100644
+index 0000000..1109123
+--- /dev/null
++++ b/bot/states/cloud_setup.py
+@@ -0,0 +1,15 @@
++from aiogram.fsm.state import State, StatesGroup
++
++
++class CloudSetupStates(StatesGroup):
++    waiting_username = State()
++    waiting_password = State()
++    connecting = State()
++
++
++class CloudServerCreateStates(StatesGroup):
++    choosing_zone = State()
++    choosing_plan = State()
++    choosing_template = State()
++    waiting_hostname = State()
++    confirming = State()
+diff --git a/bot/texts/cloud.py b/bot/texts/cloud.py
+new file mode 100644
+index 0000000..d151bd1
+--- /dev/null
++++ b/bot/texts/cloud.py
+@@ -0,0 +1,208 @@
++from __future__ import annotations
++
++import html
++
++from .premium_emoji import e
++from .translations import t
++
++PROVIDERS = ("upcloud", "aws", "azure", "linode", "kamatera")
++ACTIVE_PROVIDERS = ("upcloud",)
++
++_STATE_EMOJI = {
++    "started": "🟢",
++    "stopped": "🔴",
++    "maintenance": "🚧",
++    "error": "⚠️",
++}
++
++_CLOUD_ERR_KEYS = {
++    "wrong_credentials": "cloud_err_wrong_credentials",
++    "connect_failed": "cloud_err_connect_failed",
++    "bad_response": "cloud_err_bad_response",
++}
++
++
++_PROVIDER_TITLES = {"upcloud": "UpCloud", "aws": "AWS", "azure": "Azure", "linode": "Linode", "kamatera": "Kamatera"}
++
++
++def provider_title(provider: str) -> str:
++    return _PROVIDER_TITLES.get(provider, provider.capitalize())
++
++
++def provider_list_text(lang: str) -> str:
++    return t(lang, "cloud_provider_list", icon=e("cloud_vps", "☁️"))
++
++
++def provider_soon_text(lang: str) -> str:
++    return t(lang, "cloud_provider_soon", icon=e("warning", "⚠️"))
++
++
++def account_list_text(lang: str, provider: str, accounts: list[dict]) -> str:
++    body_key = "cloud_account_list_hint" if accounts else "cloud_account_list_empty"
++    body = t(lang, body_key)
++    return t(
++        lang,
++        "cloud_account_list_header",
++        icon=e("cloud_vps", "☁️"),
++        provider=provider_title(provider),
++        body=body,
++    )
++
++
++def account_list_label(account: dict) -> str:
++    return f"☁️ {account['username']}"
++
++
++def step_username_text(lang: str, provider: str) -> str:
++    return t(lang, f"cloud_step_username_{provider}")
++
++
++def step_password_text(lang: str) -> str:
++    return t(lang, "cloud_step_password")
++
++
++def empty_password_text(lang: str) -> str:
++    return t(lang, "cloud_empty_password")
++
++
++def connecting_text(lang: str) -> str:
++    return t(lang, "cloud_connecting")
++
++
++def _error_reason(lang: str, reason: str) -> str:
++    if reason.startswith("detail:"):
++        return html.escape(reason.split(":", 1)[1])
++    key = _CLOUD_ERR_KEYS.get(reason, "cloud_err_bad_response")
++    return t(lang, key)
++
++
++def login_error_text(lang: str, reason: str) -> str:
++    return t(lang, "cloud_login_error", icon=e("error", "❌"), reason=_error_reason(lang, reason))
++
++
++def action_error_text(lang: str, reason: str) -> str:
++    return t(lang, "cloud_action_error", icon=e("error", "❌"), reason=_error_reason(lang, reason))
++
++
++def connected_text(lang: str, provider: str) -> str:
++    return t(lang, "cloud_connected", icon=e("success", "✅"), provider=provider_title(provider))
++
++
++def account_dashboard_text(lang: str, account: dict, credits: float) -> str:
++    return t(
++        lang,
++        "cloud_account_dashboard",
++        provider=provider_title(account["provider"]),
++        username=html.escape(account["username"]),
++        credits=f"{credits:.2f}",
++        currency="EUR",
++    )
++
++
++def account_remove_confirm_text(lang: str, account: dict) -> str:
++    return t(
++        lang,
++        "cloud_account_remove_confirm",
++        icon=e("warning", "⚠️"),
++        username=html.escape(account["username"]),
++    )
++
++
++def account_removed_text(lang: str) -> str:
++    return t(lang, "cloud_account_removed", icon=e("success", "✅"))
++
++
++def servers_header_text(lang: str, account: dict, has_servers: bool) -> str:
++    body_key = "cloud_servers_hint" if has_servers else "cloud_servers_empty"
++    return t(lang, "cloud_servers_header", username=html.escape(account["username"]), body=t(lang, body_key))
++
++
++def server_list_label(server) -> str:
++    icon = _STATE_EMOJI.get(server.state, "⚪️")
++    return f"{icon} {server.title or server.hostname}"
++
++
++def _ip_list(server) -> str:
++    public = [ip.address for ip in server.ip_addresses if ip.access == "public"]
++    return ", ".join(public) if public else t("ru", "cloud_server_no_ip")
++
++
++def server_detail_text(lang: str, server) -> str:
++    return t(
++        lang,
++        "cloud_server_detail",
++        title=html.escape(server.title or server.hostname),
++        hostname=html.escape(server.hostname),
++        state=f"{_STATE_EMOJI.get(server.state, '⚪️')} {server.state}",
++        zone=server.zone,
++        plan=server.plan,
++        cores=server.core_number,
++        memory=server.memory_amount,
++        ips=_ip_list(server) if server.ip_addresses else t(lang, "cloud_server_no_ip"),
++    )
++
++
++def server_action_ok_text(lang: str) -> str:
++    return t(lang, "cloud_server_action_ok", icon=e("success", "✅"))
++
++
++def server_delete_confirm_text(lang: str, server) -> str:
++    return t(
++        lang,
++        "cloud_server_delete_confirm",
++        icon=e("warning", "⚠️"),
++        title=html.escape(server.title or server.hostname),
++    )
++
++
++def server_deleted_text(lang: str) -> str:
++    return t(lang, "cloud_server_deleted", icon=e("success", "✅"))
++
++
++def create_choose_zone_text(lang: str) -> str:
++    return t(lang, "cloud_create_choose_zone")
++
++
++def create_choose_plan_text(lang: str) -> str:
++    return t(lang, "cloud_create_choose_plan")
++
++
++def create_choose_template_text(lang: str) -> str:
++    return t(lang, "cloud_create_choose_template")
++
++
++def create_waiting_hostname_text(lang: str) -> str:
++    return t(lang, "cloud_create_waiting_hostname")
++
++
++def create_invalid_hostname_text(lang: str) -> str:
++    return t(lang, "cloud_create_invalid_hostname")
++
++
++def create_confirm_text(lang: str, hostname: str, zone: str, plan: str, template: str) -> str:
++    return t(
++        lang,
++        "cloud_create_confirm",
++        hostname=html.escape(hostname),
++        zone=zone,
++        plan=plan,
++        template=html.escape(template),
++    )
++
++
++def creating_text(lang: str) -> str:
++    return t(lang, "cloud_creating")
++
++
++def create_success_text(lang: str, server) -> str:
++    password_line = ""
++    if server.password:
++        password_line = t(lang, "cloud_create_password_line", password=server.password)
++    return t(
++        lang,
++        "cloud_create_success",
++        icon=e("success", "✅"),
++        title=html.escape(server.title or server.hostname),
++        ips=_ip_list(server) if server.ip_addresses else t(lang, "cloud_server_no_ip"),
++        password_line=password_line,
++    )
+diff --git a/bot/texts/main.py b/bot/texts/main.py
+index 424bd6b..adc874f 100644
+--- a/bot/texts/main.py
++++ b/bot/texts/main.py
+@@ -7,7 +7,6 @@
+ from .translations import t
+ 
+ _SECTION_ICON = {
+-    "cloud_vpn": ("cloud_vpn", "☁️"),
+     "cloud_account": ("cloud_account", "👤"),
+     "crypt": ("crypt", "🔐"),
+     "info": ("info", "ℹ️"),
+diff --git a/bot/texts/premium_emoji.py b/bot/texts/premium_emoji.py
+index 8cd68b7..4b10abe 100644
+--- a/bot/texts/premium_emoji.py
++++ b/bot/texts/premium_emoji.py
+@@ -26,8 +26,8 @@
+     "marzban": "",
+     # pasarguard — заголовок PasarGuard
+     "pasarguard": "",
+-    # cloud_vpn — раздел Cloud VPN
+-    "cloud_vpn": "",
++    # cloud_vps — раздел Cloud VPS
++    "cloud_vps": "",
+     # cloud_account — раздел Cloud Account
+     "cloud_account": "",
+     # crypt — раздел Crypt/Decrypt
+diff --git a/bot/texts/translations.py b/bot/texts/translations.py
+index 6118d01..5421a7f 100644
+--- a/bot/texts/translations.py
++++ b/bot/texts/translations.py
+@@ -43,7 +43,7 @@ def resolve_language(code: str | None) -> str:
+     },
+     # --- Button labels ---
+     "btn_node": {"ru": "🖥 Node", "en": "🖥 Node", "tk": "🖥 Node"},
+-    "btn_cloud_vpn": {"ru": "☁️ Cloud VPN", "en": "☁️ Cloud VPN", "tk": "☁️ Cloud VPN"},
++    "btn_cloud_vps": {"ru": "☁️ Cloud VPS", "en": "☁️ Cloud VPS", "tk": "☁️ Cloud VPS"},
+     "btn_cloud_account": {"ru": "📇 Cloud Account", "en": "📇 Cloud Account", "tk": "📇 Cloud Account"},
+     "btn_crypt": {"ru": "🔐 Crypt/Decrypt", "en": "🔐 Crypt/Decrypt", "tk": "🔐 Crypt/Decrypt"},
+     "btn_language": {"ru": "💬 Язык", "en": "💬 Language", "tk": "💬 Dil"},
+@@ -181,23 +181,6 @@ def resolve_language(code: str | None) -> str:
+         "tk": "🗑 Hawa, poz",
+     },
+     # --- Section placeholders ---
+-    "section_cloud_vpn": {
+-        "ru": (
+-            "{icon} <b>Cloud VPN</b> 📶\n\n"
+-            "<i>Управление облачными VPN-подключениями появится здесь совсем скоро.</i>\n\n"
+-            "🛠️ Уже в разработке"
+-        ),
+-        "en": (
+-            "{icon} <b>Cloud VPN</b> 📶\n\n"
+-            "<i>Cloud VPN connection management is coming here very soon.</i>\n\n"
+-            "🛠️ Already in the works"
+-        ),
+-        "tk": (
+-            "{icon} <b>Cloud VPN</b> 📶\n\n"
+-            "<i>Bulut VPN birikmelerini dolandyrmak ýakynda bu ýerde peýda bolar.</i>\n\n"
+-            "🛠️ Eýýäm işlenilýär"
+-        ),
+-    },
+     "section_cloud_account": {
+         "ru": (
+             "{icon} <b>Cloud Account</b> 🔑\n\n"
+@@ -1660,6 +1643,324 @@ def resolve_language(code: str | None) -> str:
+     "whois_l_dns_a": {"ru": "🔢 DNS A", "en": "🔢 DNS A", "tk": "🔢 DNS A"},
+     "whois_l_dns_mx": {"ru": "📧 DNS MX", "en": "📧 DNS MX", "tk": "📧 DNS MX"},
+     "whois_l_dns_txt": {"ru": "📝 DNS TXT", "en": "📝 DNS TXT", "tk": "📝 DNS TXT"},
++    # --- Cloud VPS ---
++    "cloud_provider_list": {
++        "ru": (
++            "{icon} <b>Cloud VPS</b> 🖥\n\n"
++            "<i>Покупка и управление серверами напрямую через API облачных "
++            "провайдеров — выберите провайдера:</i>"
++        ),
++        "en": (
++            "{icon} <b>Cloud VPS</b> 🖥\n\n"
++            "<i>Buy and manage servers directly through cloud-provider APIs — "
++            "choose a provider:</i>"
++        ),
++        "tk": (
++            "{icon} <b>Cloud VPS</b> 🖥\n\n"
++            "<i>Bulut provaýderleriň API-si arkaly serwer satyn almak we dolandyrmak — "
++            "provaýderi saýlaň:</i>"
++        ),
++    },
++    "btn_cloud_provider_upcloud": {"ru": "☁️ UpCloud", "en": "☁️ UpCloud", "tk": "☁️ UpCloud"},
++    "btn_cloud_provider_aws": {"ru": "🟧 AWS (скоро)", "en": "🟧 AWS (soon)", "tk": "🟧 AWS (ýakynda)"},
++    "btn_cloud_provider_azure": {"ru": "🔷 Azure (скоро)", "en": "🔷 Azure (soon)", "tk": "🔷 Azure (ýakynda)"},
++    "btn_cloud_provider_linode": {"ru": "🟩 Linode (скоро)", "en": "🟩 Linode (soon)", "tk": "🟩 Linode (ýakynda)"},
++    "btn_cloud_provider_kamatera": {
++        "ru": "🟪 Kamatera (скоро)",
++        "en": "🟪 Kamatera (soon)",
++        "tk": "🟪 Kamatera (ýakynda)",
++    },
++    "cloud_provider_soon": {
++        "ru": "{icon} Этот провайдер появится здесь в одном из следующих обновлений — сейчас доступен UpCloud.",
++        "en": "{icon} This provider is coming in a future update — UpCloud is available right now.",
++        "tk": "{icon} Bu provaýder indiki täzelenmede goşular — häzir UpCloud elýeterli.",
++    },
++    "title_cloud_provider_upcloud": {"ru": "UpCloud", "en": "UpCloud", "tk": "UpCloud"},
++    "cloud_account_list_header": {
++        "ru": "{icon} <b>{provider}</b>\n\n{body}",
++        "en": "{icon} <b>{provider}</b>\n\n{body}",
++        "tk": "{icon} <b>{provider}</b>\n\n{body}",
++    },
++    "cloud_account_list_empty": {
++        "ru": "<i>Пока нет подключённых аккаунтов.</i>",
++        "en": "<i>No accounts connected yet.</i>",
++        "tk": "<i>Entek birikdirilen hasap ýok.</i>",
++    },
++    "cloud_account_list_hint": {
++        "ru": "<i>Выберите аккаунт или подключите новый.</i>",
++        "en": "<i>Pick an account or connect a new one.</i>",
++        "tk": "<i>Hasaby saýlaň ýa-da täzesini birikdiriň.</i>",
++    },
++    "btn_cloud_account_add": {"ru": "➕ Подключить аккаунт", "en": "➕ Connect account", "tk": "➕ Hasap birikdir"},
++    "btn_cloud_provider_list": {"ru": "☁️ К провайдерам", "en": "☁️ Back to providers", "tk": "☁️ Provaýderlere gaýt"},
++    "cloud_step_username_upcloud": {
++        "ru": (
++            "🔑 <b>Подключение UpCloud</b>\n\n"
++            "Введите <b>API-логин</b> — имя суб-аккаунта с доступом к API "
++            "(создаётся в панели UpCloud: People → сотрудник с правами API), "
++            "а не email от основного аккаунта."
++        ),
++        "en": (
++            "🔑 <b>Connect UpCloud</b>\n\n"
++            "Enter the <b>API username</b> — an API-access sub-account name "
++            "(created in the UpCloud panel: People → a user with API rights), "
++            "not the main account's email."
++        ),
++        "tk": (
++            "🔑 <b>UpCloud birikdirmek</b>\n\n"
++            "<b>API-login</b> giriziň — API girişi bolan sub-hasabyň ady "
++            "(UpCloud panelinde döredilýär: People → API hukukly ulanyjy), "
++            "esasy hasabyň e-poçtasy däl."
++        ),
++    },
++    "cloud_step_password": {
++        "ru": "🔒 Теперь введите пароль от этого аккаунта (сообщение удалится сразу после отправки):",
++        "en": "🔒 Now enter that account's password (the message is deleted right after you send it):",
++        "tk": "🔒 Indi şol hasabyň parolyny giriziň (habar iberilenden soň derrew pozulýar):",
++    },
++    "cloud_empty_password": {
++        "ru": "Пароль не может быть пустым. Попробуйте ещё раз:",
++        "en": "The password can't be empty. Try again:",
++        "tk": "Parol boş bolup bilmez. Gaýtadan synanyň:",
++    },
++    "cloud_connecting": {
++        "ru": "🔌 Подключаюсь к провайдеру...",
++        "en": "🔌 Connecting to the provider...",
++        "tk": "🔌 Provaýdere birikilýär...",
++    },
++    "cloud_login_error": {
++        "ru": (
++            "{icon} <b>Не удалось подключиться</b>\n\n"
++            "{reason}\n\n"
++            "🔁 Проверьте логин и пароль и попробуйте снова"
++        ),
++        "en": (
++            "{icon} <b>Couldn't connect</b>\n\n"
++            "{reason}\n\n"
++            "🔁 Check the username and password and try again"
++        ),
++        "tk": (
++            "{icon} <b>Birikdirip bolmady</b>\n\n"
++            "{reason}\n\n"
++            "🔁 Login we paroly barlaň we gaýtadan synanyň"
++        ),
++    },
++    "cloud_action_error": {
++        "ru": "{icon} <b>Не получилось выполнить действие</b>\n\n{reason}",
++        "en": "{icon} <b>Couldn't complete the action</b>\n\n{reason}",
++        "tk": "{icon} <b>Amal ýerine ýetirilmedi</b>\n\n{reason}",
++    },
++    "cloud_err_wrong_credentials": {
++        "ru": "Неверный API-логин или пароль.",
++        "en": "Wrong API username or password.",
++        "tk": "API-login ýa-da parol nädogry.",
++    },
++    "cloud_err_connect_failed": {
++        "ru": "Не удалось связаться с провайдером — проверьте подключение к интернету и повторите попытку.",
++        "en": "Couldn't reach the provider — check the connection and try again.",
++        "tk": "Provaýder bilen habarlaşyp bolmady — internet birikmesini barlaň we gaýtadan synanyň.",
++    },
++    "cloud_err_bad_response": {
++        "ru": "Провайдер ответил в неожиданном формате.",
++        "en": "The provider responded in an unexpected format.",
++        "tk": "Provaýder garaşylmadyk formatda jogap berdi.",
++    },
++    "cloud_connected": {
++        "ru": "{icon} Аккаунт {provider} успешно подключен 🚀",
++        "en": "{icon} {provider} account connected successfully 🚀",
++        "tk": "{icon} {provider} hasaby üstünlikli birikdirildi 🚀",
++    },
++    "btn_cloud_cancel": {"ru": "❌ Отмена", "en": "❌ Cancel", "tk": "❌ Ýatyr"},
++    "cloud_account_dashboard": {
++        "ru": (
++            "☁️ <b>{provider}</b>\n\n"
++            "👤 Аккаунт: <code>{username}</code>\n"
++            "💰 Баланс: {credits} {currency}"
++        ),
++        "en": (
++            "☁️ <b>{provider}</b>\n\n"
++            "👤 Account: <code>{username}</code>\n"
++            "💰 Balance: {credits} {currency}"
++        ),
++        "tk": (
++            "☁️ <b>{provider}</b>\n\n"
++            "👤 Hasap: <code>{username}</code>\n"
++            "💰 Balans: {credits} {currency}"
++        ),
++    },
++    "btn_cloud_servers": {"ru": "🖥 Серверы", "en": "🖥 Servers", "tk": "🖥 Serwerler"},
++    "btn_cloud_account_remove": {"ru": "🗑 Убрать аккаунт", "en": "🗑 Remove account", "tk": "🗑 Hasaby aýyr"},
++    "btn_cloud_account_remove_confirm": {"ru": "🗑 Да, убрать", "en": "🗑 Yes, remove", "tk": "🗑 Hawa, aýyr"},
++    "btn_cloud_account_list": {"ru": "⬅️ К аккаунтам", "en": "⬅️ Back to accounts", "tk": "⬅️ Hasaplara gaýt"},
++    "btn_cloud_account_dashboard": {"ru": "⬅️ К аккаунту", "en": "⬅️ Back to account", "tk": "⬅️ Hasaba gaýt"},
++    "cloud_account_remove_confirm": {
++        "ru": "{icon} Убрать аккаунт <b>{username}</b> из бота? Сами серверы в облаке не удаляются.",
++        "en": "{icon} Remove account <b>{username}</b> from the bot? The cloud servers themselves stay untouched.",
++        "tk": "{icon} <b>{username}</b> hasabyny botdan aýyrmalymy? Buluddaky serwerler pozulmaz.",
++    },
++    "cloud_account_removed": {
++        "ru": "{icon} Аккаунт убран.",
++        "en": "{icon} Account removed.",
++        "tk": "{icon} Hasap aýryldy.",
++    },
++    "cloud_servers_header": {
++        "ru": "🖥 <b>Серверы — {username}</b>\n\n{body}",
++        "en": "🖥 <b>Servers — {username}</b>\n\n{body}",
++        "tk": "🖥 <b>Serwerler — {username}</b>\n\n{body}",
++    },
++    "cloud_servers_empty": {
++        "ru": "<i>Серверов пока нет.</i>",
++        "en": "<i>No servers yet.</i>",
++        "tk": "<i>Entek serwer ýok.</i>",
++    },
++    "cloud_servers_hint": {
++        "ru": "<i>Выберите сервер или создайте новый.</i>",
++        "en": "<i>Pick a server or create a new one.</i>",
++        "tk": "<i>Serweri saýlaň ýa-da täzesini dörediň.</i>",
++    },
++    "btn_cloud_server_add": {"ru": "➕ Создать сервер", "en": "➕ Create server", "tk": "➕ Serwer döret"},
++    "btn_cloud_servers_list": {"ru": "🖥 К серверам", "en": "🖥 Back to servers", "tk": "🖥 Serwerlere gaýt"},
++    "cloud_server_detail": {
++        "ru": (
++            "🖥 <b>{title}</b>\n\n"
++            "🌐 Hostname: <code>{hostname}</code>\n"
++            "🚦 Статус: {state}\n"
++            "📍 Зона: {zone}\n"
++            "⚙️ План: {plan} ({cores} CPU / {memory} MB RAM)\n"
++            "🌍 IP: {ips}"
++        ),
++        "en": (
++            "🖥 <b>{title}</b>\n\n"
++            "🌐 Hostname: <code>{hostname}</code>\n"
++            "🚦 State: {state}\n"
++            "📍 Zone: {zone}\n"
++            "⚙️ Plan: {plan} ({cores} CPU / {memory} MB RAM)\n"
++            "🌍 IP: {ips}"
++        ),
++        "tk": (
++            "🖥 <b>{title}</b>\n\n"
++            "🌐 Hostname: <code>{hostname}</code>\n"
++            "🚦 Ýagdaýy: {state}\n"
++            "📍 Zolak: {zone}\n"
++            "⚙️ Meýilnama: {plan} ({cores} CPU / {memory} MB RAM)\n"
++            "🌍 IP: {ips}"
++        ),
++    },
++    "cloud_server_no_ip": {"ru": "—", "en": "—", "tk": "—"},
++    "btn_cloud_server_start": {"ru": "▶️ Включить", "en": "▶️ Start", "tk": "▶️ Işe girizmek"},
++    "btn_cloud_server_stop": {"ru": "⏹ Выключить", "en": "⏹ Stop", "tk": "⏹ Duruzmak"},
++    "btn_cloud_server_restart": {"ru": "🔄 Перезагрузить", "en": "🔄 Restart", "tk": "🔄 Täzeden başlat"},
++    "btn_cloud_server_delete": {"ru": "🗑 Удалить сервер", "en": "🗑 Delete server", "tk": "🗑 Serweri poz"},
++    "btn_cloud_server_delete_confirm": {"ru": "🗑 Да, удалить", "en": "🗑 Yes, delete", "tk": "🗑 Hawa, poz"},
++    "cloud_server_action_ok": {
++        "ru": "{icon} Команда отправлена, статус сервера скоро обновится.",
++        "en": "{icon} Command sent, the server's status will update shortly.",
++        "tk": "{icon} Buýruk iberildi, serweriň ýagdaýy ýakynda täzelener.",
++    },
++    "cloud_server_delete_confirm": {
++        "ru": (
++            "{icon} <b>Удалить сервер {title}?</b>\n\n"
++            "⚠️ Действие необратимо: сервер и его диски будут удалены "
++            "на стороне провайдера безвозвратно."
++        ),
++        "en": (
++            "{icon} <b>Delete server {title}?</b>\n\n"
++            "⚠️ This is irreversible: the server and its disks will be "
++            "permanently deleted on the provider's side."
++        ),
++        "tk": (
++            "{icon} <b>{title} serweri pozulsynmy?</b>\n\n"
++            "⚠️ Bu amal yzyna gaýtarylmaz: serwer we onuň disklari "
++            "provaýderde hemişelik pozular."
++        ),
++    },
++    "cloud_server_deleted": {
++        "ru": "{icon} Сервер удалён.",
++        "en": "{icon} Server deleted.",
++        "tk": "{icon} Serwer pozuldy.",
++    },
++    "cloud_create_choose_zone": {
++        "ru": "🌍 <b>Новый сервер — шаг 1/4</b>\n\nВыберите зону (дата-центр):",
++        "en": "🌍 <b>New server — step 1/4</b>\n\nChoose a zone (data center):",
++        "tk": "🌍 <b>Täze serwer — 1/4 ädim</b>\n\nZolak saýlaň (maglumat merkezi):",
++    },
++    "cloud_create_choose_plan": {
++        "ru": "⚙️ <b>Новый сервер — шаг 2/4</b>\n\nВыберите тарифный план:",
++        "en": "⚙️ <b>New server — step 2/4</b>\n\nChoose a plan:",
++        "tk": "⚙️ <b>Täze serwer — 2/4 ädim</b>\n\nMeýilnama saýlaň:",
++    },
++    "cloud_create_choose_template": {
++        "ru": "💿 <b>Новый сервер — шаг 3/4</b>\n\nВыберите операционную систему:",
++        "en": "💿 <b>New server — step 3/4</b>\n\nChoose an operating system:",
++        "tk": "💿 <b>Täze serwer — 3/4 ädim</b>\n\nOperasion ulgamy saýlaň:",
++    },
++    "cloud_create_waiting_hostname": {
++        "ru": "✏️ <b>Новый сервер — шаг 4/4</b>\n\nВведите hostname сервера (например, my-server.example.com):",
++        "en": "✏️ <b>New server — step 4/4</b>\n\nEnter the server's hostname (e.g. my-server.example.com):",
++        "tk": "✏️ <b>Täze serwer — 4/4 ädim</b>\n\nServeriň hostname-ini giriziň (mysal: my-server.example.com):",
++    },
++    "cloud_create_invalid_hostname": {
++        "ru": "Некорректный hostname. Используйте только буквы, цифры, точки и дефисы. Попробуйте ещё раз:",
++        "en": "Invalid hostname. Use only letters, digits, dots and hyphens. Try again:",
++        "tk": "Hostname nädogry. Diňe harp, san, nokat we defis ulanyň. Gaýtadan synanyň:",
++    },
++    "cloud_create_confirm": {
++        "ru": (
++            "✅ <b>Проверьте параметры сервера</b>\n\n"
++            "🌐 Hostname: <code>{hostname}</code>\n"
++            "📍 Зона: {zone}\n"
++            "⚙️ План: {plan}\n"
++            "💿 ОС: {template}\n\n"
++            "💰 Это создаст платный ресурс на стороне провайдера. Создать?"
++        ),
++        "en": (
++            "✅ <b>Review server parameters</b>\n\n"
++            "🌐 Hostname: <code>{hostname}</code>\n"
++            "📍 Zone: {zone}\n"
++            "⚙️ Plan: {plan}\n"
++            "💿 OS: {template}\n\n"
++            "💰 This will create a billable resource with the provider. Create it?"
++        ),
++        "tk": (
++            "✅ <b>Serweriň parametrlerini barlaň</b>\n\n"
++            "🌐 Hostname: <code>{hostname}</code>\n"
++            "📍 Zolak: {zone}\n"
++            "⚙️ Meýilnama: {plan}\n"
++            "💿 OS: {template}\n\n"
++            "💰 Bu provaýderde tölegli resurs dörediler. Döredilsinmi?"
++        ),
++    },
++    "btn_cloud_create_confirm": {"ru": "✅ Создать", "en": "✅ Create", "tk": "✅ Döret"},
++    "cloud_creating": {
++        "ru": "🚀 Создаю сервер, это может занять до минуты...",
++        "en": "🚀 Creating the server, this can take up to a minute...",
++        "tk": "🚀 Serwer döredilýär, bir minuda çenli wagt alyp biler...",
++    },
++    "cloud_create_success": {
++        "ru": (
++            "{icon} <b>Сервер создан!</b>\n\n"
++            "🖥 {title}\n"
++            "🌐 IP: {ips}\n"
++            "{password_line}"
++        ),
++        "en": (
++            "{icon} <b>Server created!</b>\n\n"
++            "🖥 {title}\n"
++            "🌐 IP: {ips}\n"
++            "{password_line}"
++        ),
++        "tk": (
++            "{icon} <b>Serwer döredildi!</b>\n\n"
++            "🖥 {title}\n"
++            "🌐 IP: {ips}\n"
++            "{password_line}"
++        ),
++    },
++    "cloud_create_password_line": {
++        "ru": "🔑 Пароль root: <code>{password}</code> (сохраните, повторно показан не будет)",
++        "en": "🔑 Root password: <code>{password}</code> (save it, it won't be shown again)",
++        "tk": "🔑 Root paroly: <code>{password}</code> (ýatda saklaň, indi görkezilmez)",
++    },
+ }
+ 
+ 

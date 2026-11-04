@@ -1,0 +1,169 @@
+From 7fbc1aa10e078884760bcc937519928a246cb1ca Mon Sep 17 00:00:00 2001
+From: Paolo <71789321+Paolo-Beci@users.noreply.github.com>
+Date: Tue, 6 Oct 2026 16:17:22 +0200
+Subject: [PATCH] fix: server_ips (#72)
+
+* fix: kaas storage_gb minimum value
+
+* fix: labels services on sidebar
+
+* fix: remove google dbaas - not supported
+
+* fix: remove sqlserver as supported dbaas
+
+* fix: n8n e openclaw input fields
+
+* fix: regex password dbaas
+
+* fix: additional checks input dbaas
+
+* fix: update k8s default version
+
+* usa saas
+
+* add license
+
+* fix: reintroduce google dbaas as supported
+
+* feat: aws dev service init
+
+* fix: type objectstorage on aws, scaleway
+
+* feat: aws blockstorage support dev
+
+* feat: aws dbaas support dev
+
+* feat: scaleway blockstorage support dev
+
+* feat: added registry and filestorage services
+
+* feat: added more supported dbaas aws
+
+* feat: added new supported services aws and scaleway
+
+* feat: publicip aws dev support
+
+* feat: loadbanacer service scw aws dev
+
+* feat: added support for privatenetwork
+
+* fix: region kaas - added valkey dbaas
+
+* fix: added dhcp field privatenet
+
+* fix: added mongodb dbaas
+
+* feat: added more services dev aws
+
+* fix: region objectstorage upcloud
+
+* feat: supported_meson_type flag on supported providers
+
+* feat: publicgateway
+
+* fix: typo
+
+* feat: serverless support
+
+* fix: dev routes -dev (except aws)
+
+* fix: aws dev endpoint
+
+* fix: names regex
+
+* feat: aiserverless support
+
+* feat: queueaas support
+
+* fix: typo
+
+* feat: plus codes, certifications and carbon_emissions parameters added
+
+* fix: typo
+
+* fix: supported ai models
+
+* feat(supported_providers): create JSON schema for Supported Providers
+
+* fix(supported_intents): typos
+
+* feat: provider credentials input specs for private meson
+
+* feat: added azure and upcloud credentials
+
+* fix: upcloud input
+
+* fix: remove upcloud public access
+
+* fix: impossible and wasabi only public flow
+
+* feat: spotvm draft
+
+* fix: remove compute
+
+* feat: added OVH credentials and fixed supported providers
+
+* feat: added openclaw and n8n support to scaleway and aws
+
+* fix: openclaw and n8n service
+
+* fix: openclaw and n8n services
+
+* fix: opencalw and n8n services
+
+* fix: openclaw and n8n services
+
+* fix: openclaw and n8n services
+
+* fix: openclaw and n8n services
+
+* fix: table layout openclaw and n8n services
+
+* fix: table layout openclaw and n9n services
+
+* feat: support spotvm service added
+
+* fix: bug merge
+
+* fix: server_ips
+
+---------
+
+Co-authored-by: Filippo Valle <filippo_valle@protonmail.com>
+Co-authored-by: srobaldo <srobaldo@elemento.cloud>
+Co-authored-by: Andrea Riccardi <andricc16@gmail.com>
+---
+ supported_providers.json | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/supported_providers.json b/supported_providers.json
+index 62ca148..dd928f9 100644
+--- a/supported_providers.json
++++ b/supported_providers.json
+@@ -7144,7 +7144,7 @@
+             "svg_filename": "impossiblecloud_icon.svg",
+             "status": "production",
+             "server_ips": [
+-                "impossiblecloud-dev.meson.elemento.cloud"
++                "impossiblecloud.meson.elemento.cloud"
+             ],
+             "services": [
+                 {
+@@ -7275,7 +7275,7 @@
+             "svg_filename": "oracle_icon.svg",
+             "status": "development",
+             "server_ips": [
+-                "oracle-dev.meson.elemento.cloud"
++                "oracle.meson.elemento.cloud"
+             ],
+             "services": [
+                 {
+@@ -7304,7 +7304,7 @@
+             "svg_filename": "aws_icon.svg",
+             "status": "development",
+             "server_ips": [
+-                "aws-dev.meson.elemento.cloud"
++                "aws.meson.elemento.cloud"
+             ],
+             "services": [
+                 {

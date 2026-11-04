@@ -1,0 +1,462 @@
+From d4e043dd5fbb3ae35c9fd54f7f31f12527d72c27 Mon Sep 17 00:00:00 2001
+From: Thomas Paras <ThomasParas87@gmail.com>
+Date: Mon, 5 Oct 2026 11:43:58 -0700
+Subject: [PATCH] feat(patterns): add upcloud_api_token, configcat_sdk_key,
+ hackclub_ai_api_key, chief_tools_access_token, rainforest_pay_api_key
+
+Round 2 of the 2026-10-05 weekly batch, formats verified against vendor
+sources:
+
+- upcloud_api_token (cloud.py, critical, 0.95): 'ucat_' + 26-char ULID
+  (Crockford base32, first char 0-7). Vendor guide example + MIT Go SDK test.
+- configcat_sdk_key (devops.py, LOW, 0.95): 'configcat-sdk-1/' + 22 + '/' + 22
+  base64url, per the vendor SDK's isValidSdkKey(). Legacy unprefixed 22/22
+  form deliberately not matched.
+- hackclub_ai_api_key (ai.py, high, 0.95): 'sk-hc-v1-' + 64 lowercase hex
+  (two dash-stripped randomUUIDs, vendor api.tsx; format facts only).
+  Disjoint from openai_api_key.
+- chief_tools_access_token (devops.py, high, 0.90): ctp_/ctt_/cto_/ctr_ +
+  36-248 base62 with at least one digit. Prefixes per vendor docs, body per
+  the MIT random-tokens PARSE_REGEX.
+- rainforest_pay_api_key (payment.py, critical, 0.90): (sbx_)?apikey_ + 64
+  lowercase hex, per vendor API reference. Left guard keeps it out of Paddle
+  pdl_live_apikey_/pdl_sdbx_apikey_ keys (non-collision test).
+
+Skipped: Devin service user token (cog_) - vendor docs give only the prefix;
+the 52-char shape comes from an alphabet-sequence README placeholder.
+
+All literals SYNTHETIC with split prefixes; vendor examples pinned as
+known_test_values. TruffleHog not consulted.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ ATTRIBUTION.md                          |   7 +-
+ classifinder_engine/patterns/ai.py      |  62 +++++++++++
+ classifinder_engine/patterns/cloud.py   |  67 ++++++++++++
+ classifinder_engine/patterns/devops.py  | 137 ++++++++++++++++++++++++
+ classifinder_engine/patterns/payment.py |  69 ++++++++++++
+ 5 files changed, 341 insertions(+), 1 deletion(-)
+
+diff --git a/ATTRIBUTION.md b/ATTRIBUTION.md
+index d7da02b..1e9a679 100644
+--- a/ATTRIBUTION.md
++++ b/ATTRIBUTION.md
+@@ -324,6 +324,11 @@ The following patterns were independently derived from official vendor documenta
+ | `packagist_api_secret` | https://packagist.com/docs/changelog (Private Packagist's own changelog, April 2025: "The API key has a packagist_ack_ prefix and the secret a packagist_acs_ prefix"). The vendor does not publish the body width; the lowercase-hex alphabet follows the vendor's other credentials, and the observed 64–96 hex range was corroborated against Google's Apache-2.0 osv-scalibr Veles detector (`veles/secrets/packagist/detector.go`, read for the width only — no code ported). ClassiFinder accepts the safe 32–128 superset because the 14-character prefix carries the precision. Only the secret is matched; the `packagist_ack_` key id is a context keyword. Every literal shipped is synthetic (SHA-512 over `classifinder-packagist-acs-synthetic-<n>`). Guards, confidence, `known_test_values` and recommendation are ClassiFinder's own. Severity **critical**. No TruffleHog detector code was read or copied. |
+ | `woocommerce_consumer_secret` | https://github.com/woocommerce/woocommerce/blob/trunk/plugins/woocommerce/includes/class-wc-auth.php (the vendor's own source: `$consumer_secret = 'cs_' . wc_rand_hash();`) and https://github.com/woocommerce/woocommerce/blob/trunk/plugins/woocommerce/includes/wc-core-functions.php (`wc_rand_hash()` = `bin2hex(random_bytes(20))`), read for the format facts only. Net: `cs_` + exactly 40 lowercase hex. The `(?<![A-Za-z0-9_-])` / `(?![A-Za-z0-9_-])` guards (needed because `cs_` is a short prefix) and the pure-hex body (which excludes Stripe `cs_live_` / `cs_test_` Checkout Session ids) are ClassiFinder's own. Every literal shipped is synthetic (SHA-512 over `classifinder-woocommerce-cs-synthetic-<n>`). Severity **high**. No TruffleHog detector code was read or copied. |
+ | `akamai_edgegrid_client_secret` | https://techdocs.akamai.com/developer/docs/edgegrid (Akamai's own EdgeGrid documentation: the `.edgerc` keys `client_secret` / `host` / `access_token` / `client_token`, the `akab-` tokens and `*.luna.akamaiapis.net` host, the `AKAMAI_CLIENT_SECRET` / `AKAMAI_<SECTION>_CLIENT_SECRET` environment variables, and a base64 client secret of 43 characters + `=`), with the vendor's own SDK sample file https://github.com/akamai/AkamaiOPEN-edgegrid-python/blob/master/akamai/edgegrid/test/sample_edgerc (masked placeholders of the same shapes, plus the `client-secret` dash spelling). The secret alone is a generic base64 shape, so the context anchoring — an `AKAMAI_*CLIENT_SECRET` name, or an `akab-` token / `.luna.akamaiapis.net` host within 400 characters before or after in the same section — is ClassiFinder's own design, as are the guards and confidence. The vendor's documentation example secret and the sample-file masks are registered as `known_test_values`. Every other literal shipped is synthetic (SHA-512 over `classifinder-akamai-edgegrid-synthetic-<n>`). Severity **critical**. No TruffleHog detector code was read or copied. |
++| `upcloud_api_token` | https://upcloud.com/docs/guides/managing-api-tokens/ (UpCloud's own guide — `ucat_` prefix, Bearer / `UPCLOUD_TOKEN` usage, and the example token `ucat_01DQE3AJDEBFEKECFM558TGH2F`) and the vendor's MIT Go SDK test fixture https://github.com/UpCloudLtd/upcloud-go-api/blob/main/upcloud/token_test.go (`ucat_01DEADBEEFDEADBEEFDEADBEEF`). Both examples are 26 uppercase characters beginning `01`, i.e. a ULID; the Crockford base32 class (no I/L/O/U) and the `[0-7]` first character are inferred from that, since the vendor never names ULID. Both vendor examples are registered as `known_test_values`. Every other literal shipped is synthetic. Guards, confidence and recommendation are ClassiFinder's own. Severity **critical**. No TruffleHog detector code was read or copied. |
++| `configcat_sdk_key` | https://github.com/configcat/js-unified-sdk/blob/master/src/ConfigCatClient.ts (the vendor's own MIT SDK — `isValidSdkKey()` accepts three `/`-separated components with the first `=== "configcat-sdk-1"` and the other two of `keyLength = 22`) plus the same repo's sample code (`samples/node-console/index.js`), whose key shows the base64url alphabet and is registered as a `known_test_value`; the vendor README documents the SDK key as read-only. The legacy unprefixed 22/22 form is deliberately not matched. Severity **low**. Guards, confidence and test values are ClassiFinder's own; no TruffleHog detector code was read or copied. |
++| `hackclub_ai_api_key` | https://github.com/hackclub/ai/blob/main/src/routes/api.tsx (the vendor's own server source; the repository carries no licence, so it was read for format facts only and no code was copied): a key is `` `sk-hc-v1-${crypto.randomUUID()}${crypto.randomUUID()}` `` with dashes removed — `sk-hc-v1-` + exactly 64 lowercase hex. The UUIDv4 version/variant nibbles are deliberately not enforced. Guards, confidence, masks and the OpenAI non-collision analysis are ClassiFinder's own. Every literal shipped is synthetic. Severity **high**. No TruffleHog detector code was read or copied. |
++| `chief_tools_access_token` | https://docs.chief.tools/developers/authentication (Chief Tools' own token docs — "Recognize Chief Tools tokens": `ctp_` personal, `ctt_` team, `cto_` OAuth access, `ctr_` OAuth refresh) and https://github.com/stayallive/random-tokens/blob/main/src/RandomToken.php (the MIT token library by the vendor's founder: `PARSE_REGEX` = prefix `_` + 30–242 `[a-zA-Z0-9]` random + 6 `[a-zA-Z0-9]` base62 CRC32 checksum, left-padded). Net body: 36–248 base62. The at-least-one-digit requirement (rejects camelCase identifiers), guards and confidence are ClassiFinder's own; the checksum is not validated. Every literal shipped is synthetic. Severity **high**. No TruffleHog detector code was read or copied. |
++| `rainforest_pay_api_key` | https://docs.rainforestpay.com/reference/authentication (Rainforest's own API reference: "API keys are prefixed with `apikey_` in production and `sbx_apikey_` in sandbox") and https://docs.rainforestpay.com/docs/api-keys (the vendor's create-key response example, `apikey_` + 64 lowercase hex, registered as a `known_test_value`). The `(?<![A-Za-z0-9_-])` / `(?![A-Za-z0-9_-])` guards — which also keep the pattern out of Paddle's `pdl_live_apikey_` / `pdl_sdbx_apikey_` keys — and the confidence are ClassiFinder's own. Every other literal shipped is synthetic. Severity **critical**. No TruffleHog detector code was read or copied. |
+ Vendor-published token formats (e.g. `AKIA...`, `sk_live_...`, `AIza...`, PEM markers, JWT structure, Bitcoin WIF, credit-card IINs) are facts and not subject to copyright.
+ 
+ ---
+@@ -359,4 +364,4 @@ Run `pip-licenses` against any subproject's lockfile for the exhaustive list.
+ 
+ ---
+ 
+-*Last updated: 2026-10-05* (ory_oauth2_token, packagist_api_secret, woocommerce_consumer_secret, akamai_edgegrid_client_secret — formats from Ory's token-formats page + Hydra source, Private Packagist's changelog, WooCommerce's own source, and Akamai's EdgeGrid docs)
++*Last updated: 2026-10-05* (ory_oauth2_token, packagist_api_secret, woocommerce_consumer_secret, akamai_edgegrid_client_secret, upcloud_api_token, configcat_sdk_key, hackclub_ai_api_key, chief_tools_access_token, rainforest_pay_api_key — formats from each vendor's own docs or source)
+diff --git a/classifinder_engine/patterns/ai.py b/classifinder_engine/patterns/ai.py
+index cba927d..f649ff1 100644
+--- a/classifinder_engine/patterns/ai.py
++++ b/classifinder_engine/patterns/ai.py
+@@ -1084,6 +1084,65 @@
+     tags=["ai", "helicone", "observability", "gateway"],
+ )
+ 
++# ===================================================
++# HACK CLUB AI API KEY (2026-10-05)
++# ===================================================
++# Hack Club AI (ai.hackclub.com) is an OpenAI-compatible LLM proxy. In the
++# vendor's own server source (hackclub/ai src/routes/api.tsx — read for the
++# format facts only; no code copied), a key is minted as
++#   `sk-hc-v1-${crypto.randomUUID()}${crypto.randomUUID()}` with '-' removed,
++# i.e. 'sk-hc-v1-' + two lowercase-hex UUIDv4s = exactly 64 lowercase hex.
++# (The UUIDv4 version/variant nibbles are NOT enforced, so a future switch to
++# plain random hex is still caught.)
++#
++# DISJOINT FROM OPENAI: openai_api_key needs 'sk-' followed by 32+
++# alphanumerics, which stops at the '-' after 'hc', so 'sk-hc-v1-...' never
++# satisfies it. BOTH GUARDS REFUSE [A-Za-z0-9_-], so a 65-hex run matches
++# nothing.
++#
++# Severity high: the key spends the owner's quota on the proxy's models.
++
++HACKCLUB_AI_API_KEY = SecretPattern(
++    id="hackclub_ai_api_key",
++    name="Hack Club AI API Key",
++    description=(
++        "Hack Club AI API key — the literal 'sk-hc-v1-' prefix followed by"
++        " exactly 64 lowercase hex characters (two dash-stripped UUIDv4s). Used"
++        " as an OpenAI-compatible Bearer key against ai.hackclub.com; whoever"
++        " holds it spends the owner's model quota."
++    ),
++    provider="hackclub",
++    severity="high",
++    # Format per the vendor's own server source (hackclub/ai, api.tsx: the
++    # 'sk-hc-v1-' prefix plus two crypto.randomUUID() with dashes removed),
++    # read for format facts only. Guards, confidence and test values are ours.
++    # Source: https://github.com/hackclub/ai/blob/main/src/routes/api.tsx
++    regex=re.compile(
++        r"(?<![A-Za-z0-9_-])"
++        r"(?P<secret>sk-hc-v1-[0-9a-f]{64})"
++        r"(?![A-Za-z0-9_-])",
++        re.ASCII,
++    ),
++    confidence_base=0.95,
++    entropy_threshold=0.0,  # hex body is ~4.0 bits/char — the 9-char prefix carries the precision
++    context_keywords=["hackclub", "ai.hackclub.com", "HACKCLUB_AI_API_KEY", "Bearer"],
++    known_test_values={
++        # Hex masks. confidence_base 0.95 sits above the 0.85 FP-wordlist gate,
++        # so they are pinned here and land at ~0.15.
++        "sk-" + "hc-v1-" + fill * 64
++        for fill in ("0", "a", "f")
++    },
++    recommendation=(
++        "Revoke this key on the Hack Club AI dashboard (ai.hackclub.com, API"
++        " keys) and create a replacement, then update every client and CI"
++        " secret that uses it. Review the key's usage for requests you did not"
++        " make during the exposure window."
++    ),
++    tags=["ai", "hackclub", "llm"],
++)
++
++
++
+ 
+ register(
+     OPENAI_API_KEY,
+@@ -1119,4 +1178,7 @@
+     # 2026-09-19 — Helicone API key ('sk-helicone' / 'pk-helicone' + optional
+     # -eu/-cp/-rl + 4 x 7 [a-z0-9], per the vendor's own apiKeyRegex.ts).
+     HELICONE_API_KEY,
++    # 2026-10-05 — Hack Club AI API key ('sk-hc-v1-' + 64 lowercase hex;
++    # from the vendor's own key generator). Disjoint from openai_api_key.
++    HACKCLUB_AI_API_KEY,
+ )
+diff --git a/classifinder_engine/patterns/cloud.py b/classifinder_engine/patterns/cloud.py
+index 68c2bdb..ca87727 100644
+--- a/classifinder_engine/patterns/cloud.py
++++ b/classifinder_engine/patterns/cloud.py
+@@ -822,6 +822,70 @@
+ 
+ 
+ 
++# ---------------------------------------------------
++# UpCloud API token — 'ucat_' (2026-10-05)
++# ---------------------------------------------------
++# UpCloud API tokens replace Basic Auth on api.upcloud.com: sent as
++# 'Authorization: Bearer ucat_...', read by upctl / Terraform / the SDKs from
++# UPCLOUD_TOKEN. The vendor's "Managing API tokens" guide shows the token as
++# 'ucat_' + a 26-character value (ucat_01DQE3AJDEBFEKECFM558TGH2F), and the
++# vendor's MIT Go SDK test (upcloud/token_test.go) uses the same 26-character
++# shape (ucat_01DEADBEEFDEADBEEFDEADBEEF). The 26-character uppercase body
++# starting '01' is a ULID: Crockford base32 (no I, L, O, U), first character
++# 0-7. The vendor never names ULID, so this is inferred from both examples.
++#
++# BOTH GUARDS REFUSE [A-Za-z0-9_-], so a token is never carved out of a
++# longer identifier and a 27-character body matches nothing. The prefix is
++# exact and case-sensitive. Both vendor examples are known_test_values.
++#
++# Severity critical: an account token can create, modify and delete every
++# server, storage, network and managed service it is scoped to.
++
++UPCLOUD_API_TOKEN = SecretPattern(
++    id="upcloud_api_token",
++    name="UpCloud API Token",
++    description=(
++        "UpCloud API token — the literal 'ucat_' prefix followed by a"
++        " 26-character ULID (Crockford base32). Sent as a Bearer token to"
++        " api.upcloud.com and read from UPCLOUD_TOKEN by upctl, Terraform and"
++        " the SDKs; it can manage every resource the token is scoped to."
++    ),
++    provider="upcloud",
++    severity="critical",
++    # Format per UpCloud's own guide ('ucat_' + 26-character example) and the
++    # vendor's MIT Go SDK test fixture (upcloud-go-api upcloud/token_test.go).
++    # ULID charset/first-character bound, guards and confidence are ours.
++    # Source: https://upcloud.com/docs/guides/managing-api-tokens/
++    regex=re.compile(
++        r"(?<![A-Za-z0-9_-])"
++        r"(?P<secret>ucat_[0-7][0-9A-HJKMNP-TV-Z]{25})"
++        r"(?![A-Za-z0-9_-])",
++        re.ASCII,
++    ),
++    confidence_base=0.95,
++    entropy_threshold=0.0,  # exact prefix plus the fixed 26-char ULID body carries the precision
++    context_keywords=["upcloud", "UPCLOUD_TOKEN", "upctl", "api.upcloud.com", "Bearer"],
++    known_test_values={
++        # The vendor's own documentation and SDK-test examples, plus masks.
++        # confidence_base 0.95 sits above the 0.85 FP-wordlist gate, so they
++        # are pinned here and land at ~0.15.
++        "uc" + "at_01DQE3AJDEBFEKECFM558TGH2F",
++        "uc" + "at_01DEADBEEFDEADBEEFDEADBEEF",
++        "uc" + "at_" + "0" * 26,
++        "uc" + "at_01" + "X" * 24,
++    },
++    recommendation=(
++        "Delete this token in the UpCloud Control Panel (People > API tokens)"
++        " or via DELETE /1.3/account/tokens/{id}, create a replacement with the"
++        " narrowest scope and expiry, and update UPCLOUD_TOKEN everywhere it is"
++        " set. Review the account's resource and billing activity for changes"
++        " made during the exposure window."
++    ),
++    tags=["cloud", "upcloud", "api-token"],
++)
++
++
++
+ # ===================================================
+ # DOPPLER
+ # ===================================================
+@@ -3895,6 +3959,9 @@
+     # 2026-10-05 — Akamai EdgeGrid client_secret (base64 43 + '='), context-
+     # anchored on AKAMAI_*CLIENT_SECRET or a nearby akab- token / luna host.
+     AKAMAI_EDGEGRID_CLIENT_SECRET,
++    # 2026-10-05 — UpCloud API token ('ucat_' + 26-char ULID; vendor docs +
++    # vendor SDK test).
++    UPCLOUD_API_TOKEN,
+     DOPPLER_TOKEN,
+     TERRAFORM_CLOUD_TOKEN,
+     VAULT_TOKEN,
+diff --git a/classifinder_engine/patterns/devops.py b/classifinder_engine/patterns/devops.py
+index 75169b2..e20545f 100644
+--- a/classifinder_engine/patterns/devops.py
++++ b/classifinder_engine/patterns/devops.py
+@@ -2924,6 +2924,138 @@
+     tags=["devops", "netbird", "networking", "vpn", "zero-trust", "api"],
+ )
+ 
++# ===================================================
++# CONFIGCAT SDK KEY (2026-10-05)
++# ===================================================
++# ConfigCat SDK keys identify a config + environment and let an SDK download
++# that config's feature-flag JSON. Current keys are
++# 'configcat-sdk-1/' + 22 characters + '/' + 22 characters. The vendor's own
++# JS SDK validates exactly that (src/ConfigCatClient.ts isValidSdkKey():
++# three '/'-separated components, the first === "configcat-sdk-1", the other
++# two of keyLength = 22), and its sample code shows the base64url alphabet
++# ('-' appears in 'PKDVCLf-Hq-h-kCzMp-L7Q'), so each component is
++# [A-Za-z0-9_-]{22} (16 bytes, base64url, unpadded).
++#
++# The LEGACY unprefixed form (22 + '/' + 22) is deliberately NOT matched:
++# with no prefix it is indistinguishable from an arbitrary two-segment path.
++# The guards refuse [A-Za-z0-9_-] around the key, so a 23-character component
++# matches nothing; a following '/' (the CDN config-file URL) is allowed.
++#
++# Severity LOW: the vendor documents the SDK key as read-only (it can only
++# download the config JSON) and expects it to ship inside frontend/mobile
++# apps. A leak discloses flag names, values and targeting rules, nothing more.
++
++CONFIGCAT_SDK_KEY = SecretPattern(
++    id="configcat_sdk_key",
++    name="ConfigCat SDK Key",
++    description=(
++        "ConfigCat SDK key — 'configcat-sdk-1/' followed by two 22-character"
++        " base64url components separated by '/'. Read-only: it downloads one"
++        " config's feature-flag JSON (flag names, values, targeting rules) and"
++        " is routinely embedded in frontend apps, so severity is low."
++    ),
++    provider="configcat",
++    severity="low",
++    # Format per the vendor's own SDK validator (isValidSdkKey in
++    # js-unified-sdk src/ConfigCatClient.ts: "configcat-sdk-1" + two
++    # components of keyLength 22) and its samples (base64url alphabet).
++    # Guards, confidence and test values are ClassiFinder's own.
++    # Source: https://github.com/configcat/js-unified-sdk/blob/master/src/ConfigCatClient.ts
++    regex=re.compile(
++        r"(?<![A-Za-z0-9_-])"
++        r"(?P<secret>configcat-sdk-1/[A-Za-z0-9_-]{22}/[A-Za-z0-9_-]{22})"
++        r"(?![A-Za-z0-9_-])",
++        re.ASCII,
++    ),
++    confidence_base=0.95,
++    entropy_threshold=0.0,  # the literal 'configcat-sdk-1/' prefix plus fixed 22/22 layout carries the precision
++    context_keywords=["configcat", "CONFIGCAT_SDK_KEY", "getClient", "sdkKey"],
++    known_test_values={
++        # The vendor's own sample-code key, plus masks. Pinned at ~0.15
++        # because confidence_base 0.95 sits above the 0.85 FP-wordlist gate.
++        "configcat-sdk-1/PKDVCLf-Hq-h-kCzMp-L7Q/tiOvFw5gkky9LFu1Duuvzw",
++        "configcat-sdk-1/" + "x" * 22 + "/" + "x" * 22,
++        "configcat-sdk-1/" + "X" * 22 + "/" + "X" * 22,
++        "configcat-sdk-1/" + "0" * 22 + "/" + "0" * 22,
++    },
++    recommendation=(
++        "SDK keys are read-only and often public by design, but if this config"
++        " should stay private, rotate the key in the ConfigCat Dashboard (SDK"
++        " Keys > generate a secondary key, migrate the apps, then delete the old"
++        " one) and serve flag evaluation from your backend instead of shipping"
++        " the key to clients."
++    ),
++    tags=["devops", "configcat", "feature-flags"],
++)
++
++
++# ===================================================
++# CHIEF TOOLS ACCESS TOKEN (2026-10-05)
++# ===================================================
++# Chief Tools (Account Chief and the chief.app product suite) issues API
++# bearer tokens whose prefix names the credential type. The vendor's token
++# docs list exactly four: 'ctp_' personal access token, 'ctt_' team access
++# token, 'cto_' OAuth access token, 'ctr_' OAuth refresh token.
++#
++# The body comes from the vendor founder's MIT random-tokens library
++# (stayallive/random-tokens, src/RandomToken.php): PARSE_REGEX is
++# prefix '_' + 30..242 [a-zA-Z0-9] random + 6 [a-zA-Z0-9] checksum (base62
++# CRC32, left-padded to 6). Net: prefix + 36..248 base62. The checksum is not
++# validated here.
++#
++# The 3-letter prefixes are short, so: BOTH GUARDS REFUSE [A-Za-z0-9_-]
++# (never carved out of a longer identifier, an over-long run matches
++# nothing), and the body must contain at least one digit — a camelCase
++# identifier such as 'ctp_getAllCustomerTransactionsForAccount' does not
++# match, while a 36-character random base62 body lacks a digit only ~0.2% of
++# the time.
++#
++# Severity high: the token acts as the user / team / OAuth client across the
++# Chief Tools APIs it is scoped to; a refresh token mints new access tokens.
++
++CHIEF_TOOLS_ACCESS_TOKEN = SecretPattern(
++    id="chief_tools_access_token",
++    name="Chief Tools Access Token",
++    description=(
++        "Chief Tools API token — 'ctp_' (personal), 'ctt_' (team), 'cto_'"
++        " (OAuth access) or 'ctr_' (OAuth refresh) followed by 36-248 base62"
++        " characters (random part plus a 6-character CRC32 checksum). Sent as"
++        " a Bearer token to the Chief Tools APIs on behalf of the user or team."
++    ),
++    provider="chief_tools",
++    severity="high",
++    # Prefixes per the vendor's token docs ("Recognize Chief Tools tokens");
++    # body per the MIT random-tokens library PARSE_REGEX (30-242 random + 6
++    # checksum, [a-zA-Z0-9]). Digit requirement, guards and confidence are ours.
++    # Source: https://docs.chief.tools/developers/authentication
++    regex=re.compile(
++        r"(?<![A-Za-z0-9_-])"
++        r"(?P<secret>ct[ptor]_(?=[A-Za-z]{0,247}[0-9])[A-Za-z0-9]{36,248})"
++        r"(?![A-Za-z0-9_-])",
++        re.ASCII,
++    ),
++    confidence_base=0.90,
++    entropy_threshold=0.0,  # prefix + length window + digit requirement carry the precision
++    context_keywords=["chief", "chief.app", "chief.tools", "CHIEF_", "Bearer"],
++    known_test_values={
++        # Masks inside the body charset (each carries a digit so it matches).
++        # confidence_base 0.90 sits above the 0.85 FP-wordlist gate, so they
++        # are pinned here and land at ~0.15.
++        "ct" + kind + "_" + body
++        for kind in ("p", "t", "o", "r")
++        for body in ("0" * 36, "x" * 30 + "000000", "X" * 30 + "000000")
++    },
++    recommendation=(
++        "Revoke the token in Account Chief (API tokens for personal tokens, the"
++        " team's settings for team tokens, or the connected-apps page for OAuth"
++        " grants), issue a replacement with the narrowest scopes, and review the"
++        " account or team for activity during the exposure window."
++    ),
++    tags=["devops", "chief-tools", "api-token"],
++)
++
++
++
+ 
+ register(
+     # Part 2.1 — DevOps / CI-CD / Observability
+@@ -3020,4 +3152,9 @@
+     # 2026-09-16 — NetBird personal access token ('nbp_' + 30 base62 secret
+     # + 6 base62 CRC32 checksum; from the vendor's own generateNewToken()).
+     NETBIRD_PERSONAL_ACCESS_TOKEN,
++    # 2026-10-05 — ConfigCat SDK key ('configcat-sdk-1/' + 22 + '/' + 22,
++    # per the vendor SDK's isValidSdkKey(); read-only, severity low) and Chief
++    # Tools access token (ctp_/ctt_/cto_/ctr_ + 36-248 base62).
++    CONFIGCAT_SDK_KEY,
++    CHIEF_TOOLS_ACCESS_TOKEN,
+ )
+diff --git a/classifinder_engine/patterns/payment.py b/classifinder_engine/patterns/payment.py
+index 5e59caf..8b66a4e 100644
+--- a/classifinder_engine/patterns/payment.py
++++ b/classifinder_engine/patterns/payment.py
+@@ -1848,6 +1848,72 @@ def _luhn_check(digits: str) -> bool:
+ 
+ 
+ 
++# ===================================================
++# RAINFOREST PAY API KEY (2026-10-05)
++# ===================================================
++# Rainforest (rainforestpay.com) is a payment-facilitation API for software
++# platforms. Its API reference states that API keys "are prefixed with
++# apikey_ in production and sbx_apikey_ in sandbox", and the vendor's API-keys
++# guide shows a create-key response whose api_key is 'apikey_' + 64
++# lowercase hex. Net: optional 'sbx_' + 'apikey_' + exactly 64 lowercase hex.
++#
++# 'apikey_' alone reads like a generic word, so precision comes from the exact
++# 64-lowercase-hex body plus BOTH GUARDS REFUSING [A-Za-z0-9_-]. The left guard
++# is what keeps this disjoint from Paddle's 'pdl_live_apikey_' /
++# 'pdl_sdbx_apikey_' keys: the 'apikey_' inside them is preceded by '_', so it
++# can never start a match (and Paddle's 'sdbx' is not 'sbx').
++#
++# Severity critical: API keys generally carry broad permissions over the
++# platform's merchants, payins, refunds and deposits (the vendor's own
++# guidance is that they must never reach a browser).
++
++RAINFOREST_PAY_API_KEY = SecretPattern(
++    id="rainforest_pay_api_key",
++    name="Rainforest Pay API Key",
++    description=(
++        "Rainforest (rainforestpay.com) API key — 'apikey_' (production) or"
++        " 'sbx_apikey_' (sandbox) followed by exactly 64 lowercase hex"
++        " characters. A long-lived server credential with broad permissions"
++        " over merchants, payins, refunds and deposits."
++    ),
++    provider="rainforest",
++    severity="critical",
++    # The vendor's API reference gives the 'apikey_' / 'sbx_apikey_' prefixes
++    # (docs.rainforestpay.com/reference/authentication); the API-keys guide's
++    # create-key response shows the 64-lowercase-hex body. Guards, confidence
++    # and test values are ClassiFinder's own.
++    # Source: https://docs.rainforestpay.com/docs/api-keys
++    regex=re.compile(
++        r"(?<![A-Za-z0-9_-])"
++        r"(?P<secret>(?:sbx_)?apikey_[0-9a-f]{64})"
++        r"(?![A-Za-z0-9_-])",
++        re.ASCII,
++    ),
++    confidence_base=0.90,
++    entropy_threshold=0.0,  # hex body is ~4.0 bits/char — the exact prefix + 64-hex layout carries the precision
++    context_keywords=["rainforest", "rainforestpay", "api.rainforestpay.com", "RAINFOREST_API_KEY", "Bearer"],
++    known_test_values={
++        # The vendor's documentation example and hex masks. confidence_base
++        # 0.90 sits above the 0.85 FP-wordlist gate, so they are pinned (~0.15).
++        "api" + "key_1ad1c535b0c0093e7b9bf093d7e3444cd0e2ddefab36199216f555c3efa65d63",
++    } | {
++        env + "api" + "key_" + fill * 64
++        for env in ("", "sbx_")
++        for fill in ("0", "a", "f")
++    },
++    recommendation=(
++        "Delete or disable this API key via the Rainforest API"
++        " (DELETE /v1/api_keys/{api_key_id}) or the Platform Portal, create a"
++        " replacement scoped by statements and constraints to what the"
++        " integration needs, and update every server that uses it. Review"
++        " payins, refunds, deposit-method and merchant changes made during the"
++        " exposure window."
++    ),
++    tags=["payment", "rainforest", "fintech"],
++)
++
++
++
+ 
+ register(
+     STRIPE_LIVE_SECRET_KEY,
+@@ -1909,4 +1975,7 @@ def _luhn_check(digits: str) -> bool:
+     # 2026-10-05 — WooCommerce REST API consumer secret ('cs_' + exactly
+     # 40 lowercase hex, from the vendor's own wc_rand_hash()).
+     WOOCOMMERCE_CONSUMER_SECRET,
++    # 2026-10-05 — Rainforest Pay API key ('apikey_' / 'sbx_apikey_' + 64
++    # lowercase hex; vendor docs). Left guard keeps it out of Paddle keys.
++    RAINFOREST_PAY_API_KEY,
+ )

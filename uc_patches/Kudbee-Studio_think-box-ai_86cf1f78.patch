@@ -1,0 +1,665 @@
+From 86cf1f78412f4a8198b579afac9893f93213df6f Mon Sep 17 00:00:00 2001
+From: Kudbee <twd4lifez@gmail.com>
+Date: Tue, 29 Sep 2026 12:50:59 -0500
+Subject: [PATCH] feat(server): dashboard bridge to governed upcloud-ssh
+ execution (#284)
+
+apps/web had no path to backend.main, and governed admission tokens could
+only be minted in-process, so no out-of-process client could run a
+governed job.
+
+- POST /api/v1/run/admission-token (API-key authenticated) issues a 300s
+  goal:execute token for a fixed server-side identity. Callers cannot
+  choose agent, capability or TTL. require_http_admission is unchanged.
+- apps/web/governed-bridge.ts gets the token server-side and submits to
+  the existing governed POST /api/v1/run with execution_substrate fixed
+  to upcloud-ssh. It forwards only an exact-match read-only command
+  allow-list, requires the X-Kudbee-Client header, and fails closed
+  without THINKBOX_API_KEY. The browser never sees the key or token.
+- Dashboard /remote CMD terminal command.
+
+Live: headless Chrome -> dashboard /remote hostname -> apps/web (HTTP) ->
+uvicorn backend (HTTP) -> worker-02 209.50.51.174 -> "kudbee-hermes-worker-02",
+exit 0, verified, with 0 console errors. Tests: f142 4/4, bridge 7/7, web
+140/140, python regression 263/263. CI not run (GitHub billing issue).
+
+Co-authored-by: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ AGENTS.md                                  |  76 +++++++++++-
+ apps/web/governed-bridge.ts                | 115 ++++++++++++++++++
+ apps/web/public/js/app.js                  |  35 ++++++
+ apps/web/server.ts                         |   6 +
+ apps/web/tests/governed-bridge.test.ts     | 131 +++++++++++++++++++++
+ backend/api/v1/router.py                   |   8 ++
+ backend/api/v1/run_governed.py             |  30 +++++
+ docs/CONTINUITY.md                         |  18 +++
+ tests/e2e/test_f142_web_admission_token.py | 106 +++++++++++++++++
+ 9 files changed, 523 insertions(+), 2 deletions(-)
+ create mode 100644 apps/web/governed-bridge.ts
+ create mode 100644 apps/web/tests/governed-bridge.test.ts
+ create mode 100644 tests/e2e/test_f142_web_admission_token.py
+
+diff --git a/AGENTS.md b/AGENTS.md
+index 8ec498db..24b254ac 100644
+--- a/AGENTS.md
++++ b/AGENTS.md
+@@ -524,8 +524,15 @@ Set up UpCloud infrastructure (see skill: `upcloud-setup`):
+   fallback (guard H09 covers `upcloud-ssh`).
+ - `ssh` exit 255 (a transport or auth error) is recorded as `SSH_FAILED`, not as a remote-command
+   failure.
+-- Governance tokens are minted only in-process (`get_api_run_governance().register_agent`). There is
+-  no HTTP issuance path yet, so an out-of-process client cannot pass admission.
++- Governance tokens for out-of-process clients: `POST /api/v1/run/admission-token` (API-key
++  authenticated). It returns a 300-second token for a **fixed server-side identity**
++  (`THINKBOX_WEB_AGENT_ID`, default `web-dashboard-agent`) with capability `goal:execute` only. A caller
++  cannot choose the agent, capability, or TTL. (Added 2026-09-29; before that, tokens were in-process only.)
++- The dashboard bridge (`apps/web/governed-bridge.ts`) calls that endpoint server-side. The browser never
++  sees the API key or the token. The bridge fixes `execution_substrate` to `upcloud-ssh` and forwards
++  only an exact-match read-only allow-list (`hostname`, `uname -a`, `uptime`, `whoami`, `df -h /`,
++  `free -m`). The web process needs `THINKBOX_BACKEND_URL` (default `http://127.0.0.1:8000`) and
++  `THINKBOX_API_KEY`. Dashboard usage: `/remote hostname`.
+ 
+ ---
+ 
+@@ -2132,6 +2139,71 @@ Dashboard CLI: `/help`, `/algo`, `/memory`, `/remember`, `/promote`, `/metrics`,
+   proof re-ran from merged code (job `engine_36e6e492`, receipt `tb_rcpt_20260929173803_6dfe975b`,
+   worker-02 → `kudbee-hermes-worker-02`, exit 0, 1.39s end-to-end). CI not run (GitHub billing issue).
+ 
++### 2026-09-29 — Dashboard → governed backend → `upcloud-ssh` → worker-02 bridge (LIVE through the browser)
++
++- **Where the chain stopped:** `apps/web` had no path to the Python backend at all. `backend.main`'s
++  governed `POST /api/v1/run` required a governance token that could only be minted in-process
++  (`register_agent`), so no out-of-process client could pass admission.
++- **Governance decision:** extend the existing `GovernanceTokenService` + `IdentityLedger`; no new auth
++  system. New `POST /api/v1/run/admission-token` (`backend/api/v1/router.py` →
++  `run_governed.issue_web_admission_token`):
++  - sits behind the existing `X-API-Key` middleware (no API key → 401)
++  - the identity is fixed server-side (`web-dashboard-agent`, overridable only by the server env
++    `THINKBOX_WEB_AGENT_ID`); the capability is `goal:execute` only; the TTL is 300s
++  - request bodies are ignored, so a caller cannot pick agent, capability or TTL
++  - the token is still checked by the unchanged `require_http_admission`: it's rejected (403) for
++    another `agent_id` or for `goal:execute:verified`
++- **Web bridge:** `apps/web/governed-bridge.ts` adds `POST /api/governed/run` and
++  `GET /api/governed/run/:engineId`, wired in `server.ts`.
++  - Server-side it fetches an admission token, then calls the existing governed `POST /api/v1/run` with
++    `execution_substrate: "upcloud-ssh"` **fixed**.
++  - Commands must exactly match a read-only allow-list; anything else gets 400 before the backend is
++    contacted.
++  - Requests need the `X-Kudbee-Client: dashboard` header (403 without it), a cross-site
++    form-post/CSRF guard.
++  - The browser never receives the API key or the governance token. If `THINKBOX_API_KEY` is unset,
++    the bridge fails closed with 503.
++  - The status proxy validates the engine id.
++  - Dashboard `/remote CMD` terminal command added in `public/js/app.js`.
++  - No second execution path: admission, receipt, `ThinkJobEntry`, dashboard events, artifact hash and
++    checkpoint all come from the unchanged governed route and substrate.
++- **Tests:**
++  - `tests/e2e/test_f142_web_admission_token.py`: 4/4 (API key required; identity and capability fixed;
++    token admits an `upcloud-ssh` run end to end; token refused for another agent and for the verified
++    capability)
++  - `apps/web/tests/governed-bridge.test.ts`: 7/7 against a mock backend (substrate fixed, client
++    cannot inject substrate/agent/token/capability, allow-list rejects `hostname; id` etc. without
++    contacting the backend, header required, 403 passthrough without token leak, engine-id validation,
++    503 when unconfigured)
++  - full web suite 140/140; python regression 263/263
++  - `ruff --isolated` clean on the new test; no new issues in changed modules
++  - CI not run (GitHub billing issue)
++- **LIVE, by boundary:**
++  1. *Backend over HTTP (TCP):* real `uvicorn backend.main:app` on `127.0.0.1:18000` and the real
++     `apps/web` server on `:13000`. `curl POST :13000/api/governed/run {"command":"hostname"}` →
++     backend access log shows `POST /api/v1/run/admission-token 200` then `POST /api/v1/run 200` →
++     job `engine_53b5b986`, receipt `tb_rcpt_20260929174322_5d5c6f9b` → worker-02 `209.50.51.174`
++     stdout `kudbee-hermes-worker-02`, exit 0, 1.20s. Proof `COMPLETED`, verified, checkpoint
++     `chk_09c134d0e733`. Negatives: no header → 403, `rm -rf /` → 400, backend without key → 401. The
++     token appeared 0 times in web responses.
++  2. *Browser:* real Chrome (headless, Windows host, via CDP) loaded `http://localhost:13000/`, typed
++     `/remote hostname` and clicked Run. The dashboard showed job `engine_4ffa5c8f`
++     (`tb_rcpt_20260929174539_764eed02`) `✓ completed · provider upcloud-ssh · exit 0 · verified true`,
++     checkpoint `chk_6b03112e8430`, with **0 console errors/warnings**. Artifact stdout
++     `kudbee-hermes-worker-02`, exit 0, 1.43s.
++  3. *Real worker-02 execution:* both artifacts record `remote_host 209.50.51.174`,
++     stdout `kudbee-hermes-worker-02`.
++  - Headless automation, not a human clicking; all servers ran locally (loopback). No deployed
++    environment.
++- **Four-state:** web→backend bridge + admission-token endpoint: CODE COMPLETE (this branch) / TEST
++  VERIFIED / LIVE VERIFIED (browser → web over HTTP → backend over HTTP → worker-02). PRODUCTION READY:
++  **NO** (the dashboard itself has no user authentication (AGENTS.md: keep on localhost); there is a
++  single shared API key; no founder review).
++- **Scope held:** only worker-02 was used. Not touched: worker-01, the orphan, the firewall, CI,
++  ruff/W503, `investigate_upcloud()`.
++- **Next:** founder review. Then the next production gap is dashboard user authentication, so that
++  `/api/governed/run` is not open to anything that can reach `:3000`.
++
+ ### Open items / debt (be honest here)
+ 
+ - `cli.ts` has no automated tests (its paths are exercised manually and through
+diff --git a/apps/web/governed-bridge.ts b/apps/web/governed-bridge.ts
+new file mode 100644
+index 00000000..0b780935
+--- /dev/null
++++ b/apps/web/governed-bridge.ts
+@@ -0,0 +1,115 @@
++// Dashboard → governed backend bridge. The browser never receives the backend API key or a governance
++// token, and never chooses the substrate: this server-side module fixes execution_substrate to
++// `upcloud-ssh`, only forwards allow-listed read-only commands, obtains a short-lived admission token
++// from the backend, and submits through the existing governed POST /api/v1/run.
++import type { Request, Response } from 'express';
++
++export const GOVERNED_SUBSTRATE = 'upcloud-ssh';
++export const CLIENT_HEADER = 'x-kudbee-client';
++export const CLIENT_HEADER_VALUE = 'dashboard';
++
++// Exact-match, read-only. Anything else is rejected before it leaves this process.
++export const ALLOWED_REMOTE_COMMANDS: readonly string[] = ['hostname', 'uname -a', 'uptime', 'whoami', 'df -h /', 'free -m'];
++
++export interface BridgeConfig {
++  backendUrl: string;
++  apiKey: string;
++}
++
++export function bridgeConfigFromEnv(env: NodeJS.ProcessEnv = process.env): BridgeConfig {
++  return {
++    backendUrl: (env.THINKBOX_BACKEND_URL || 'http://127.0.0.1:8000').replace(/\/+$/, ''),
++    apiKey: (env.THINKBOX_API_KEY || env.THINKBOX_API_KEYS?.split(',')[0] || '').trim(),
++  };
++}
++
++async function backend(cfg: BridgeConfig, path: string, init: { method: string; body?: unknown }): Promise<{ status: number; json: any }> {
++  const res = await fetch(`${cfg.backendUrl}${path}`, {
++    method: init.method,
++    headers: { 'X-API-Key': cfg.apiKey, 'Content-Type': 'application/json' },
++    body: init.body === undefined ? undefined : JSON.stringify(init.body),
++    signal: AbortSignal.timeout(15000),
++  });
++  let json: any = null;
++  try {
++    json = await res.json();
++  } catch {
++    // non-JSON error body
++  }
++  return { status: res.status, json };
++}
++
++function guard(req: Request, res: Response, cfg: BridgeConfig): boolean {
++  if (req.get(CLIENT_HEADER) !== CLIENT_HEADER_VALUE) {
++    res.status(403).json({ error: `missing ${CLIENT_HEADER} header` });
++    return false;
++  }
++  if (!cfg.apiKey) {
++    res.status(503).json({ error: 'governed bridge not configured: THINKBOX_API_KEY is not set' });
++    return false;
++  }
++  return true;
++}
++
++export function submitGovernedRun(cfg: BridgeConfig) {
++  return async (req: Request, res: Response): Promise<void> => {
++    if (!guard(req, res, cfg)) return;
++    const command = typeof req.body?.command === 'string' ? req.body.command.trim() : '';
++    if (!ALLOWED_REMOTE_COMMANDS.includes(command)) {
++      res.status(400).json({ error: 'command not allowed', allowed: ALLOWED_REMOTE_COMMANDS });
++      return;
++    }
++    try {
++      const adm = await backend(cfg, '/api/v1/run/admission-token', { method: 'POST' });
++      if (adm.status !== 200 || !adm.json?.governance_token) {
++        res.status(502).json({ error: 'admission token unavailable', backend_status: adm.status });
++        return;
++      }
++      const run = await backend(cfg, '/api/v1/run', {
++        method: 'POST',
++        body: {
++          goal: `dashboard remote exec: ${command}`,
++          agent_id: adm.json.agent_id,
++          governance_token: adm.json.governance_token,
++          execution_substrate: GOVERNED_SUBSTRATE,
++          exec_command: command,
++        },
++      });
++      if (run.status !== 200) {
++        // Governance/validation errors are passed through, without the request that carried the token.
++        res.status(run.status === 403 ? 403 : 502).json({ error: 'backend rejected run', backend_status: run.status, detail: run.json?.detail ?? null });
++        return;
++      }
++      res.status(202).json({
++        engine_id: run.json.engine_id,
++        receipt_id: run.json.summary?.receipt_id,
++        session_id: run.json.session_id,
++        execution_substrate: GOVERNED_SUBSTRATE,
++        command,
++      });
++    } catch (err) {
++      res.status(502).json({ error: `backend unreachable: ${err instanceof Error ? err.message : String(err)}` });
++    }
++  };
++}
++
++export function getGovernedRun(cfg: BridgeConfig) {
++  return async (req: Request, res: Response): Promise<void> => {
++    if (!guard(req, res, cfg)) return;
++    const id = String(req.params.engineId || '');
++    if (!/^engine_[A-Za-z0-9]+$/.test(id)) {
++      res.status(400).json({ error: 'invalid engine id' });
++      return;
++    }
++    try {
++      const st = await backend(cfg, `/api/v1/run/job/${id}/status`, { method: 'GET' });
++      if (st.status !== 200) {
++        res.status(st.status === 404 ? 404 : 502).json({ error: 'status unavailable', backend_status: st.status });
++        return;
++      }
++      res.json(st.json);
++    } catch (err) {
++      res.status(502).json({ error: `backend unreachable: ${err instanceof Error ? err.message : String(err)}` });
++    }
++  };
++}
+diff --git a/apps/web/public/js/app.js b/apps/web/public/js/app.js
+index b32f280c..3d009820 100644
+--- a/apps/web/public/js/app.js
++++ b/apps/web/public/js/app.js
+@@ -633,6 +633,7 @@ async function runSlashCommand(command) {
+         '  /model NAME         Switch to a model',
+         '  /agent [NAME]       Switch agent profile (or clear for default)',
+         '  /notes [LAYER]     List recent notes (session|task|org|verified)',
++        '  /remote CMD        Run an allow-listed read-only command on the UpCloud worker (governed)',
+         '',
+         '🔌 Plugins & Integration:',
+         '  /plugins           List installed plugins',
+@@ -1003,6 +1004,40 @@ async function runSlashCommand(command) {
+       ].join('\n'));
+       return true;
+ 
++    case '/remote': {
++      const command = args.join(' ').trim();
++      const headers = { 'Content-Type': 'application/json', 'X-Kudbee-Client': 'dashboard' };
++      if (!command) {
++        appendTerminalMessage('system', 'Usage: /remote hostname | uname -a | uptime | whoami | df -h / | free -m');
++        return true;
++      }
++      try {
++        const submit = await fetch('/api/governed/run', { method: 'POST', headers, body: JSON.stringify({ command }) });
++        const job = await submit.json();
++        if (!submit.ok) {
++          appendTerminalMessage('system', `✗ /remote rejected (${submit.status}): ${job.error || 'error'}`);
++          return true;
++        }
++        appendTerminalMessage('system', `⏳ governed job ${job.engine_id} → ${job.execution_substrate} (receipt ${job.receipt_id})`);
++        for (let i = 0; i < 40; i += 1) {
++          const st = await (await fetch(`/api/governed/run/${job.engine_id}`, { headers, cache: 'no-store' })).json();
++          if (st?.poll?.terminal) {
++            const proof = st.result?.execution_proof || {};
++            appendTerminalMessage('system', [
++              `${st.status === 'completed' ? '✓' : '✗'} ${st.status} · provider ${proof.provider || '?'} · exit ${proof.exit_code ?? '?'} · verified ${proof.verified ?? '?'}`,
++              `  checkpoint ${proof.checkpoint_id || '-'} · artifact ${String(proof.artifact_hash || '').slice(0, 12)}…`,
++            ].join('\n'));
++            return true;
++          }
++          await new Promise(r => setTimeout(r, 500));
++        }
++        appendTerminalMessage('system', `… job ${job.engine_id} still running; check its receipt ${job.receipt_id}`);
++      } catch (err) {
++        appendTerminalMessage('system', `✗ /remote failed: ${err instanceof Error ? err.message : String(err)}`);
++      }
++      return true;
++    }
++
+     case '/refresh':
+       await Promise.all([refreshStats(), refreshRuns(), refreshMemory(), refreshFiles()]);
+       loadModels();
+diff --git a/apps/web/server.ts b/apps/web/server.ts
+index 6512a754..e5b21119 100644
+--- a/apps/web/server.ts
++++ b/apps/web/server.ts
+@@ -1,3 +1,4 @@
++import { bridgeConfigFromEnv, submitGovernedRun, getGovernedRun } from './governed-bridge.ts';
+ import express, { type Request, type Response } from 'express';
+ import { createServer } from 'http';
+ import { randomUUID } from 'node:crypto';
+@@ -1559,6 +1560,11 @@ app.post('/api/sessions/:id/run', async (req: Request, res: Response) => {
+   res.status(202).json(session.submitGoal(goal, typeof req.body.model === 'string' ? req.body.model : undefined));
+ });
+ 
++// Governed remote execution (dashboard → backend → upcloud-ssh). See governed-bridge.ts.
++const governedBridge = bridgeConfigFromEnv();
++app.post('/api/governed/run', submitGovernedRun(governedBridge));
++app.get('/api/governed/run/:engineId', getGovernedRun(governedBridge));
++
+ app.post('/api/sessions/:id/stop', (req: Request, res: Response) => {
+   const session = sessions.get(req.params.id);
+   if (!session) return res.status(404).json({ error: 'Session not found' });
+diff --git a/apps/web/tests/governed-bridge.test.ts b/apps/web/tests/governed-bridge.test.ts
+new file mode 100644
+index 00000000..e0bd41ff
+--- /dev/null
++++ b/apps/web/tests/governed-bridge.test.ts
+@@ -0,0 +1,131 @@
++// Hermetic: exercises governed-bridge.ts against a mock backend. No network beyond loopback.
++import { test, before, after } from 'node:test';
++import assert from 'node:assert/strict';
++import http from 'node:http';
++import type { AddressInfo } from 'node:net';
++import express from 'express';
++import { submitGovernedRun, getGovernedRun, ALLOWED_REMOTE_COMMANDS, type BridgeConfig } from '../governed-bridge.ts';
++
++type Seen = { method: string; url: string; apiKey?: string; body: any };
++let seen: Seen[] = [];
++let backend: http.Server;
++let web: http.Server;
++let webBase: string;
++let cfg: BridgeConfig;
++let runStatus = 200;
++
++const H = { 'Content-Type': 'application/json', 'X-Kudbee-Client': 'dashboard' };
++
++before(async () => {
++  backend = http.createServer((req, res) => {
++    let raw = '';
++    req.on('data', (c) => (raw += c));
++    req.on('end', () => {
++      seen.push({ method: req.method!, url: req.url!, apiKey: req.headers['x-api-key'] as string, body: raw ? JSON.parse(raw) : null });
++      res.setHeader('Content-Type', 'application/json');
++      if (req.url === '/api/v1/run/admission-token') {
++        return res.end(JSON.stringify({ agent_id: 'web-dashboard-agent', governance_token: 'SECRET-TOKEN', capability: 'goal:execute' }));
++      }
++      if (req.url === '/api/v1/run') {
++        res.statusCode = runStatus;
++        return res.end(JSON.stringify(runStatus === 200 ? { engine_id: 'engine_abc123', session_id: 's1', summary: { receipt_id: 'rcpt1' } } : { detail: { error: 'governance_denied' } }));
++      }
++      if (req.url === '/api/v1/run/job/engine_abc123/status') return res.end(JSON.stringify({ status: 'completed', result: { execution_proof: { provider: 'upcloud-ssh' } } }));
++      res.statusCode = 404;
++      res.end('{}');
++    });
++  });
++  await new Promise<void>((r) => backend.listen(0, '127.0.0.1', r));
++  cfg = { backendUrl: `http://127.0.0.1:${(backend.address() as AddressInfo).port}`, apiKey: 'server-side-key' };
++  const app = express();
++  app.use(express.json());
++  app.post('/api/governed/run', submitGovernedRun(cfg));
++  app.get('/api/governed/run/:engineId', getGovernedRun(cfg));
++  web = http.createServer(app);
++  await new Promise<void>((r) => web.listen(0, '127.0.0.1', r));
++  webBase = `http://127.0.0.1:${(web.address() as AddressInfo).port}`;
++});
++
++after(() => {
++  backend.close();
++  web.close();
++});
++
++const post = (body: unknown, headers: Record<string, string> = H) =>
++  fetch(`${webBase}/api/governed/run`, { method: 'POST', headers, body: JSON.stringify(body) });
++
++test('submits allow-listed command through admission token then governed /api/v1/run with upcloud-ssh fixed', async () => {
++  seen = [];
++  const r = await post({ command: 'hostname' });
++  assert.equal(r.status, 202);
++  const body: any = await r.json();
++  assert.deepEqual(body, { engine_id: 'engine_abc123', receipt_id: 'rcpt1', session_id: 's1', execution_substrate: 'upcloud-ssh', command: 'hostname' });
++  assert.equal(JSON.stringify(body).includes('SECRET-TOKEN'), false, 'governance token must not reach the browser');
++  assert.deepEqual(seen.map((s) => s.url), ['/api/v1/run/admission-token', '/api/v1/run']);
++  assert.ok(seen.every((s) => s.apiKey === 'server-side-key'));
++  const run = seen[1].body;
++  assert.equal(run.execution_substrate, 'upcloud-ssh');
++  assert.equal(run.exec_command, 'hostname');
++  assert.equal(run.governance_token, 'SECRET-TOKEN');
++});
++
++test('client cannot choose substrate, agent, token or capability', async () => {
++  seen = [];
++  const r = await post({ command: 'uptime', execution_substrate: 'local', agent_id: 'evil', governance_token: 'x', capability: 'goal:execute:verified' });
++  assert.equal(r.status, 202);
++  const run = seen[1].body;
++  assert.equal(run.execution_substrate, 'upcloud-ssh');
++  assert.equal(run.agent_id, 'web-dashboard-agent');
++  assert.equal(run.governance_token, 'SECRET-TOKEN');
++  assert.equal(run.capability, undefined);
++});
++
++test('rejects commands outside the allow-list without contacting the backend', async () => {
++  for (const command of ['rm -rf /', 'hostname; id', 'hostname && whoami', '', 'cat /etc/shadow', ' HOSTNAME']) {
++    seen = [];
++    const r = await post({ command });
++    assert.equal(r.status, 400, `command ${JSON.stringify(command)}`);
++    assert.equal(seen.length, 0);
++  }
++  assert.ok(ALLOWED_REMOTE_COMMANDS.includes('hostname'));
++});
++
++test('rejects requests without the dashboard client header', async () => {
++  seen = [];
++  const r = await post({ command: 'hostname' }, { 'Content-Type': 'application/json' });
++  assert.equal(r.status, 403);
++  assert.equal(seen.length, 0);
++});
++
++test('surfaces backend governance denial as 403 without leaking the token', async () => {
++  runStatus = 403;
++  try {
++    const r = await post({ command: 'hostname' });
++    assert.equal(r.status, 403);
++    assert.equal((await r.text()).includes('SECRET-TOKEN'), false);
++  } finally {
++    runStatus = 200;
++  }
++});
++
++test('status proxy validates engine id and returns backend status', async () => {
++  const bad = await fetch(`${webBase}/api/governed/run/..%2Fadmin`, { headers: H });
++  assert.equal(bad.status, 400);
++  const ok = await fetch(`${webBase}/api/governed/run/engine_abc123`, { headers: H });
++  assert.equal(ok.status, 200);
++  assert.equal(((await ok.json()) as any).result.execution_proof.provider, 'upcloud-ssh');
++});
++
++test('unconfigured bridge (no API key) fails closed with 503', async () => {
++  const app = express();
++  app.use(express.json());
++  app.post('/x', submitGovernedRun({ backendUrl: cfg.backendUrl, apiKey: '' }));
++  const s = http.createServer(app);
++  await new Promise<void>((r) => s.listen(0, '127.0.0.1', r));
++  try {
++    const r = await fetch(`http://127.0.0.1:${(s.address() as AddressInfo).port}/x`, { method: 'POST', headers: H, body: JSON.stringify({ command: 'hostname' }) });
++    assert.equal(r.status, 503);
++  } finally {
++    s.close();
++  }
++});
+diff --git a/backend/api/v1/router.py b/backend/api/v1/router.py
+index aaeb530e..b24e9601 100644
+--- a/backend/api/v1/router.py
++++ b/backend/api/v1/router.py
+@@ -234,6 +234,14 @@ async def run_goal(
+     )
+ 
+ 
++@api_v1_router.post("/run/admission-token")
++async def issue_run_admission_token() -> dict[str, Any]:
++    """Short-lived governance token for the dashboard bridge (API-key authenticated; identity fixed server-side)."""
++    from backend.api.v1.run_governed import issue_web_admission_token
++
++    return issue_web_admission_token()
++
++
+ @api_v1_router.get("/run/receipt/{receipt_id}")
+ async def get_run_receipt(receipt_id: str, request: Request) -> Any:
+     """Redacted governed-run receipt (hermetic SQLite)."""
+diff --git a/backend/api/v1/run_governed.py b/backend/api/v1/run_governed.py
+index bd07c9b5..9ad2e9f1 100644
+--- a/backend/api/v1/run_governed.py
++++ b/backend/api/v1/run_governed.py
+@@ -127,6 +127,36 @@ def get_api_run_governance() -> ApiRunGovernance:
+     return _api_governance
+ 
+ 
++WEB_ADMISSION_TTL_SECONDS = 300.0
++WEB_ADMISSION_CAPABILITY = DEFAULT_RUN_CAPABILITY
++
++
++def web_admission_agent_id() -> str:
++    """Server-side identity for the dashboard bridge; never client-supplied."""
++    return (os.environ.get("THINKBOX_WEB_AGENT_ID") or "web-dashboard-agent").strip() or "web-dashboard-agent"
++
++
++def issue_web_admission_token() -> dict[str, Any]:
++    """Short-lived governance token for the fixed dashboard agent (capability ``goal:execute`` only).
++
++    The caller has already passed API-key authentication. The identity and
++    capability are fixed server-side, so a caller cannot choose either.
++    """
++    gov = get_api_run_governance()
++    agent_id = web_admission_agent_id()
++    if not any(i.get("agent_id") == agent_id for i in gov.identity_ledger.list()):
++        gov.identity_ledger.register(agent_id=agent_id, capabilities=[WEB_ADMISSION_CAPABILITY])
++    token = gov.token_service.issue(
++        TokenRequest(agent_id=agent_id, capabilities=[WEB_ADMISSION_CAPABILITY], ttl_seconds=WEB_ADMISSION_TTL_SECONDS)
++    )
++    return {
++        "agent_id": agent_id,
++        "capability": WEB_ADMISSION_CAPABILITY,
++        "governance_token": token.token_value,
++        "expires_in_seconds": WEB_ADMISSION_TTL_SECONDS,
++    }
++
++
+ def reset_api_run_governance_for_tests(
+     *,
+     signing_key: str = "hermetic-test-signing",
+diff --git a/docs/CONTINUITY.md b/docs/CONTINUITY.md
+index a205dd96..5e0db277 100644
+--- a/docs/CONTINUITY.md
++++ b/docs/CONTINUITY.md
+@@ -3431,3 +3431,21 @@ python3 experiments/verify_swarm_proof.py data/thinkboxmd/big_swarm_<timestamp>.
+ - **CI:** not run (GitHub billing issue). Nothing is claimed CI-green.
+ - **FOUR-STATE (`upcloud-ssh` substrate):** **CODE COMPLETE (`d481afbe`) / TEST VERIFIED / LIVE VERIFIED** (Think Job API on the real app object → real worker-02). **PRODUCTION READY: NO** (no deployed server, no out-of-process token issuance, `apps/web` not bridged, no founder review).
+ - **NEXT LARGER IMPROVEMENT:** design and build the `apps/web` → `backend.main` bridge. Step 1 is deciding how an out-of-process client, such as the `:3000` dashboard or a deployed uvicorn, obtains a governance token for `POST /api/v1/run`.
++
++### 2026-09-29 — SAVE POINT: dashboard (browser) → `apps/web` → governed backend → `upcloud-ssh` → worker-02 (LIVE VERIFIED per boundary)
++
++- **Starting point:** `main` `c5876ce9`. **Where the chain stopped:** `apps/web` had no path to `backend.main`, and governed admission tokens could only be minted in-process.
++- **Governance decision:** extend the existing `GovernanceTokenService`/`IdentityLedger` with `POST /api/v1/run/admission-token`. It is API-key authenticated and issues a 300s token for a fixed server-side identity (`web-dashboard-agent`) with `goal:execute` only; callers cannot choose agent, capability or TTL. Admission itself (`require_http_admission`) is unchanged. The browser never holds the API key or the token: the `apps/web` server (`governed-bridge.ts`) obtains the token and submits server-side.
++- **Bridge:** `POST /api/governed/run` / `GET /api/governed/run/:engineId`. `execution_substrate` is fixed to `upcloud-ssh`, the read-only command allow-list is exact-match, the `X-Kudbee-Client: dashboard` header is required, and the bridge fails closed (503) without `THINKBOX_API_KEY`. Dashboard `/remote CMD`. No second execution path.
++- **Tests:** f142 4/4, web bridge 7/7, web suite 140/140, python regression 263/263. CI not run (GitHub billing issue).
++- **LIVE, per boundary** (all local loopback; real worker-02):
++
++  | Boundary | Evidence |
++  |---|---|
++  | In-process app (earlier, #282) | `engine_b9da7810`, `engine_36e6e492` |
++  | Backend over HTTP (uvicorn :18000) + web over HTTP (:13000) | curl → web → `admission-token 200` → `/api/v1/run 200` → `engine_53b5b986` → `kudbee-hermes-worker-02`, exit 0, 1.20s, checkpoint `chk_09c134d0e733` |
++  | Browser (headless Chrome via CDP) | `/remote hostname` → `engine_4ffa5c8f` (`tb_rcpt_20260929174539_764eed02`) completed, exit 0, verified, checkpoint `chk_6b03112e8430`, 0 console errors |
++  | Real worker-02 | both artifacts `remote_host 209.50.51.174`, stdout `kudbee-hermes-worker-02` |
++
++- **FOUR-STATE:** bridge + admission-token: CODE COMPLETE (branch; merge SHA recorded in the PR) / TEST VERIFIED / LIVE VERIFIED (browser → web → backend over HTTP → worker-02). **PRODUCTION READY: NO**: the dashboard has no user authentication, there is a single shared API key, there is no deployed environment, and there has been no founder review.
++- **NEXT LARGER IMPROVEMENT:** dashboard user authentication in front of `/api/governed/run` (currently anything that can reach `:3000` on localhost can trigger the allow-listed read-only commands).
+diff --git a/tests/e2e/test_f142_web_admission_token.py b/tests/e2e/test_f142_web_admission_token.py
+new file mode 100644
+index 00000000..36b34de2
+--- /dev/null
++++ b/tests/e2e/test_f142_web_admission_token.py
+@@ -0,0 +1,106 @@
++"""Hermetic e2e: dashboard admission token (POST /api/v1/run/admission-token).
++
++The token is what lets the dashboard bridge pass governed admission without the
++browser ever holding a governance secret. Identity and capability are fixed
++server-side; the endpoint sits behind the existing API-key middleware.
++"""
++
++from __future__ import annotations
++
++import os
++import tempfile
++import unittest
++from pathlib import Path
++from unittest import mock
++
++from tests.e2e.api_run_hermetic import (
++    auth_headers,
++    drain_background_tasks,
++    hermetic_run_client,
++)
++from thinkbox.cloud_execution.provider import ProviderRunResult
++from thinkbox.governed_job_execution import SUBSTRATE_UPCLOUD_SSH
++
++
++class _FakeSSH:
++    def __init__(self, cfg):
++        self.cfg = cfg
++
++    def run(self, job, limits, workspace):
++        return ProviderRunResult(
++            success=True, exit_code=0, summary="kudbee-hermes-worker-02",
++            metadata={"stdout": "kudbee-hermes-worker-02", "stderr": "", "elapsed_s": 0.1},
++        )
++
++
++class TestWebAdmissionToken(unittest.TestCase):
++    def test_requires_api_key(self) -> None:
++        with hermetic_run_client() as (client, _):
++            self.assertIn(client.post("/api/v1/run/admission-token").status_code, (401, 403))
++            self.assertIn(
++                client.post("/api/v1/run/admission-token", headers={"X-API-Key": "wrong"}).status_code, (401, 403)
++            )
++
++    def test_identity_and_capability_are_server_fixed(self) -> None:
++        with hermetic_run_client() as (client, _):
++            r = client.post(
++                "/api/v1/run/admission-token",
++                headers=auth_headers(),
++                json={"agent_id": "attacker", "capabilities": ["goal:execute:verified"], "ttl_seconds": 999999},
++            )
++            self.assertEqual(r.status_code, 200)
++            body = r.json()
++            self.assertEqual(body["agent_id"], "web-dashboard-agent")
++            self.assertEqual(body["capability"], "goal:execute")
++            self.assertEqual(body["expires_in_seconds"], 300.0)
++            self.assertTrue(body["governance_token"])
++
++    def test_token_admits_upcloud_ssh_run_end_to_end(self) -> None:
++        tmp = tempfile.TemporaryDirectory()
++        self.addCleanup(tmp.cleanup)
++        key = Path(tmp.name) / "id_test"
++        key.write_text("x")
++        env = {"UPCLOUD_SERVER_IP": "203.0.113.10", "UPCLOUD_SSH_KEY_PATH": str(key)}
++        with mock.patch.dict(os.environ, env), mock.patch(
++            "thinkbox.upcloud_ssh_execution_adapter.SSHCloudExecutionProvider", side_effect=_FakeSSH
++        ), hermetic_run_client() as (client, _):
++            adm = client.post("/api/v1/run/admission-token", headers=auth_headers()).json()
++            r = client.post(
++                "/api/v1/run",
++                headers=auth_headers(),
++                json={
++                    "goal": "dashboard remote exec: hostname",
++                    "agent_id": adm["agent_id"],
++                    "governance_token": adm["governance_token"],
++                    "execution_substrate": SUBSTRATE_UPCLOUD_SSH,
++                    "exec_command": "hostname",
++                },
++            )
++            self.assertEqual(r.status_code, 200, r.text)
++            drain_background_tasks()
++            st = client.get(f"/api/v1/run/job/{r.json()['engine_id']}/status", headers=auth_headers()).json()
++            self.assertEqual(st["status"], "completed")
++            self.assertEqual(st["result"]["execution_proof"]["provider"], "upcloud-ssh")
++
++    def test_token_cannot_be_used_for_another_agent_or_verified_capability(self) -> None:
++        with hermetic_run_client() as (client, _):
++            adm = client.post("/api/v1/run/admission-token", headers=auth_headers()).json()
++            other = client.post(
++                "/api/v1/run",
++                headers=auth_headers(),
++                json={"goal": "x", "agent_id": "someone-else", "governance_token": adm["governance_token"]},
++            )
++            self.assertEqual(other.status_code, 403)
++            verified = client.post(
++                "/api/v1/run",
++                headers=auth_headers(),
++                json={
++                    "goal": "x", "agent_id": adm["agent_id"], "governance_token": adm["governance_token"],
++                    "capability": "goal:execute:verified",
++                },
++            )
++            self.assertEqual(verified.status_code, 403)
++
++
++if __name__ == "__main__":
++    unittest.main()

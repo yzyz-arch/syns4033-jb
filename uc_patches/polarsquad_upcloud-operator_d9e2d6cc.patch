@@ -1,0 +1,48 @@
+From d9e2d6cc4975ed5d7ead41abc9aaed962748e7a0 Mon Sep 17 00:00:00 2001
+From: Joseph Shriner <joseph.shriner@polarsquad.com>
+Date: Thu, 17 Sep 2026 17:29:39 +0300
+Subject: [PATCH] Fix ObjectStoragePolicy sample resource for the real API
+ (#42)
+
+The sample's policy document used an invented ARN namespace
+(arn:upcloud:objectstorage::bucket/*) that UpCloud rejects with
+400 Policy has invalid resource on every real-API e2e dispatch,
+failing the policy Ready wait and cascading to the user and
+access key samples. Use "*" instead, which UpCloud's own provider
+examples use for this endpoint, and document the accepted S3 ARN
+resource format in docs/resources.md.
+
+Closes #40
+
+Signed-off-by: ps-jshriner <joseph.shriner@polarsquad.com>
+---
+ config/samples/objectstorage_v1alpha1_objectstoragepolicy.yaml | 2 +-
+ docs/resources.md                                              | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/config/samples/objectstorage_v1alpha1_objectstoragepolicy.yaml b/config/samples/objectstorage_v1alpha1_objectstoragepolicy.yaml
+index d8bdf73..a9d4e4d 100644
+--- a/config/samples/objectstorage_v1alpha1_objectstoragepolicy.yaml
++++ b/config/samples/objectstorage_v1alpha1_objectstoragepolicy.yaml
+@@ -17,7 +17,7 @@ spec:
+         {
+           "Effect": "Allow",
+           "Action": ["s3:GetObject"],
+-          "Resource": ["arn:upcloud:objectstorage::bucket/*"]
++          "Resource": ["*"]
+         }
+       ]
+     }
+diff --git a/docs/resources.md b/docs/resources.md
+index 84341bd..315a048 100644
+--- a/docs/resources.md
++++ b/docs/resources.md
+@@ -17,7 +17,7 @@ the operator produces.
+ | NetworkPeering | Network peering to a peer network (by UUID, may be another account) | `status.uuid` | none | Adoption is by the `k8s-uid` label. `networkRef` (local Network CR) and `peerNetworkUUID` are immutable: changing either is a different peering, so delete and recreate. `name`, `configuredStatus` and `labels` are mutable. Ready is state `active`; `pending-peer`, `provisioning` and the conflict/missing-router states are transitional and requeued. |
+ | FloatingIP | Floating (unbound) IP address | `status.address` | none | The IP address is the identity. No adoption (the API's IP object has no labels): with an empty `status.address` the operator cannot tell which address belongs to the CR. `zone`, `family` and `access` are immutable; `ptrRecord` and `releasePolicy` are mutable. The address is allocated by UpCloud; `status.address` holds the allocated value. `ptrRecord` can be set but not cleared: the API's modify omits empty values, so an empty `spec.ptrRecord` is accepted as-is (not treated as drift) and the existing record stays. To clear a PTR record, delete the FloatingIP (which releases the address) and recreate it. Attaching the IP to a server is out of v0.1 scope (no server API in the operator). |
+ | ManagedObjectStorage | Managed Object Storage | `status.uuid` | none | `spec.region` is immutable and is a MOS region (`europe-1`, `europe-2`, `apac-1`, `us-1`), not a compute zone; `spec.configuredStatus` starts/stops the service. Deletion is refused (409) while any bucket exists; delete the buckets first or set `deletionPolicy: Orphan`. |
+-| ObjectStoragePolicy | Object storage policy document | `status.name` | none | Identity is `(serviceUUID, name)`. The policy document is immutable in v0.1 (the API only offers versioning); a change requires recreation. Deletion is refused (409) while the policy is attached to a user. |
++| ObjectStoragePolicy | Object storage policy document | `status.name` | none | Identity is `(serviceUUID, name)`. The policy document is immutable in v0.1 (the API only offers versioning); a change requires recreation. Deletion is refused (409) while the policy is attached to a user. A policy document's `Resource` values must be standard S3 ARNs (`arn:aws:s3:::bucket`, `arn:aws:s3:::bucket/*`) or `*`; an invented namespace such as `arn:upcloud:objectstorage::...` is rejected with 400 `Policy has invalid resource`. |
+ | ObjectStorageUser | Object storage IAM user | `status.username` | none | Identity is `(serviceUUID, username)`. `spec.policies` / `spec.policyRefs` attach policy documents. Deleting the user detaches its policies and deletes its access keys first. |
+ | ObjectStorageAccessKey | Object storage access key | `status.accessKeyID` | `<name>-s3` with keys `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_ENDPOINT_URL`, `AWS_REGION` | The S3 secret is only returned once, at create time, and is written to the Secret in the same call; if that write fails the key is deleted and recreated on the next pass. No adoption (no labels, unrecoverable secret). `spec.status` toggles Active/Inactive. |
+ | ObjectStorageBucket | Object storage bucket | `status.name` | none | Identity is `(serviceUUID, name)`; `name` is immutable. Deletion is refused (409) for a non-empty bucket (empty it first, or use `deletionPolicy: Orphan`); a successful delete is retried until the metrics show the bucket gone. |

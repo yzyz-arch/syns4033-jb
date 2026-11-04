@@ -1,0 +1,77 @@
+From 5550964827107c7d27ec301be44ec92bdbf90729 Mon Sep 17 00:00:00 2001
+From: Rolle Laukkarinen <roni@dude.fi>
+Date: Sat, 3 Oct 2026 19:51:30 +0300
+Subject: [PATCH] Add root password for the UpCloud web console
+
+---
+ CHANGELOG.md                  |  1 +
+ molecule/default/ci-vault.yml |  1 +
+ molecule/default/verify.yml   | 12 ++++++++++++
+ roles/common/tasks/main.yml   |  7 +++++++
+ 4 files changed, 21 insertions(+)
+
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index cf4f21a..02d2dc4 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -24,6 +24,7 @@
+ * Fix private network route winning over the public one
+ * Fix monit restarting web every few hours
+ * Fix preview card refetch stopping on upload timeouts
++* Add root password for the UpCloud web console
+ 
+ ### 1.2.0: 2026-09-20
+ 
+diff --git a/molecule/default/ci-vault.yml b/molecule/default/ci-vault.yml
+index 41575e3..7f081eb 100644
+--- a/molecule/default/ci-vault.yml
++++ b/molecule/default/ci-vault.yml
+@@ -56,6 +56,7 @@ vault_postgresql_pg_hba_block: |
+   host all all 127.0.0.1/32 scram-sha-256
+ vault_room_id: "ci-room-id"
+ vault_ssh_user_chat: "ci"
++vault_root_password_hash: "$6$cisalt$vdGBxKyz46k/Y6QcLjaG635mo75napOvFhVDqg30jrcirvnK9q.DdUJZwed0LkFTZQEAhdgbuPXW6CAStPjMC0"
+ vault_ssh_user_elastic: "ci"
+ vault_ssh_user_mastodon: "ci"
+ vault_ssh_user_postgresql: "ci"
+diff --git a/molecule/default/verify.yml b/molecule/default/verify.yml
+index 8c8171c..13f3c9b 100644
+--- a/molecule/default/verify.yml
++++ b/molecule/default/verify.yml
+@@ -68,6 +68,18 @@
+           - ssh_opt_check is not failed
+         fail_msg: "SSH option missing"
+ 
++    - name: Read the root shadow entry
++      ansible.builtin.command: getent shadow root
++      changed_when: false
++      register: root_shadow
++      no_log: true
++
++    - name: Assert root has a password
++      ansible.builtin.assert:
++        that:
++          - root_shadow.stdout.split(':')[1] is match('\$6\$')
++        fail_msg: "root has no password"
++
+ - name: Verify postgresql
+   hosts: postgresql
+   gather_facts: true
+diff --git a/roles/common/tasks/main.yml b/roles/common/tasks/main.yml
+index 7477512..bd9d4cc 100644
+--- a/roles/common/tasks/main.yml
++++ b/roles/common/tasks/main.yml
+@@ -33,6 +33,13 @@
+     - pubkeys-rolle.pub
+     - pubkeys-ikke.pub
+ 
++# Only for the UpCloud web console: SSH below refuses passwords and root.
++- name: Set the root password
++  ansible.builtin.user:
++    name: root
++    password: "{{ vault_root_password_hash }}"
++  no_log: true
++
+ - name: Fix SSH options
+   ansible.builtin.lineinfile:
+     path: /etc/ssh/sshd_config

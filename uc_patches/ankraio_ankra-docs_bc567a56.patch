@@ -1,0 +1,30 @@
+From bc567a566677be8f7d4b574780e94750aa93489a Mon Sep 17 00:00:00 2001
+From: Mark Shine <72512363+CodeStaple@users.noreply.github.com>
+Date: Sat, 22 Aug 2026 13:53:32 +0200
+Subject: [PATCH] docs(upcloud): API tokens page path depends on account type
+ (ankra-t3mtt.3) (#160)
+
+Workspace accounts find API tokens under Settings -> API tokens
+(hub.upcloud.com/settings/api-tokens); regular accounts under
+Account -> API tokens (hub.upcloud.com/account/api-tokens). The page
+only described the regular-account path, and the workspace URL is
+what the UpCloud x Ankra workshop guide now prints.
+
+Bead: ankra-t3mtt.3
+---
+ platform/credentials/upcloud.mdx | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/platform/credentials/upcloud.mdx b/platform/credentials/upcloud.mdx
+index a4aebdb9..3a02a8cd 100644
+--- a/platform/credentials/upcloud.mdx
++++ b/platform/credentials/upcloud.mdx
+@@ -33,7 +33,7 @@ For [UKS](/guides/uks-clusters), Ankra uses the managed Kubernetes API instead:
+ <Steps>
+   <Step title="Create an UpCloud API token">
+     1. Log in to the [UpCloud Control Panel](https://hub.upcloud.com)
+-    2. Go to **Account** → **API tokens** (for a scoped identity, first create a workspace member under **People** with **API connections** allowed, and create the token as that member)
++    2. Open the API tokens page. Where it lives depends on your account type: a workspace account has it under **Settings** → **API tokens** (`hub.upcloud.com/settings/api-tokens`), a regular account under **Account** → **API tokens** (`hub.upcloud.com/account/api-tokens`). For a scoped identity, first create a workspace member under **People** with **API connections** allowed, and create the token as that member
+     3. Create a token and copy it (prefixed with `ucat_`; shown once)
+ 
+     The token inherits the permissions of the account it belongs to - that account must be allowed to manage servers, networking, storage, and Kubernetes. A read-only or restricted member's token passes the save-time check but fails when Ankra provisions.

@@ -1,0 +1,561 @@
+From a92dd1d2c073566341f886caa0962bb633940a75 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Ram=C3=B3n=20Garc=C3=ADa=20Fern=C3=A1ndez?=
+ <ramon-garcia@users.noreply.github.com>
+Date: Mon, 8 Jun 2026 16:26:50 +0200
+Subject: [PATCH] feat(server): add attribute for retrieving one-time password
+ (#1013)
+
+Co-authored-by: Toni Kangas <toni.kangas@upcloud.com>
+---
+ CHANGELOG.md                                  |  8 ++
+ DEVELOPING.md                                 |  6 +-
+ GNUmakefile                                   |  2 +-
+ docs/resources/server.md                      |  6 +-
+ go.mod                                        |  2 +-
+ go.sum                                        |  4 +-
+ internal/service/server/server.go             | 66 ++++++++++++--
+ ...esource_upcloud_server_backup_rule_test.go |  4 +-
+ .../resource_upcloud_server_network_test.go   |  4 +-
+ .../server/resource_upcloud_server_test.go    | 86 ++++++++++++++++---
+ upcloud/server/testdata/server_otp.tf         | 33 +++++++
+ 11 files changed, 191 insertions(+), 30 deletions(-)
+ create mode 100644 upcloud/server/testdata/server_otp.tf
+
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 5e903a053..9dc63fd62 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -5,6 +5,14 @@ See updating [Changelog example here](https://keepachangelog.com/en/1.0.0/)
+ 
+ ## [Unreleased]
+ 
++### Added
++
++- upcloud_server: add `password` attribute to `login` block for retrieving system generated one-time password.
++
++### Changed
++
++- upcloud_server: change `login` block from set to list to avoid `password` attribute causing resource to be recreated. The maximum length for `login` block is one, so this is not a breaking change.
++
+ ## [5.38.0] - 2026-05-21
+ 
+ ### Added
+diff --git a/DEVELOPING.md b/DEVELOPING.md
+index fcaed3dd8..758a7e18e 100644
+--- a/DEVELOPING.md
++++ b/DEVELOPING.md
+@@ -91,17 +91,17 @@ make testacc
+ 
+ In order to run an individual acceptance test, the '-run' flag can be used
+ together with a regular expression.  The following example uses a regular
+-expression matching single test called 'TestUpcloudServer_basic'.
++expression matching single test called 'TestAccUpCloudServer_basic'.
+ 
+ ```sh
+-make testacc TESTARGS='-run=TestUpcloudServer_basic'
++make testacc TESTARGS='-run=TestAccUpCloudServer_basic'
+ ```
+ 
+ The following example uses a regular expression to execute a grouping of basic
+ acceptance tests.
+ 
+ ```sh
+-make testacc TESTARGS='-run=TestUpcloudServer_*'
++make testacc TESTARGS='-run=TestAccUpCloudServer_*'
+ ```
+ 
+ ### CI acceptance test matrix (pull requests)
+diff --git a/GNUmakefile b/GNUmakefile
+index d699167bb..4c59bf271 100644
+--- a/GNUmakefile
++++ b/GNUmakefile
+@@ -53,7 +53,7 @@ testacc-managedobjectstorage:
+ 	
+ testacc-server:
+ 	@echo "Running acceptance tests in ./upcloud/server only..."
+-	TF_ACC=1 go test ./upcloud/server $(TESTARGS) -v -parallel=4 -count=1 -timeout=150m
++	TF_ACC=1 go test ./upcloud/server $(TESTARGS) -v -parallel=16 -count=1 -timeout=150m
+ 
+ testacc-network:
+ 	@echo "Running acceptance tests in ./upcloud/network only..."
+diff --git a/docs/resources/server.md b/docs/resources/server.md
+index efc343489..1721b8c18 100644
+--- a/docs/resources/server.md
++++ b/docs/resources/server.md
+@@ -83,7 +83,7 @@ resource "upcloud_server" "example" {
+ 
+ ### Blocks
+ 
+-- `login` (Block Set) Configure access credentials to the server (see [below for nested schema](#nestedblock--login))
++- `login` (Block List) Configure access credentials to the server (see [below for nested schema](#nestedblock--login))
+ - `network_interface` (Block List) One or more blocks describing the network interfaces of the server.
+ 
+     In addition to list order, the configured network interfaces are matched to the server's actual network interfaces by `index` and `ip_address` fields. This is to avoid public and utility network interfaces being re-assigned when the server is updated. This might result to inaccurate diffs in the plan, when interfaces are re-ordered or when interface is removed from the middle of the list.
+@@ -111,6 +111,10 @@ Optional Attributes:
+ - `password_delivery` (String) The delivery method for the server's root password (one of `none`, `email` or `sms`)
+ - `user` (String) Username to be create to access the server
+ 
++Read-Only:
++
++- `password` (String, Sensitive) The generated one-time password for the server
++
+ 
+ <a id="nestedblock--network_interface"></a>
+ ### Nested Schema for `network_interface`
+diff --git a/go.mod b/go.mod
+index 2de229ea5..d724cb0c8 100644
+--- a/go.mod
++++ b/go.mod
+@@ -4,7 +4,7 @@ go 1.25.3
+ 
+ require (
+ 	github.com/UpCloudLtd/upcloud-go-api/credentials v0.1.1
+-	github.com/UpCloudLtd/upcloud-go-api/v8 v8.37.0
++	github.com/UpCloudLtd/upcloud-go-api/v8 v8.38.0
+ 	github.com/hashicorp/go-cty v1.5.0
+ 	github.com/hashicorp/go-retryablehttp v0.7.7
+ 	github.com/hashicorp/go-uuid v1.0.3
+diff --git a/go.sum b/go.sum
+index 6842341e4..b07722bfb 100644
+--- a/go.sum
++++ b/go.sum
+@@ -8,8 +8,8 @@ github.com/ProtonMail/go-crypto v1.1.6 h1:ZcV+Ropw6Qn0AX9brlQLAUXfqLBc7Bl+f/DmNx
+ github.com/ProtonMail/go-crypto v1.1.6/go.mod h1:rA3QumHc/FZ8pAHreoekgiAbzpNsfQAosU5td4SnOrE=
+ github.com/UpCloudLtd/upcloud-go-api/credentials v0.1.1 h1:eTfQsv58ufALOk9BZ7WbS/i7pMUD11RnYYpRPsz0LdI=
+ github.com/UpCloudLtd/upcloud-go-api/credentials v0.1.1/go.mod h1:7OtVs2UqtfvjkC1HfE+Oud0MnbMv7qUWnbEgxnTAqts=
+-github.com/UpCloudLtd/upcloud-go-api/v8 v8.37.0 h1:ptUIKABcsDmopPWCFlVu2iIgzOzlanjA8QYmTLN//RQ=
+-github.com/UpCloudLtd/upcloud-go-api/v8 v8.37.0/go.mod h1:sxG94uNhC31OQH+zK0RhZjVj+PdkhObsNAt5bvq2J8c=
++github.com/UpCloudLtd/upcloud-go-api/v8 v8.38.0 h1:iWgTz32bgXtX1ouFIA3JehBXOvUWnRJsH9CTaX5SzcY=
++github.com/UpCloudLtd/upcloud-go-api/v8 v8.38.0/go.mod h1:sxG94uNhC31OQH+zK0RhZjVj+PdkhObsNAt5bvq2J8c=
+ github.com/agext/levenshtein v1.2.3 h1:YB2fHEn0UJagG8T1rrWknE3ZQzWM06O8AMAatNn7lmo=
+ github.com/agext/levenshtein v1.2.3/go.mod h1:JEDfjyjHDjOF/1e4FlBE/PkbqA9OfWu2ki2W0IB5558=
+ github.com/apparentlymart/go-textseg/v12 v12.0.0/go.mod h1:S/4uRK2UtaQttw1GenVJEynmyUenKwP++x/+DdGV/Ec=
+diff --git a/internal/service/server/server.go b/internal/service/server/server.go
+index 1c022ec81..718ceb479 100644
+--- a/internal/service/server/server.go
++++ b/internal/service/server/server.go
+@@ -27,6 +27,7 @@ import (
+ 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
+ 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
+ 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
++	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listplanmodifier"
+ 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+ 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/setplanmodifier"
+ 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
+@@ -94,7 +95,7 @@ type serverModel struct {
+ 	Plan              types.String `tfsdk:"plan"`
+ 	StorageDevices    types.Set    `tfsdk:"storage_devices"`
+ 	Template          types.List   `tfsdk:"template"`
+-	Login             types.Set    `tfsdk:"login"`
++	Login             types.List   `tfsdk:"login"`
+ 	SimpleBackup      types.Set    `tfsdk:"simple_backup"`
+ 	BootOrder         types.String `tfsdk:"boot_order"`
+ 	HotResize         types.Bool   `tfsdk:"hot_resize"`
+@@ -152,6 +153,7 @@ type loginModel struct {
+ 	User             types.String `tfsdk:"user"`
+ 	Keys             types.List   `tfsdk:"keys"`
+ 	CreatePassword   types.Bool   `tfsdk:"create_password"`
++	Password         types.String `tfsdk:"password"`
+ 	PasswordDelivery types.String `tfsdk:"password_delivery"`
+ }
+ 
+@@ -526,13 +528,13 @@ func (r *serverResource) getSchema(version int64) schema.Schema {
+ 					},
+ 				},
+ 			},
+-			"login": schema.SetNestedBlock{
++			"login": schema.ListNestedBlock{
+ 				Description: "Configure access credentials to the server",
+-				PlanModifiers: []planmodifier.Set{
+-					setplanmodifier.RequiresReplace(),
++				PlanModifiers: []planmodifier.List{
++					listplanmodifier.RequiresReplace(),
+ 				},
+-				Validators: []validator.Set{
+-					setvalidator.SizeAtMost(1),
++				Validators: []validator.List{
++					listvalidator.SizeAtMost(1),
+ 				},
+ 				NestedObject: schema.NestedBlockObject{
+ 					Attributes: map[string]schema.Attribute{
+@@ -554,6 +556,12 @@ func (r *serverResource) getSchema(version int64) schema.Schema {
+ 								boolplanmodifier.UseStateForUnknown(),
+ 							},
+ 						},
++						"password": schema.StringAttribute{
++							Description: "The generated one-time password for the server",
++							Computed:    true,
++							Sensitive:   true,
++							// PlanModifiers handled at the resource level because UseStateForUnknown here does not seem to work nicely with sensitive or null values.
++						},
+ 						"password_delivery": schema.StringAttribute{
+ 							Description: "The delivery method for the server's root password (one of `none`, `email` or `sms`)",
+ 							Optional:    true,
+@@ -672,7 +680,7 @@ func (r *serverResource) UpgradeState(_ context.Context) map[int64]resource.Stat
+ 					if len(login) > 0 && login[0].User.ValueString() == "" {
+ 						login[0].User = types.StringNull()
+ 
+-						data.Login, _ = types.SetValueFrom(ctx, data.Login.ElementType(ctx), login)
++						data.Login, _ = types.ListValueFrom(ctx, data.Login.ElementType(ctx), login)
+ 					}
+ 				}
+ 
+@@ -796,6 +804,32 @@ func (r *serverResource) updateNetworkInterfacesPlan(ctx context.Context, server
+ 	resp.Diagnostics.Append(diags...)
+ }
+ 
++// Similar to attribute level UseStateForUnknown, but also copies null value from state and seems to work nicely with sensitive values.
++func (r *serverResource) updateOTPasswordPlan(ctx context.Context, state, plan *serverModel, resp *resource.ModifyPlanResponse) {
++	isCreate := state.ID.IsUnknown()
++
++	if plan.Login.IsNull() || isCreate {
++		return
++	}
++
++	var login []loginModel
++	resp.Diagnostics.Append(state.Login.ElementsAs(ctx, &login, false)...)
++	if len(login) == 0 {
++		return
++	}
++	stateLogin := login[0]
++
++	resp.Diagnostics.Append(plan.Login.ElementsAs(ctx, &login, false)...)
++	if len(login) == 0 {
++		return
++	}
++	login[0].Password = stateLogin.Password
++
++	var diags diag.Diagnostics
++	plan.Login, diags = types.ListValueFrom(ctx, plan.Login.ElementType(ctx), login)
++	resp.Diagnostics.Append(diags...)
++}
++
+ func (r *serverResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+ 	var plan *serverModel
+ 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+@@ -831,6 +865,7 @@ func (r *serverResource) ModifyPlan(ctx context.Context, req resource.ModifyPlan
+ 
+ 	r.updateTagsPlan(server, plan)
+ 	r.updateNetworkInterfacesPlan(ctx, server, state, plan, resp)
++	r.updateOTPasswordPlan(ctx, state, plan, resp)
+ 
+ 	// Host might change if server is migrated to different host, so update host here instead of using state for unknown.
+ 	var stateDevices, planDevices []storageDeviceModel
+@@ -1035,6 +1070,9 @@ func (r *serverResource) Create(ctx context.Context, req resource.CreateRequest,
+ 	if !data.Login.IsNull() {
+ 		var login []loginModel
+ 		resp.Diagnostics.Append(data.Login.ElementsAs(ctx, &login, false)...)
++		if resp.Diagnostics.HasError() {
++			return
++		}
+ 
+ 		loginOpts, deliveryMethod, diags := buildLoginOpts(ctx, login[0])
+ 		resp.Diagnostics.Append(diags...)
+@@ -1148,6 +1186,20 @@ func (r *serverResource) Create(ctx context.Context, req resource.CreateRequest,
+ 		resp.Diagnostics.Append(diags...)
+ 	}
+ 
++	if !data.Login.IsNull() {
++		var login []loginModel
++		resp.Diagnostics.Append(data.Login.ElementsAs(ctx, &login, false)...)
++		if len(login) > 0 {
++			if server.OneTimePassword != "" {
++				login[0].Password = types.StringValue(server.OneTimePassword)
++			} else {
++				login[0].Password = types.StringNull()
++			}
++		}
++		data.Login, diags = types.ListValueFrom(ctx, data.Login.ElementType(ctx), login)
++		resp.Diagnostics.Append(diags...)
++	}
++
+ 	if !data.Tags.IsNull() {
+ 		tags, diags := getTags(ctx, data.Tags)
+ 		resp.Diagnostics.Append(diags...)
+diff --git a/upcloud/server/resource_upcloud_server_backup_rule_test.go b/upcloud/server/resource_upcloud_server_backup_rule_test.go
+index 2848de49d..dcc5b7258 100644
+--- a/upcloud/server/resource_upcloud_server_backup_rule_test.go
++++ b/upcloud/server/resource_upcloud_server_backup_rule_test.go
+@@ -8,9 +8,9 @@ import (
+ 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+ )
+ 
+-// TestUpcloudServer_removeBackupRule tests the scenario where a backup_rule
++// TestAccUpCloudServer_removeBackupRule tests the scenario where a backup_rule
+ // is removed from a template after the server is created.
+-func TestUpcloudServer_removeBackupRule(t *testing.T) {
++func TestAccUpCloudServer_removeBackupRule(t *testing.T) {
+ 	s1 := utils.ReadTestDataFile(t, "testdata/server_backup_rule_s1.tf")
+ 	s2 := utils.ReadTestDataFile(t, "testdata/server_backup_rule_s2.tf")
+ 
+diff --git a/upcloud/server/resource_upcloud_server_network_test.go b/upcloud/server/resource_upcloud_server_network_test.go
+index b2e466ce9..e06798e93 100644
+--- a/upcloud/server/resource_upcloud_server_network_test.go
++++ b/upcloud/server/resource_upcloud_server_network_test.go
+@@ -9,7 +9,7 @@ import (
+ 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+ )
+ 
+-func TestAccUpcloudServerNetwork(t *testing.T) {
++func TestAccUpCloudServerNetwork(t *testing.T) {
+ 	testDataS1 := utils.ReadTestDataFile(t, "testdata/server_s1.tf")
+ 	testDataS2 := utils.ReadTestDataFile(t, "testdata/server_s2.tf")
+ 
+@@ -47,7 +47,7 @@ func TestAccUpcloudServerNetwork(t *testing.T) {
+ 	})
+ }
+ 
+-func TestAccUpcloudServerInterfaceMatching(t *testing.T) {
++func TestAccUpCloudServerInterfaceMatching(t *testing.T) {
+ 	testDataS1 := utils.ReadTestDataFile(t, "testdata/server_ifaces_s1.tf")
+ 	testDataS2 := utils.ReadTestDataFile(t, "testdata/server_ifaces_s2.tf")
+ 	testDataS3 := utils.ReadTestDataFile(t, "testdata/server_ifaces_s3.tf")
+diff --git a/upcloud/server/resource_upcloud_server_test.go b/upcloud/server/resource_upcloud_server_test.go
+index 3636d65d7..80636a91c 100644
+--- a/upcloud/server/resource_upcloud_server_test.go
++++ b/upcloud/server/resource_upcloud_server_test.go
+@@ -11,7 +11,9 @@ import (
+ 
+ 	"github.com/UpCloudLtd/terraform-provider-upcloud/internal/utils"
+ 	"github.com/UpCloudLtd/terraform-provider-upcloud/upcloud"
++	"github.com/hashicorp/terraform-plugin-testing/config"
+ 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
++	"github.com/hashicorp/terraform-plugin-testing/plancheck"
+ 	"github.com/hashicorp/terraform-plugin-testing/terraform"
+ )
+ 
+@@ -35,7 +37,7 @@ func configCustomPlan(cpu, mem int) string {
+ 		}`, cpu, mem, upcloud.DebianTemplateUUID)
+ }
+ 
+-func TestUpcloudServer_customPlan(t *testing.T) {
++func TestAccUpCloudServer_customPlan(t *testing.T) {
+ 	resource.ParallelTest(t, resource.TestCase{
+ 		PreCheck:                 func() { upcloud.TestAccPreCheck(t) },
+ 		ProtoV6ProviderFactories: upcloud.TestAccProviderFactories,
+@@ -60,7 +62,7 @@ func TestUpcloudServer_customPlan(t *testing.T) {
+ 	})
+ }
+ 
+-func TestUpcloudServer_basic(t *testing.T) {
++func TestAccUpCloudServer_basic(t *testing.T) {
+ 	config := fmt.Sprintf(`
+ 		resource "upcloud_server" "this" {
+ 			zone     = "fi-hel1"
+@@ -146,7 +148,7 @@ func configSimple(hostname, plan, zone string) string {
+ 	}`, hostname, plan, zone, upcloud.DebianTemplateUUID)
+ }
+ 
+-func TestUpcloudServer_plan(t *testing.T) {
++func TestAccUpCloudServer_plan(t *testing.T) {
+ 	resource.ParallelTest(t, resource.TestCase{
+ 		PreCheck:                 func() { upcloud.TestAccPreCheck(t) },
+ 		ProtoV6ProviderFactories: upcloud.TestAccProviderFactories,
+@@ -234,7 +236,7 @@ func configBackupRule(time, interval string, retention int) string {
+ 		}`, upcloud.DebianTemplateUUID, time, interval, retention)
+ }
+ 
+-func TestUpcloudServer_simpleBackup(t *testing.T) {
++func TestAccUpCloudServer_simpleBackup(t *testing.T) {
+ 	resource.ParallelTest(t, resource.TestCase{
+ 		PreCheck:                 func() { upcloud.TestAccPreCheck(t) },
+ 		ProtoV6ProviderFactories: upcloud.TestAccProviderFactories,
+@@ -291,7 +293,7 @@ func TestUpcloudServer_simpleBackup(t *testing.T) {
+ 	})
+ }
+ 
+-func TestUpcloudServer_simpleBackupWithStorage(t *testing.T) {
++func TestAccUpCloudServer_simpleBackupWithStorage(t *testing.T) {
+ 	resource.ParallelTest(t, resource.TestCase{
+ 		PreCheck:                 func() { upcloud.TestAccPreCheck(t) },
+ 		ProtoV6ProviderFactories: upcloud.TestAccProviderFactories,
+@@ -379,6 +381,11 @@ func TestUpcloudServer_simpleBackupWithStorage(t *testing.T) {
+ 						}
+ 					}
+ 				`,
++				ConfigPlanChecks: resource.ConfigPlanChecks{
++					PreApply: []plancheck.PlanCheck{
++						plancheck.ExpectResourceAction("upcloud_server.this", plancheck.ResourceActionUpdate),
++					},
++				},
+ 				Check: resource.ComposeAggregateTestCheckFunc(
+ 					resource.TestCheckResourceAttr("upcloud_storage.addon", "backup_rule.#", "0"),
+ 					resource.TestCheckTypeSetElemNestedAttrs("upcloud_server.this", "simple_backup.*", map[string]string{
+@@ -425,6 +432,11 @@ func TestUpcloudServer_simpleBackupWithStorage(t *testing.T) {
+ 						}
+ 					}
+ 				`,
++				ConfigPlanChecks: resource.ConfigPlanChecks{
++					PreApply: []plancheck.PlanCheck{
++						plancheck.ExpectResourceAction("upcloud_server.this", plancheck.ResourceActionUpdate),
++					},
++				},
+ 				Check: resource.ComposeAggregateTestCheckFunc(
+ 					resource.TestCheckResourceAttr("upcloud_storage.addon", "backup_rule.#", "0"),
+ 					resource.TestCheckTypeSetElemNestedAttrs("upcloud_server.this", "simple_backup.*", map[string]string{
+@@ -467,6 +479,11 @@ func TestUpcloudServer_simpleBackupWithStorage(t *testing.T) {
+ 						}
+ 					}
+ 				`,
++				ConfigPlanChecks: resource.ConfigPlanChecks{
++					PreApply: []plancheck.PlanCheck{
++						plancheck.ExpectResourceAction("upcloud_server.this", plancheck.ResourceActionUpdate),
++					},
++				},
+ 				Check: resource.ComposeAggregateTestCheckFunc(
+ 					resource.TestCheckResourceAttr("upcloud_storage.addon", "backup_rule.#", "0"),
+ 					resource.TestCheckResourceAttr("upcloud_server.this", "simple_backup.#", "0"),
+@@ -518,6 +535,11 @@ func TestUpcloudServer_simpleBackupWithStorage(t *testing.T) {
+ 						}
+ 					}
+ 				`,
++				ConfigPlanChecks: resource.ConfigPlanChecks{
++					PreApply: []plancheck.PlanCheck{
++						plancheck.ExpectResourceAction("upcloud_server.this", plancheck.ResourceActionUpdate),
++					},
++				},
+ 				Check: resource.ComposeAggregateTestCheckFunc(
+ 					resource.TestCheckResourceAttr("upcloud_server.this", "template.0.backup_rule.0.time", "2200"),
+ 					resource.TestCheckResourceAttr("upcloud_server.this", "template.0.backup_rule.0.interval", "daily"),
+@@ -556,7 +578,7 @@ func configTags(tags ...string) string {
+ 		}`, tagsStr, upcloud.DebianTemplateUUID)
+ }
+ 
+-func TestUpcloudServer_updateTags(t *testing.T) {
++func TestAccUpCloudServer_updateTags(t *testing.T) {
+ 	resource.ParallelTest(t, resource.TestCase{
+ 		PreCheck:                 func() { upcloud.TestAccPreCheck(t) },
+ 		ProtoV6ProviderFactories: upcloud.TestAccProviderFactories,
+@@ -621,7 +643,7 @@ func TestUpcloudServer_updateTags(t *testing.T) {
+ 	})
+ }
+ 
+-func TestUpcloudServer_networkInterface(t *testing.T) {
++func TestAccUpCloudServer_networkInterface(t *testing.T) {
+ 	var serverID string
+ 	// Generate once per test so all steps use the same base octet and network addresses are stable.
+ 	baseOctet := 10 + rand.IntN(230)
+@@ -903,7 +925,7 @@ func testAccServerNetworkInterfaceConfig(baseOctet int, nis ...networkInterface)
+ 	return builder.String()
+ }
+ 
+-func TestUpcloudServer_createPreChecks(t *testing.T) {
++func TestAccUpCloudServer_createPreChecks(t *testing.T) {
+ 	resource.ParallelTest(t, resource.TestCase{
+ 		PreCheck:                 func() { upcloud.TestAccPreCheck(t) },
+ 		ProtoV6ProviderFactories: upcloud.TestAccProviderFactories,
+@@ -1030,7 +1052,7 @@ func TestEndToEndServer_HotResize(t *testing.T) {
+ 	})
+ }
+ 
+-func TestUpcloudServer_hotResizeWithNetworkChange(t *testing.T) {
++func TestAccUpCloudServer_hotResizeWithNetworkChange(t *testing.T) {
+ 	// Skip if we're not running acceptance tests
+ 	if os.Getenv("TF_ACC") == "" {
+ 		t.Skip("Skipping hot resize with network change test as TF_ACC is not set")
+@@ -1136,7 +1158,7 @@ func TestUpcloudServer_hotResizeWithNetworkChange(t *testing.T) {
+ 	})
+ }
+ 
+-func TestUpcloudServer_metadataChange(t *testing.T) {
++func TestAccUpCloudServer_metadataChange(t *testing.T) {
+ 	testDataS1 := utils.ReadTestDataFile(t, "testdata/server_metadata_s1.tf")
+ 	testDataS2 := utils.ReadTestDataFile(t, "testdata/server_metadata_s2.tf")
+ 
+@@ -1154,6 +1176,11 @@ func TestUpcloudServer_metadataChange(t *testing.T) {
+ 			},
+ 			{
+ 				Config: testDataS2,
++				ConfigPlanChecks: resource.ConfigPlanChecks{
++					PreApply: []plancheck.PlanCheck{
++						plancheck.ExpectResourceAction(serverName, plancheck.ResourceActionUpdate),
++					},
++				},
+ 				Check: resource.ComposeAggregateTestCheckFunc(
+ 					resource.TestCheckResourceAttr(serverName, "metadata", "true"),
+ 				),
+@@ -1162,7 +1189,44 @@ func TestUpcloudServer_metadataChange(t *testing.T) {
+ 	})
+ }
+ 
+-func TestUpcloudServer_storageDetachAttach(t *testing.T) {
++func TestAccUpCloudServer_oneTimePassword(t *testing.T) {
++	testDataS1 := utils.ReadTestDataFile(t, "testdata/server_otp.tf")
++
++	serverName := "upcloud_server.this"
++
++	var otp string
++
++	resource.ParallelTest(t, resource.TestCase{
++		PreCheck:                 func() { upcloud.TestAccPreCheck(t) },
++		ProtoV6ProviderFactories: upcloud.TestAccProviderFactories,
++		Steps: []resource.TestStep{
++			{
++				Config: testDataS1,
++				Check: resource.ComposeAggregateTestCheckFunc(
++					resource.TestCheckResourceAttrSet(serverName, "login.0.password"),
++					upcloud.CheckStringDoesNotChange(serverName, "login.0.password", &otp),
++				),
++			},
++			{
++				Config: testDataS1,
++				ConfigVariables: map[string]config.Variable{
++					"step": config.StringVariable("modified-"),
++				},
++				ConfigPlanChecks: resource.ConfigPlanChecks{
++					PreApply: []plancheck.PlanCheck{
++						plancheck.ExpectResourceAction(serverName, plancheck.ResourceActionUpdate),
++					},
++				},
++				Check: resource.ComposeAggregateTestCheckFunc(
++					resource.TestCheckResourceAttrSet(serverName, "login.0.password"),
++					upcloud.CheckStringDoesNotChange(serverName, "login.0.password", &otp),
++				),
++			},
++		},
++	})
++}
++
++func TestAccUpCloudServer_storageDetachAttach(t *testing.T) {
+ 	// Step 1: shared storage attached to server_a
+ 	// Step 2: shared storage moved to server_b (detach from server_a, attach to server_b concurrently)
+ 	s1 := utils.ReadTestDataFile(t, "testdata/server_storage_detach_attach_s1.tf")
+diff --git a/upcloud/server/testdata/server_otp.tf b/upcloud/server/testdata/server_otp.tf
+new file mode 100644
+index 000000000..c2cf53e0b
+--- /dev/null
++++ b/upcloud/server/testdata/server_otp.tf
+@@ -0,0 +1,33 @@
++variable "prefix" {
++  default = "tf-acc-test-server-otp-"
++  type    = string
++}
++
++variable "zone" {
++  default = "pl-waw1"
++  type    = string
++}
++
++variable "step" {
++  default = ""
++  type    = string
++}
++
++resource "upcloud_server" "this" {
++  hostname = "${var.prefix}${var.step}vm"
++  zone     = var.zone
++  plan     = "1xCPU-1GB"
++
++  template {
++    storage = "AlmaLinux 8"
++  }
++
++  network_interface {
++    type = "public"
++  }
++
++  login {
++    create_password   = true
++    password_delivery = "none"
++  }
++}

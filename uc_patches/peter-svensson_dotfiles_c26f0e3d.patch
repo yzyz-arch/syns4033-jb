@@ -1,0 +1,161 @@
+From c26f0e3d51b5fe38791fac81dc884cc61c26a747 Mon Sep 17 00:00:00 2001
+From: Peter Svensson <peter@sparetimecoders.com>
+Date: Thu, 18 Jun 2026 11:17:57 +0200
+Subject: [PATCH] feat(intersolia): add Scaleway staging profile + scw helpers
+
+Scaleway config rendered from Proton Pass (.scw/config.yaml), SCW_PROFILE
+wired into .envrc and shown in the starship prompt; scw-profile/scw-clear
+fish helpers; staging-scaleway terraform env. Also switches the UpCloud
+creds from username/password to UPCLOUD_TOKEN.
+
+Claude-Session: https://claude.ai/code/session_01K2Qvx1Zu9fKuY3TSZYt3Q2
+---
+ dot_config/fish/functions/scw/scw-clear.fish  |  7 ++++
+ .../fish/functions/scw/scw-profile.fish       | 34 +++++++++++++++++++
+ dot_config/fish/themes/starship.toml          |  7 ++++
+ source/intersolia/dot_envrc.tmpl              | 11 ++++--
+ .../dot_scw/private_config.yaml.tmpl          | 16 +++++++++
+ .../staging-scaleway/dot_envrc.tmpl           |  6 ++++
+ 6 files changed, 79 insertions(+), 2 deletions(-)
+ create mode 100644 dot_config/fish/functions/scw/scw-clear.fish
+ create mode 100644 dot_config/fish/functions/scw/scw-profile.fish
+ create mode 100644 source/intersolia/dot_scw/private_config.yaml.tmpl
+ create mode 100644 source/intersolia/infrastructure/terraform/environments/staging-scaleway/dot_envrc.tmpl
+
+diff --git a/dot_config/fish/functions/scw/scw-clear.fish b/dot_config/fish/functions/scw/scw-clear.fish
+new file mode 100644
+index 0000000..5332f04
+--- /dev/null
++++ b/dot_config/fish/functions/scw/scw-clear.fish
+@@ -0,0 +1,7 @@
++function scw-clear --description 'Clear the per-shell Scaleway profile override (revert to .envrc default)'
++    if not set -q SCW_PROFILE
++        echo "SCW_PROFILE is not set"
++        return 1
++    end
++    set --erase SCW_PROFILE
++end
+diff --git a/dot_config/fish/functions/scw/scw-profile.fish b/dot_config/fish/functions/scw/scw-profile.fish
+new file mode 100644
+index 0000000..0155144
+--- /dev/null
++++ b/dot_config/fish/functions/scw/scw-profile.fish
+@@ -0,0 +1,34 @@
++function scw-profile --description 'Switch the active Scaleway profile (per-root SCW_CONFIG_PATH)'
++    if test -z "$argv[1]"
++        echo "Usage: scw-profile <profile>"
++        echo "Active: "(set -q SCW_PROFILE; and echo $SCW_PROFILE; or echo '(none)')
++        echo "Available:"
++        __scw_profile_list | sed 's/^/  /'
++        return 1
++    end
++
++    if not contains -- $argv[1] (__scw_profile_list)
++        echo "Unknown profile '$argv[1]' in "(__scw_config_path)
++        echo "Available: "(__scw_profile_list | string join ', ')
++        return 1
++    end
++
++    set -gx SCW_PROFILE $argv[1]
++end
++
++function __scw_config_path --description 'Resolve the active scw config file'
++    if set -q SCW_CONFIG_PATH; and test -r "$SCW_CONFIG_PATH"
++        echo $SCW_CONFIG_PATH
++    else
++        echo $HOME/.config/scw/config.yaml
++    end
++end
++
++function __scw_profile_list --description 'List profiles in the active scw config'
++    set -l cfg (__scw_config_path)
++    test -r "$cfg"; or return 0
++    scw -c "$cfg" config profile list -o json 2>/dev/null \
++        | string match -r '"Name"\s*:\s*"([^"]+)"' --groups-only
++end
++
++complete -f -c scw-profile -a '(__scw_profile_list)'
+diff --git a/dot_config/fish/themes/starship.toml b/dot_config/fish/themes/starship.toml
+index 22655de..3c8a70e 100644
+--- a/dot_config/fish/themes/starship.toml
++++ b/dot_config/fish/themes/starship.toml
+@@ -22,6 +22,7 @@ $line_break\
+ $character"""
+ 
+ right_format="""$aws\
++${env_var.SCW_PROFILE}\
+ $kubernetes\
+ """
+ 
+@@ -47,6 +48,12 @@ style = 'yellow'
+ disabled = false
+ format = '[$symbol($profile )]($style)'
+ 
++[env_var.SCW_PROFILE]
++variable = 'SCW_PROFILE'
++symbol = '🪐 '
++style = 'purple'
++format = '[$symbol$env_value ]($style)'
++
+ [kubernetes]
+ symbol = ' '
+ disabled = false
+diff --git a/source/intersolia/dot_envrc.tmpl b/source/intersolia/dot_envrc.tmpl
+index 8cb76e1..2f8a87e 100644
+--- a/source/intersolia/dot_envrc.tmpl
++++ b/source/intersolia/dot_envrc.tmpl
+@@ -24,11 +24,18 @@ export TF_CMD=terraform
+ export CLAUDE_GRAFANA_TOKEN={{ protonPass "pass://Intersolia/auths/ClaudeGrafanaToken" | trim }}
+ 
+ # Upcloud token
+-export UPCLOUD_USERNAME=terraform-dev
+-export UPCLOUD_PASSWORD={{ protonPass "pass://Intersolia/auths/UpCloudToken" | trim }}
++export UPCLOUD_TOKEN={{ protonPass "pass://Intersolia/auths/UpCloudToken" | trim }}
+ 
+ # Turbo remote repo
+ export TURBO_TOKEN=${GITHUB_TOKEN}
+ export TURBO_API=https://turbo-cache.platform.intersolia.io
+ export TURBO_TEAM=intersolia
+ export TURBO_TEAMID=team_intersolia
++
++# Scaleway — profiles in .scw/config.yaml (rendered from Proton Pass by chezmoi).
++# No SCW_ACCESS_KEY/SECRET_KEY here: env vars override the profile in scw's
++# precedence, which would pin one key and ignore SCW_PROFILE.
++export SCW_CONFIG_PATH=${PWD}/.scw/config.yaml
++export SCW_PROFILE=staging
++
++#KUBECONFIG_KEY=142c1281-6019-498d-9a1f-145106181bbe
+diff --git a/source/intersolia/dot_scw/private_config.yaml.tmpl b/source/intersolia/dot_scw/private_config.yaml.tmpl
+new file mode 100644
+index 0000000..12065b8
+--- /dev/null
++++ b/source/intersolia/dot_scw/private_config.yaml.tmpl
+@@ -0,0 +1,16 @@
++{{- /* Scaleway per-root profiles for intersolia.
++       Secrets pulled from Proton Pass at `chezmoi apply` time.
++       Rendered file is mode 0600 (private_ prefix). Do NOT edit the rendered
++       ~/source/intersolia/.scw/config.yaml directly — edit this template.
++       Switch profile per shell with `scw-profile <name>`; rotate by updating
++       Proton Pass and re-running `chezmoi apply`.
++       One Scaleway account => one organization id, shared across projects. */ -}}
++{{- $org := "94dd90e5-5110-46df-a475-16333418e670" -}}
++profiles:
++  staging:
++    access_key: {{ protonPass "pass://Intersolia/scw-staging/access_key" | trim }}
++    secret_key: {{ protonPass "pass://Intersolia/scw-staging/secret_key" | trim }}
++    default_project_id: {{ protonPass "pass://Intersolia/scw-staging/project_id" | trim }}
++    default_organization_id: {{ $org }}
++    default_region: fr-par
++    default_zone: fr-par-1
+diff --git a/source/intersolia/infrastructure/terraform/environments/staging-scaleway/dot_envrc.tmpl b/source/intersolia/infrastructure/terraform/environments/staging-scaleway/dot_envrc.tmpl
+new file mode 100644
+index 0000000..2a599d1
+--- /dev/null
++++ b/source/intersolia/infrastructure/terraform/environments/staging-scaleway/dot_envrc.tmpl
+@@ -0,0 +1,6 @@
++source_up .envrc
++
++# Scaleway staging
++export SCW_ACCESS_KEY=SCWMEYC3XV49TWA9C8R6
++export SCW_SECRET_KEY=728fa68a-1f99-421a-9670-6a93f0dd9b65
++export SCW_DEFAULT_ORGANIZATION_ID=24d5f96d-442b-49a8-b9ef-b6f029a7220f

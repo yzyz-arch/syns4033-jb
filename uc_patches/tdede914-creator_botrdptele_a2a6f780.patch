@@ -1,0 +1,1610 @@
+From a2a6f780c71887c58c8438b9e0c39c62d52f12a0 Mon Sep 17 00:00:00 2001
+From: Kiro Agent <244629292+kiro-agent@users.noreply.github.com>
+Date: Wed, 16 Sep 2026 20:10:21 +0000
+Subject: [PATCH] feat(web): UpCloud-aware + Order VPS/Cloud9/Fastpanel &
+ Install Cloud9/Fastpanel
+
+- RDP provisioning is now UpCloud-aware: RDP port via rdpPortForToken (UpCloud
+  8443, else 4443), correct base image (upcloud/ubuntu22.04), UpCloud SSH-key
+  auth passed to installer; manual RDP install lets user pick provider for port.
+- New services (bot-agnostic, reuse handlers' logic):
+  * vpsService: Order VPS (create only, deliver root creds; UpCloud root-pass provision)
+  * cloud9Service: Order Cloud9 (AWS-only) + Install Cloud9 on user VPS
+  * fastpanelService: Order Fastpanel (all providers) + Install Fastpanel on user VPS
+- checkoutService generalised into a registry (kind -> prepare()), unified
+  saldo-vs-QRIS payment + refund/stock-release for every service.
+- server: single POST /api/order {kind,params} + per-service catalog endpoints.
+- frontend: Order sub-tabs (RDP/VPS/Cloud9/Fastpanel) + Install sub-tabs
+  (RDP/Cloud9/Fastpanel); job cards show URL for Cloud9/Fastpanel; only digital
+  product shop is excluded, per request.
+---
+ web/public/app.html              | 147 ++++++++---
+ web/public/css/styles.css        |   2 +
+ web/public/js/app.js             | 402 +++++++++++++------------------
+ web/server.js                    |  27 ++-
+ web/services/checkoutService.js  | 150 ++++++------
+ web/services/cloud9Service.js    | 126 ++++++++++
+ web/services/fastpanelService.js | 134 +++++++++++
+ web/services/rdpService.js       |  72 ++++--
+ web/services/vpsService.js       | 110 +++++++++
+ 9 files changed, 795 insertions(+), 375 deletions(-)
+ create mode 100644 web/services/cloud9Service.js
+ create mode 100644 web/services/fastpanelService.js
+ create mode 100644 web/services/vpsService.js
+
+diff --git a/web/public/app.html b/web/public/app.html
+index 38b61ae..0e6b3ea 100644
+--- a/web/public/app.html
++++ b/web/public/app.html
+@@ -22,16 +22,16 @@
+   <div class="container">
+     <div class="tabs">
+       <button class="tab active" data-tab="dashboard">🏠 Dashboard</button>
+-      <button class="tab" data-tab="order">🖥️ Order RDP</button>
+-      <button class="tab" data-tab="install">🔑 Install RDP</button>
++      <button class="tab" data-tab="order">🛒 Order</button>
++      <button class="tab" data-tab="install">🔧 Jasa Install</button>
+       <button class="tab" data-tab="deposit">💳 Deposit</button>
+     </div>
+ 
+     <!-- Dashboard -->
+     <section id="tab-dashboard" class="tabpane">
+       <div class="notice info hidden" id="guest-note" style="margin-bottom:16px">
+-        👋 Kamu memakai mode <b>Tamu</b>. Order & Install RDP tetap bisa — pembayaran lewat <b>QRIS</b>.
+-        <b>Masuk</b> untuk bayar pakai saldo & melihat daftar RDP kamu.
++        👋 Kamu memakai mode <b>Tamu</b>. Semua order & install tetap bisa — pembayaran lewat <b>QRIS</b>.
++        <b>Masuk</b> untuk bayar pakai saldo & melihat daftar layanan kamu.
+       </div>
+       <div class="grid grid-3" style="margin-bottom:18px" id="stats-grid">
+         <div class="card"><div class="sub">Saldo Kamu</div><div class="stat" id="d-balance">…</div></div>
+@@ -44,7 +44,7 @@ <h3>⚙️ Proses Berjalan</h3>
+         <div id="active-jobs"></div>
+       </div>
+       <div class="card" style="margin-bottom:18px">
+-        <h3>RDP Saya</h3><div class="sub">Daftar RDP yang kamu miliki</div>
++        <h3>Layanan Saya</h3><div class="sub">RDP/VPS yang kamu miliki</div>
+         <div id="my-rdp"><span class="muted">Memuat…</span></div>
+       </div>
+       <div class="card">
+@@ -53,56 +53,125 @@ <h3>Riwayat Transaksi</h3><div class="sub">20 transaksi terakhir</div>
+       </div>
+     </section>
+ 
+-    <!-- Order RDP -->
++    <!-- ORDER -->
+     <section id="tab-order" class="tabpane hidden">
+-      <div class="card">
++      <div class="tabs" style="padding-top:0">
++        <button class="subtab active" data-sub="order" data-name="rdp">🖥️ RDP</button>
++        <button class="subtab" data-sub="order" data-name="vps">🧊 VPS</button>
++        <button class="subtab" data-sub="order" data-name="cloud9">☁️ Cloud9</button>
++        <button class="subtab" data-sub="order" data-name="fastpanel">🎛️ Fastpanel</button>
++      </div>
++
++      <!-- Order RDP -->
++      <div class="card subpane" id="order-rdp">
+         <h3>Order RDP (Auto Create + Auto Install)</h3>
+         <div class="sub">Pilih paket, durasi, region, dan Windows. VPS dibuat & RDP diinstall otomatis.</div>
+-        <div id="order-step-pkg">
+-          <label>1. Pilih Paket</label>
+-          <div class="pkg-grid" id="pkg-grid"><span class="muted">Memuat paket…</span></div>
+-        </div>
+-        <div id="order-step-detail" class="hidden">
++        <label>1. Pilih Paket</label>
++        <div class="pkg-grid" id="rdp-pkg-grid"><span class="muted">Memuat paket…</span></div>
++        <div id="rdp-detail" class="hidden">
+           <div class="grid grid-2">
+-            <div><label>2. Durasi</label><select id="o-duration"></select></div>
+-            <div><label>3. Region</label><select id="o-region"><option>Pilih paket dulu…</option></select></div>
++            <div><label>2. Durasi</label><select id="rdp-duration"></select></div>
++            <div><label>3. Region</label><select id="rdp-region"></select></div>
+           </div>
+           <div class="grid grid-2">
+-            <div><label>4. Windows</label><select id="o-os"></select></div>
+-            <div><label>5. Password RDP</label>
+-              <select id="o-passmode"><option value="auto">Auto (acak, direkomendasikan)</option><option value="custom">Custom</option></select>
+-            </div>
++            <div><label>4. Windows</label><select id="rdp-os"></select></div>
++            <div><label>5. Password RDP</label><select id="rdp-passmode"><option value="auto">Auto (acak)</option><option value="custom">Custom</option></select></div>
+           </div>
+-          <div id="o-custompass-wrap" class="hidden"><label>Password Custom</label><input id="o-custompass" placeholder="min 8, huruf+angka" /></div>
+-          <div class="notice info" id="o-price"></div>
+-          <div class="row-flex">
+-            <button class="btn btn-primary" id="o-submit">🚀 Buat & Install RDP</button>
+-            <button class="btn btn-ghost" id="o-reset">Ganti Paket</button>
++          <div id="rdp-custompass-wrap" class="hidden"><label>Password Custom</label><input id="rdp-custompass" placeholder="min 8, huruf+angka" /></div>
++          <div class="notice info" id="rdp-price"></div>
++          <div class="row-flex"><button class="btn btn-primary" id="rdp-submit">🚀 Buat & Install RDP</button><button class="btn btn-ghost" id="rdp-reset">Ganti Paket</button></div>
++        </div>
++        <div id="rdp-msg"></div>
++      </div>
++
++      <!-- Order VPS -->
++      <div class="card subpane hidden" id="order-vps">
++        <h3>Order VPS (Auto Deploy)</h3>
++        <div class="sub">VPS Linux siap pakai — root + password dikirim setelah aktif.</div>
++        <label>1. Pilih Paket</label>
++        <div class="pkg-grid" id="vps-pkg-grid"><span class="muted">Memuat paket…</span></div>
++        <div id="vps-detail" class="hidden">
++          <div class="grid grid-2">
++            <div><label>2. Durasi</label><select id="vps-duration"></select></div>
++            <div><label>3. Region</label><select id="vps-region"></select></div>
+           </div>
++          <div><label>4. OS</label><select id="vps-os"></select></div>
++          <div class="notice info" id="vps-price"></div>
++          <div class="row-flex"><button class="btn btn-primary" id="vps-submit">🚀 Buat VPS</button><button class="btn btn-ghost" id="vps-reset">Ganti Paket</button></div>
+         </div>
+-        <div id="order-progress" class="hidden"></div>
+-        <div id="order-msg"></div>
++        <div id="vps-msg"></div>
++      </div>
++
++      <!-- Order Cloud9 -->
++      <div class="card subpane hidden" id="order-cloud9">
++        <h3>Order Cloud9 IDE (Auto Create + Install)</h3>
++        <div class="sub">VPS dibuat & Cloud9 diinstall otomatis. Akses via browser (port 8000/8880).</div>
++        <div id="cloud9-products"><span class="muted">Memuat produk…</span></div>
++        <div id="cloud9-msg"></div>
++      </div>
++
++      <!-- Order Fastpanel -->
++      <div class="card subpane hidden" id="order-fastpanel">
++        <h3>Order Fastpanel (Auto Create + Install)</h3>
++        <div class="sub">VPS dibuat & Fastpanel diinstall otomatis. Panel di port 8888 (HTTPS).</div>
++        <div id="fastpanel-products"><span class="muted">Memuat produk…</span></div>
++        <div id="fastpanel-msg"></div>
+       </div>
+     </section>
+ 
+-    <!-- Install RDP -->
++    <!-- INSTALL -->
+     <section id="tab-install" class="tabpane hidden">
+-      <div class="card">
+-        <h3>Install RDP di VPS Sendiri</h3>
+-        <div class="sub">Punya VPS (fresh Ubuntu)? Masukkan kredensialnya, kami install RDP Windows-nya. Biaya install dipotong dari saldo.</div>
++      <div class="tabs" style="padding-top:0">
++        <button class="subtab active" data-sub="install" data-name="rdp">🖥️ RDP</button>
++        <button class="subtab" data-sub="install" data-name="cloud9">☁️ Cloud9</button>
++        <button class="subtab" data-sub="install" data-name="fastpanel">🎛️ Fastpanel</button>
++      </div>
++
++      <!-- Install RDP -->
++      <div class="card subpane" id="install-rdp">
++        <h3>Jasa Install RDP di VPS Sendiri</h3>
++        <div class="sub">Punya VPS (fresh Ubuntu)? Kami install RDP Windows-nya. Bayar via saldo/QRIS.</div>
+         <div class="grid grid-2">
+-          <div><label>IP VPS</label><input id="i-ip" placeholder="mis. 103.12.34.56" /></div>
+-          <div><label>SSH User</label><input id="i-user" value="root" /></div>
++          <div><label>IP VPS</label><input id="irdp-ip" placeholder="mis. 103.12.34.56" /></div>
++          <div><label>SSH User</label><input id="irdp-user" value="root" /></div>
+         </div>
+-        <label>Password SSH VPS</label><input id="i-pass" type="password" placeholder="password root VPS" />
++        <label>Password SSH VPS</label><input id="irdp-pass" type="password" placeholder="password root VPS" />
++        <div class="grid grid-2">
++          <div><label>Provider VPS (untuk port RDP)</label><select id="irdp-provider"><option value="digitalocean">DigitalOcean / Linode / AWS (port 4443)</option><option value="upcloud">UpCloud (port 8443)</option></select></div>
++          <div><label>Windows</label><select id="irdp-os"></select></div>
++        </div>
++        <label>Password RDP (opsional)</label><input id="irdp-rdppass" placeholder="kosongkan untuk auto" />
++        <div class="notice info" id="irdp-info"></div>
++        <button class="btn btn-primary" id="irdp-submit">🔧 Install RDP</button>
++        <div id="irdp-msg"></div>
++      </div>
++
++      <!-- Install Cloud9 -->
++      <div class="card subpane hidden" id="install-cloud9">
++        <h3>Jasa Install Cloud9 di VPS Sendiri</h3>
++        <div class="sub">Cloud9 IDE diinstall di VPS milikmu (port 8000).</div>
++        <div class="grid grid-2">
++          <div><label>IP VPS</label><input id="ic9-ip" placeholder="mis. 103.12.34.56" /></div>
++          <div><label>SSH User</label><input id="ic9-user" value="root" /></div>
++        </div>
++        <label>Password SSH VPS</label><input id="ic9-pass" type="password" placeholder="password root VPS" />
++        <div class="notice info" id="ic9-info"></div>
++        <button class="btn btn-primary" id="ic9-submit">🔧 Install Cloud9</button>
++        <div id="ic9-msg"></div>
++      </div>
++
++      <!-- Install Fastpanel -->
++      <div class="card subpane hidden" id="install-fastpanel">
++        <h3>Jasa Install Fastpanel di VPS Sendiri</h3>
++        <div class="sub">Fastpanel diinstall di VPS milikmu (port 8888 HTTPS).</div>
+         <div class="grid grid-2">
+-          <div><label>Windows</label><select id="i-os"></select></div>
+-          <div><label>Password RDP (opsional)</label><input id="i-rdppass" placeholder="kosongkan untuk auto" /></div>
++          <div><label>IP VPS</label><input id="ifp-ip" placeholder="mis. 103.12.34.56" /></div>
++          <div><label>SSH User</label><input id="ifp-user" value="root" /></div>
+         </div>
+-        <div class="notice info" id="i-info"></div>
+-        <button class="btn btn-primary" id="i-submit">🔧 Install RDP Sekarang</button>
+-        <div id="install-progress" class="hidden"></div>
+-        <div id="install-msg"></div>
++        <label>Password SSH VPS</label><input id="ifp-pass" type="password" placeholder="password root VPS" />
++        <div class="notice info" id="ifp-info"></div>
++        <button class="btn btn-primary" id="ifp-submit">🔧 Install Fastpanel</button>
++        <div id="ifp-msg"></div>
+       </div>
+     </section>
+ 
+@@ -130,7 +199,7 @@ <h3>Scan QRIS</h3><div class="sub" id="dep-qr-sub">QR akan muncul di sini setela
+     </section>
+   </div>
+ 
+-  <!-- Modal pembayaran QRIS (order/install saat bayar via QRIS) -->
++  <!-- Modal pembayaran QRIS -->
+   <div id="qr-modal" class="modal hidden">
+     <div class="modal-box">
+       <h3>Bayar via QRIS</h3>
+diff --git a/web/public/css/styles.css b/web/public/css/styles.css
+index a231679..85a6593 100644
+--- a/web/public/css/styles.css
++++ b/web/public/css/styles.css
+@@ -54,6 +54,8 @@ footer{border-top:1px solid var(--card-brd);padding:26px 0;color:var(--muted);fo
+ .tabs{display:flex;gap:8px;padding:22px 0 8px;flex-wrap:wrap}
+ .tab{background:transparent;border:1px solid var(--card-brd);color:var(--muted);padding:10px 18px;border-radius:11px;cursor:pointer;font-weight:600;font-size:14px;font-family:inherit}
+ .tab.active{background:var(--card);color:var(--txt);border-color:var(--accent)}
++.subtab{background:transparent;border:1px solid var(--card-brd);color:var(--muted);padding:8px 14px;border-radius:10px;cursor:pointer;font-weight:600;font-size:13px;font-family:inherit}
++.subtab.active{background:var(--card);color:var(--txt);border-color:var(--accent)}
+ .grid{display:grid;gap:18px}
+ .grid-2{grid-template-columns:1fr 1fr}
+ .grid-3{grid-template-columns:repeat(3,1fr)}
+diff --git a/web/public/js/app.js b/web/public/js/app.js
+index 302dfe0..7f2257b 100644
+--- a/web/public/js/app.js
++++ b/web/public/js/app.js
+@@ -1,9 +1,9 @@
+-// ===== KOBONG CLOUD SERVER — dashboard SPA =====
++// ===== KOBONG CLOUD SERVER — dashboard SPA (multi-layanan) =====
+ const $ = (s, r = document) => r.querySelector(s);
+ const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
+ const fmtRp = (n) => (typeof n === 'string' ? n : 'Rp ' + Number(n || 0).toLocaleString('id-ID'));
++const FINAL = ['ready', 'failed', 'installing_timeout'];
+ 
+-// Login OPSIONAL: api() tidak me-redirect saat 401 (tamu diperbolehkan).
+ async function api(path, opts = {}) {
+   const r = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...opts });
+   let json = {};
+@@ -11,97 +11,54 @@ async function api(path, opts = {}) {
+   if (json && typeof json === 'object') json.__status = r.status;
+   return json;
+ }
+-function notice(el, type, msg) { el.innerHTML = msg ? `<div class="notice ${type}">${msg}</div>` : ''; }
+-function copyBtn(text) { return `<span class="copy" onclick="navigator.clipboard.writeText('${String(text).replace(/'/g, "\\'")}')">salin</span>`; }
+-const FINAL = ['ready', 'failed', 'installing_timeout'];
+-
+-let ME = null; // null = tamu (belum login)
++function notice(el, type, msg) { if (el) el.innerHTML = msg ? `<div class="notice ${type}">${msg}</div>` : ''; }
++function copyBtn(t) { return `<span class="copy" onclick="navigator.clipboard.writeText('${String(t).replace(/'/g, "\\'")}')">salin</span>`; }
+ 
++// ---------- auth ----------
++let ME = null;
+ function applyAuthUI() {
+   const logged = !!ME;
+-  const pill = $('#balance-pill');
+-  const authBtn = $('#auth-btn');
++  const pill = $('#balance-pill'); const authBtn = $('#auth-btn');
+   if (pill) pill.classList.toggle('hidden', !logged);
+   if (logged && $('#balance')) $('#balance').textContent = fmtRp(ME.balance);
+   if (authBtn) { authBtn.textContent = logged ? 'Keluar' : 'Masuk'; authBtn.dataset.act = logged ? 'logout' : 'login'; }
+   if ($('#d-balance')) $('#d-balance').textContent = logged ? fmtRp(ME.balance) : '—';
+   if ($('#d-tid')) $('#d-tid').textContent = logged ? ME.telegramId : 'Tamu';
+-  // Elemen khusus akun disembunyikan untuk tamu.
+-  const depTab = document.querySelector('.tab[data-tab="deposit"]');
+-  if (depTab) depTab.classList.toggle('hidden', !logged);
++  const depTab = document.querySelector('.tab[data-tab="deposit"]'); if (depTab) depTab.classList.toggle('hidden', !logged);
+   const stats = $('#stats-grid'); if (stats) stats.classList.toggle('hidden', !logged);
+   const gn = $('#guest-note'); if (gn) gn.classList.toggle('hidden', logged);
+   const mineCard = $('#my-rdp') ? $('#my-rdp').closest('.card') : null; if (mineCard) mineCard.classList.toggle('hidden', !logged);
+   const txCard = $('#tx-list') ? $('#tx-list').closest('.card') : null; if (txCard) txCard.classList.toggle('hidden', !logged);
+ }
+-async function loadMe() {
+-  const me = await api('/api/me');
+-  ME = (me && me.ok) ? me : null;
+-  applyAuthUI();
+-  return ME;
+-}
++async function loadMe() { const me = await api('/api/me'); ME = (me && me.ok) ? me : null; applyAuthUI(); return ME; }
+ async function refreshBalance() { await loadMe(); }
+ 
+ // ---------- tabs ----------
+ function activateTab(name) {
+   $$('.tab').forEach((x) => x.classList.toggle('active', x.dataset.tab === name));
+   $$('.tabpane').forEach((p) => p.classList.add('hidden'));
+-  const pane = $('#tab-' + name);
+-  if (pane) pane.classList.remove('hidden');
++  const pane = $('#tab-' + name); if (pane) pane.classList.remove('hidden');
+ }
+ $$('.tab').forEach((t) => t.addEventListener('click', () => activateTab(t.dataset.tab)));
+-
++$$('.subtab').forEach((t) => t.addEventListener('click', () => {
++  const group = t.dataset.sub, name = t.dataset.name;
++  $$(`.subtab[data-sub="${group}"]`).forEach((x) => x.classList.toggle('active', x === t));
++  ['rdp', 'vps', 'cloud9', 'fastpanel'].forEach((n) => { const el = $('#' + group + '-' + n); if (el) el.classList.add('hidden'); });
++  const show = $('#' + group + '-' + name); if (show) show.classList.remove('hidden');
++}));
+ $('#auth-btn').addEventListener('click', async (e) => {
+-  if (e.currentTarget.dataset.act === 'logout') {
+-    await fetch('/api/auth/logout', { method: 'POST' });
+-  }
+-  window.location.href = '/'; // login ada di landing (Telegram Login Widget)
++  if (e.currentTarget.dataset.act === 'logout') await fetch('/api/auth/logout', { method: 'POST' });
++  window.location.href = '/';
+ });
+ 
+-// ---------- dashboard ----------
+-async function loadMine() {
+-  const box = $('#my-rdp');
+-  try {
+-    const res = await api('/api/rdp/mine');
+-    if (!res || !res.ok) return; // tamu
+-    const servers = res.servers || [];
+-    if ($('#d-rdpcount')) $('#d-rdpcount').textContent = servers.length;
+-    if (!servers.length) { box.innerHTML = '<span class="muted">Belum ada RDP. Buat lewat tab Order RDP.</span>'; return; }
+-    box.innerHTML = servers.map((s) => `
+-      <div class="server-row">
+-        <div>
+-          <div class="mono">🖥️ ${s.server} ${copyBtn(s.ip)}</div>
+-          <div class="muted" style="font-size:12px">${s.os || 'Windows'} · ${s.region} · user: administrator</div>
+-        </div>
+-        <div class="mono">${s.password ? '🔑 ' + s.password + copyBtn(s.password) : ''}</div>
+-      </div>`).join('');
+-  } catch (_) { box.innerHTML = '<span class="muted">Gagal memuat.</span>'; }
+-}
+-async function loadTx() {
+-  const box = $('#tx-list');
+-  try {
+-    const res = await api('/api/tx');
+-    if (!res || !res.ok) return; // tamu
+-    const transactions = res.transactions || [];
+-    if (!transactions.length) { box.innerHTML = '<span class="muted">Belum ada transaksi.</span>'; return; }
+-    box.innerHTML = transactions.map((t) => {
+-      const amt = Number(t.amount);
+-      const pos = amt >= 0;
+-      return `<div class="server-row"><div><span class="tag ${pos ? 'ok' : 'err'}">${t.type}</span> <span class="muted" style="font-size:12px">${t.created_at || ''}</span></div><div class="mono" style="color:${pos ? 'var(--ok)' : 'var(--err)'}">${pos ? '+' : ''}${fmtRp(amt)}</div></div>`;
+-    }).join('');
+-  } catch (_) { box.innerHTML = '<span class="muted">Gagal memuat.</span>'; }
+-}
+-
+-// ---------- job registry (persist across refresh via localStorage) ----------
++// ---------- job registry (persist across refresh) ----------
+ const LS_JOBS = 'kobong_jobs';
+ const jobCache = {};
+ let pollTimer = null;
+ function lsGetJobs() { try { return JSON.parse(localStorage.getItem(LS_JOBS) || '[]'); } catch (_) { return []; } }
+-function lsSetJobs(a) { localStorage.setItem(LS_JOBS, JSON.stringify(a.slice(-6))); }
++function lsSetJobs(a) { localStorage.setItem(LS_JOBS, JSON.stringify(a.slice(-8))); }
+ function trackJob(id) { const a = lsGetJobs(); if (!a.includes(id)) { a.push(id); lsSetJobs(a); } ensurePolling(); renderActiveJobs(); }
+-function untrackJob(id) { lsSetJobs(lsGetJobs().filter((x) => x !== id)); delete jobCache[id]; renderActiveJobs(); }
+-window.dismissJob = untrackJob;
+-
++window.dismissJob = (id) => { lsSetJobs(lsGetJobs().filter((x) => x !== id)); delete jobCache[id]; renderActiveJobs(); };
+ function ensurePolling() { if (pollTimer) return; pollTimer = setInterval(pollAll, 4000); pollAll(); }
+ async function pollAll() {
+   const ids = lsGetJobs();
+@@ -111,59 +68,49 @@ async function pollAll() {
+     try {
+       const { ok, job } = await api('/api/job/' + id);
+       if (ok && job) { jobCache[id] = job; if (!FINAL.includes(job.status)) anyActive = true; }
+-      else { lsSetJobs(lsGetJobs().filter((x) => x !== id)); delete jobCache[id]; } // expired di server
++      else { lsSetJobs(lsGetJobs().filter((x) => x !== id)); delete jobCache[id]; }
+     } catch (_) {}
+   }
+   renderActiveJobs();
+   if (!anyActive) { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } refreshBalance(); loadMine(); }
+ }
++function kindLabel(kind) {
++  return ({ order: 'Order RDP', vps: 'Order VPS', cloud9: 'Order Cloud9', fastpanel: 'Order Fastpanel', install: 'Install RDP', cloud9_install: 'Install Cloud9', fastpanel_install: 'Install Fastpanel' })[kind] || 'Proses';
++}
+ function jobCardHtml(job) {
+   const pct = Math.max(0, Math.min(100, Number(job.progress) || 0));
+   const spinning = !FINAL.includes(job.status);
+-  const kind = job.kind === 'install' ? 'Install RDP (VPS sendiri)' : 'Order RDP';
+-  const tag = job.status === 'ready' ? '<span class="tag ok">SELESAI</span>'
+-    : (job.status === 'failed' ? '<span class="tag err">GAGAL</span>'
+-    : (job.status === 'installing_timeout' ? '<span class="tag warn">CEK MANUAL</span>' : '<span class="tag warn">PROSES</span>'));
+-  let h = `<div class="jobcard">
+-    <div class="row-flex" style="justify-content:space-between">
+-      <div><b>${kind}</b> ${tag}</div>
+-      <div>${spinning ? '<span class="spinner"></span>' : ''} <span class="copy" onclick="dismissJob('${job.id}')">tutup</span></div>
+-    </div>
+-    <div class="pbar"><div class="pbar-fill" style="width:${pct}%"></div></div>
+-    <div class="muted" style="font-size:13px">${pct}% · ${job.message || ''}</div>`;
++  const tag = job.status === 'ready' ? '<span class="tag ok">SELESAI</span>' : (job.status === 'failed' ? '<span class="tag err">GAGAL</span>' : (job.status === 'installing_timeout' ? '<span class="tag warn">CEK MANUAL</span>' : '<span class="tag warn">PROSES</span>'));
++  let h = `<div class="jobcard"><div class="row-flex" style="justify-content:space-between"><div><b>${kindLabel(job.kind)}</b> ${tag}</div><div>${spinning ? '<span class="spinner"></span>' : ''} <span class="copy" onclick="dismissJob('${job.id}')">tutup</span></div></div>`;
++  h += `<div class="pbar"><div class="pbar-fill" style="width:${pct}%"></div></div><div class="muted" style="font-size:13px">${pct}% · ${job.message || ''}</div>`;
+   if (job.server && (job.status === 'ready' || job.status === 'installing_timeout')) {
+     const s = job.server;
+-    h += `<div style="margin-top:10px">
+-      <div class="server-row"><span class="muted">Server</span><span class="mono">${s.ip}:${s.port} ${copyBtn(s.ip)}</span></div>
+-      <div class="server-row"><span class="muted">Username</span><span class="mono">${s.username}</span></div>
+-      <div class="server-row"><span class="muted">Password</span><span class="mono">${s.password} ${copyBtn(s.password)}</span></div>
+-      ${s.os ? `<div class="server-row"><span class="muted">Windows</span><span class="mono">${s.os}</span></div>` : ''}
+-    </div>`;
+-  }
+-  if (job.logs && job.logs.length) {
+-    h += `<div class="joblog">${job.logs.map((l) => String(l).replace(/</g, '&lt;')).join('\n')}</div>`;
++    h += '<div style="margin-top:10px">';
++    if (s.url) h += `<div class="server-row"><span class="muted">URL</span><span class="mono"><a href="${s.url}" target="_blank">${s.url}</a> ${copyBtn(s.url)}</span></div>`;
++    if (s.ip) h += `<div class="server-row"><span class="muted">Server</span><span class="mono">${s.ip}${s.port ? ':' + s.port : ''} ${copyBtn(s.ip)}</span></div>`;
++    if (s.username) h += `<div class="server-row"><span class="muted">Username</span><span class="mono">${s.username}</span></div>`;
++    if (s.password) h += `<div class="server-row"><span class="muted">Password</span><span class="mono">${s.password} ${copyBtn(s.password)}</span></div>`;
++    if (s.os) h += `<div class="server-row"><span class="muted">OS</span><span class="mono">${s.os}</span></div>`;
++    h += '</div>';
+   }
+-  h += `</div>`;
++  if (job.logs && job.logs.length) h += `<div class="joblog">${job.logs.map((l) => String(l).replace(/</g, '&lt;')).join('\n')}</div>`;
++  h += '</div>';
+   return h;
+ }
+ function renderActiveJobs() {
+-  const ids = lsGetJobs();
+-  const card = $('#active-jobs-card');
+-  const box = $('#active-jobs');
++  const ids = lsGetJobs(); const card = $('#active-jobs-card'); const box = $('#active-jobs');
+   if (!box) return;
+   if (!ids.length) { if (card) card.classList.add('hidden'); return; }
+   if (card) card.classList.remove('hidden');
+   box.innerHTML = ids.map((id) => (jobCache[id] ? jobCardHtml(jobCache[id]) : '')).join('') || '<span class="muted">Memuat…</span>';
+ }
+ 
+-// ---------- checkout (bayar via saldo atau QRIS) ----------
++// ---------- checkout (saldo / QRIS) ----------
+ const LS_CO = 'kobong_checkouts';
+-let coTimer = null;
+-let curModalTrx = null;
++let coTimer = null; let curModalTrx = null;
+ function lsGetCO() { try { return JSON.parse(localStorage.getItem(LS_CO) || '[]'); } catch (_) { return []; } }
+ function lsSetCO(a) { localStorage.setItem(LS_CO, JSON.stringify(a.slice(-6))); }
+ function addCO(trx) { const a = lsGetCO(); if (!a.includes(trx)) { a.push(trx); lsSetCO(a); } ensureCOPolling(); }
+-function delCO(trx) { lsSetCO(lsGetCO().filter((x) => x !== trx)); }
+ function ensureCOPolling() { if (coTimer) return; coTimer = setInterval(pollCOs, 6000); pollCOs(); }
+ async function pollCOs() {
+   const ids = lsGetCO();
+@@ -171,172 +118,173 @@ async function pollCOs() {
+   for (const trx of ids) {
+     try {
+       const st = await api('/api/checkout/status?trx=' + encodeURIComponent(trx));
+-      if (st.status === 'paid' && st.jobId) {
+-        delCO(trx); trackJob(st.jobId); refreshBalance();
+-        if (curModalTrx === trx) { $('#qr-status').innerHTML = '<div class="notice ok">✅ Dibayar! Proses dimulai.</div>'; setTimeout(() => { closeQrModal(); activateTab('dashboard'); }, 1200); }
+-      } else if (st.status === 'expired') {
+-        delCO(trx); if (curModalTrx === trx) $('#qr-status').innerHTML = '<div class="notice err">❌ QRIS kadaluarsa. Ulangi order.</div>';
+-      } else if (st.status === 'provision_failed') {
+-        delCO(trx); if (curModalTrx === trx) $('#qr-status').innerHTML = '<div class="notice err">❌ ' + (st.error || 'Gagal memproses setelah bayar. Hubungi admin.') + '</div>';
+-      }
++      if (st.status === 'paid' && st.jobId) { lsSetCO(lsGetCO().filter((x) => x !== trx)); trackJob(st.jobId); refreshBalance(); if (curModalTrx === trx) { $('#qr-status').innerHTML = '<div class="notice ok">✅ Dibayar! Proses dimulai.</div>'; setTimeout(() => { closeQrModal(); activateTab('dashboard'); }, 1200); } }
++      else if (st.status === 'expired') { lsSetCO(lsGetCO().filter((x) => x !== trx)); if (curModalTrx === trx) $('#qr-status').innerHTML = '<div class="notice err">❌ QRIS kadaluarsa.</div>'; }
++      else if (st.status === 'provision_failed') { lsSetCO(lsGetCO().filter((x) => x !== trx)); if (curModalTrx === trx) $('#qr-status').innerHTML = '<div class="notice err">❌ ' + (st.error || 'Gagal memproses.') + '</div>'; }
+     } catch (_) {}
+   }
+ }
+ function closeQrModal() { $('#qr-modal').classList.add('hidden'); curModalTrx = null; }
+ function openQrModal(res) {
+-  curModalTrx = res.transactionId;
+-  addCO(res.transactionId);
++  curModalTrx = res.transactionId; addCO(res.transactionId);
+   $('#qr-amount').textContent = 'Bayar sebesar ' + fmtRp(res.amount) + ' — scan QRIS di bawah.';
+   $('#qr-holder').innerHTML = res.qrImage ? `<div class="qr"><img src="${res.qrImage}" alt="QRIS"/></div>` : `<span class="muted">QR: ${res.qrString || '-'}</span>`;
+   $('#qr-status').innerHTML = '<div class="notice info"><span class="spinner"></span> Menunggu pembayaran…</div>';
+   $('#qr-modal').classList.remove('hidden');
+ }
+ $('#qr-close').addEventListener('click', closeQrModal);
+-// Tangani hasil order/install: bayar saldo (langsung jalan) atau QRIS (tampilkan modal).
+ function handleCheckoutResult(res, msgEl) {
+-  if (!res || !res.ok) { notice(msgEl, 'err', (res && res.error) || 'Gagal.'); return false; }
+-  if (res.mode === 'balance') {
+-    notice(msgEl, 'ok', '✅ Dibayar pakai saldo. Progres di Dashboard → “Proses Berjalan”.');
+-    trackJob(res.jobId); activateTab('dashboard'); refreshBalance();
+-    return true;
+-  }
+-  if (res.mode === 'qris') {
+-    notice(msgEl, 'ok', 'QRIS dibuat. Setelah dibayar, proses jalan otomatis (lihat Dashboard).');
+-    openQrModal(res);
+-    return true;
+-  }
++  if (!res || !res.ok) { notice(msgEl, 'err', (res && res.error) || 'Gagal.'); return; }
++  if (res.mode === 'balance') { notice(msgEl, 'ok', '✅ Dibayar pakai saldo. Progres di Dashboard → “Proses Berjalan”.'); trackJob(res.jobId); activateTab('dashboard'); refreshBalance(); return; }
++  if (res.mode === 'qris') { notice(msgEl, 'ok', 'QRIS dibuat. Setelah dibayar, proses jalan otomatis (lihat Dashboard).'); openQrModal(res); return; }
+   notice(msgEl, 'err', 'Respons tidak dikenali.');
+-  return false;
++}
++async function submitOrder(kind, params, msgEl, btn) {
++  btn.disabled = true; notice(msgEl, 'info', '<span class="spinner"></span> Memproses…');
++  try { const res = await api('/api/order', { method: 'POST', body: JSON.stringify({ kind, params }) }); handleCheckoutResult(res, msgEl); }
++  catch (_) { notice(msgEl, 'err', 'Terjadi kesalahan.'); }
++  btn.disabled = false;
+ }
+ 
+-// ---------- order ----------
+-let PRODUCTS = [];
+-let selPkg = null;
+-const DUR = [{ v: 1, k: 'daily', label: 'Harian (1 hari)' }, { v: 7, k: 'weekly', label: 'Mingguan (7 hari)' }, { v: 30, k: 'monthly', label: 'Bulanan (30 hari)' }];
+-
+-async function loadProducts() {
+-  const grid = $('#pkg-grid');
++// ---------- dashboard ----------
++async function loadMine() {
++  const box = $('#my-rdp'); if (!box) return;
+   try {
+-    const { products } = await api('/api/rdp/products');
+-    PRODUCTS = products;
+-    if (!products.length) { grid.innerHTML = '<span class="muted">Belum ada paket RDP. Hubungi admin.</span>'; return; }
+-    grid.innerHTML = products.map((p, i) => {
+-      const prices = [p.price_daily, p.price_weekly, p.price_monthly].filter((x) => x != null);
+-      const minP = prices.length ? Math.min(...prices) : 0;
+-      const slots = Number(p.slot_daily) + Number(p.slot_weekly) + Number(p.slot_monthly);
+-      return `<div class="pkg" data-i="${i}"><div class="spec">${p.ram}GB RAM</div><div class="muted">${p.core} vCPU</div><div class="price">mulai ${fmtRp(minP)}</div><div class="slot">${slots} slot tersedia</div></div>`;
+-    }).join('');
+-    $$('.pkg', grid).forEach((el) => el.addEventListener('click', () => selectPkg(Number(el.dataset.i), el)));
+-  } catch (_) { grid.innerHTML = '<span class="muted">Gagal memuat paket.</span>'; }
++    const res = await api('/api/rdp/mine'); if (!res || !res.ok) return;
++    const servers = res.servers || [];
++    if ($('#d-rdpcount')) $('#d-rdpcount').textContent = servers.length;
++    box.innerHTML = servers.length ? servers.map((s) => `<div class="server-row"><div><div class="mono">🖥️ ${s.server} ${copyBtn(s.ip)}</div><div class="muted" style="font-size:12px">${s.os || 'Windows'} · ${s.region} · administrator</div></div><div class="mono">${s.password ? '🔑 ' + s.password + copyBtn(s.password) : ''}</div></div>`).join('') : '<span class="muted">Belum ada layanan. Buat lewat tab Order.</span>';
++  } catch (_) {}
+ }
+-function selectPkg(i, el) {
+-  selPkg = PRODUCTS[i];
+-  $$('.pkg').forEach((x) => x.classList.remove('sel'));
+-  el.classList.add('sel');
+-  // durasi tersedia
+-  const dsel = $('#o-duration');
+-  dsel.innerHTML = '';
+-  DUR.forEach((d) => {
+-    const price = selPkg['price_' + d.k];
+-    const slot = Number(selPkg['slot_' + d.k] || 0);
+-    if (price != null && slot > 0) {
+-      const o = document.createElement('option');
+-      o.value = d.v; o.textContent = `${d.label} — ${fmtRp(price)} (${slot} slot)`;
+-      dsel.appendChild(o);
+-    }
+-  });
+-  if (!dsel.options.length) { notice($('#order-msg'), 'err', 'Paket ini tidak punya slot aktif.'); return; }
+-  $('#order-step-detail').classList.remove('hidden');
+-  loadOptions();
++async function loadTx() {
++  const box = $('#tx-list'); if (!box) return;
++  try {
++    const res = await api('/api/tx'); if (!res || !res.ok) return;
++    const tx = res.transactions || [];
++    box.innerHTML = tx.length ? tx.map((t) => { const a = Number(t.amount); const pos = a >= 0; return `<div class="server-row"><div><span class="tag ${pos ? 'ok' : 'err'}">${t.type}</span> <span class="muted" style="font-size:12px">${t.created_at || ''}</span></div><div class="mono" style="color:${pos ? 'var(--ok)' : 'var(--err)'}">${pos ? '+' : ''}${fmtRp(a)}</div></div>`; }).join('') : '<span class="muted">Belum ada transaksi.</span>';
++  } catch (_) {}
++}
++
++// ---------- shared helpers for order forms ----------
++const DUR = [{ v: 1, k: 'daily', label: 'Harian (1 hari)' }, { v: 7, k: 'weekly', label: 'Mingguan (7 hari)' }, { v: 30, k: 'monthly', label: 'Bulanan (30 hari)' }];
++function buildPkgGrid(products, gridEl, onSelect) {
++  if (!products.length) { gridEl.innerHTML = '<span class="muted">Belum ada paket. Hubungi admin.</span>'; return; }
++  gridEl.innerHTML = products.map((p, i) => {
++    const prices = [p.price_daily, p.price_weekly, p.price_monthly].filter((x) => x != null);
++    const minP = prices.length ? Math.min(...prices) : 0;
++    const slots = Number(p.slot_daily || 0) + Number(p.slot_weekly || 0) + Number(p.slot_monthly || 0);
++    return `<div class="pkg" data-i="${i}"><div class="spec">${p.ram}GB RAM</div><div class="muted">${p.core} vCPU</div><div class="price">mulai ${fmtRp(minP)}</div><div class="slot">${slots} slot</div></div>`;
++  }).join('');
++  $$('.pkg', gridEl).forEach((el) => el.addEventListener('click', () => onSelect(products[Number(el.dataset.i)], el, gridEl)));
+ }
+-async function loadOptions() {
+-  if (!selPkg) return;
+-  const dur = $('#o-duration').value;
+-  notice($('#order-msg'), '', '');
+-  const res = await api(`/api/rdp/options?ram=${selPkg.ram}&core=${selPkg.core}&duration=${dur}`);
+-  if (!res.ok) { notice($('#order-msg'), 'err', res.error || 'Gagal memuat opsi.'); return; }
+-  $('#o-submit').dataset.productId = res.productId;
+-  const rsel = $('#o-region');
+-  rsel.innerHTML = res.regions.length ? res.regions.map((r) => `<option value="${r.slug}">${r.slug} — ${r.name}</option>`).join('') : '<option value="">(tidak ada region)</option>';
+-  const osel = $('#o-os');
+-  osel.innerHTML = res.osList.map((o) => `<option value="${o.id}">${o.name}</option>`).join('');
+-  $('#o-price').textContent = `Total biaya: ${fmtRp(res.price)} (VPS + install RDP)`;
++function fillDurations(sel, pkg) {
++  sel.innerHTML = '';
++  DUR.forEach((d) => { const price = pkg['price_' + d.k]; const slot = Number(pkg['slot_' + d.k] || 0); if (price != null && slot > 0) { const o = document.createElement('option'); o.value = d.v; o.textContent = `${d.label} — ${fmtRp(price)} (${slot} slot)`; sel.appendChild(o); } });
++  return sel.options.length > 0;
+ }
+-$('#o-duration').addEventListener('change', loadOptions);
+-$('#o-passmode').addEventListener('change', (e) => $('#o-custompass-wrap').classList.toggle('hidden', e.target.value !== 'custom'));
+-$('#o-reset').addEventListener('click', () => { selPkg = null; $$('.pkg').forEach((x) => x.classList.remove('sel')); $('#order-step-detail').classList.add('hidden'); $('#order-progress').classList.add('hidden'); notice($('#order-msg'), '', ''); });
+-$('#o-submit').addEventListener('click', async (e) => {
+-  const btn = e.currentTarget;
+-  const productId = Number(btn.dataset.productId);
+-  const region = $('#o-region').value;
+-  const osId = Number($('#o-os').value);
+-  const durationDays = Number($('#o-duration').value);
+-  const passmode = $('#o-passmode').value;
+-  const customPassword = passmode === 'custom' ? $('#o-custompass').value : undefined;
+-  if (!productId || !region) { notice($('#order-msg'), 'err', 'Lengkapi pilihan dulu.'); return; }
+-  btn.disabled = true; notice($('#order-msg'), 'info', '<span class="spinner"></span> Mengirim order…');
+-  try {
+-    const res = await api('/api/rdp/order', { method: 'POST', body: JSON.stringify({ productId, regionSlug: region, osId, durationDays, customPassword }) });
+-    handleCheckoutResult(res, $('#order-msg'));
+-  } catch (_) { notice($('#order-msg'), 'err', 'Terjadi kesalahan.'); }
+-  btn.disabled = false;
++
++// ---------- Order RDP ----------
++let rdpPkg = null;
++async function loadRdpProducts() { try { const { products } = await api('/api/rdp/products'); buildPkgGrid(products || [], $('#rdp-pkg-grid'), selectRdpPkg); } catch (_) {} }
++function selectRdpPkg(pkg, el) { rdpPkg = pkg; $$('#rdp-pkg-grid .pkg').forEach((x) => x.classList.remove('sel')); el.classList.add('sel'); if (!fillDurations($('#rdp-duration'), pkg)) { notice($('#rdp-msg'), 'err', 'Paket ini tidak ada slot.'); return; } $('#rdp-detail').classList.remove('hidden'); loadRdpOptions(); }
++async function loadRdpOptions() {
++  if (!rdpPkg) return; notice($('#rdp-msg'), '', '');
++  const res = await api(`/api/rdp/options?ram=${rdpPkg.ram}&core=${rdpPkg.core}&duration=${$('#rdp-duration').value}`);
++  if (!res.ok) { notice($('#rdp-msg'), 'err', res.error || 'Gagal memuat opsi.'); return; }
++  $('#rdp-submit').dataset.productId = res.productId;
++  $('#rdp-region').innerHTML = res.regions.length ? res.regions.map((r) => `<option value="${r.slug}">${r.slug} — ${r.name}</option>`).join('') : '<option value="">(tidak ada region)</option>';
++  $('#rdp-os').innerHTML = res.osList.map((o) => `<option value="${o.id}">${o.name}</option>`).join('');
++  $('#rdp-price').textContent = `Total: ${fmtRp(res.price)}`;
++}
++$('#rdp-duration').addEventListener('change', loadRdpOptions);
++$('#rdp-passmode').addEventListener('change', (e) => $('#rdp-custompass-wrap').classList.toggle('hidden', e.target.value !== 'custom'));
++$('#rdp-reset').addEventListener('click', () => { rdpPkg = null; $$('#rdp-pkg-grid .pkg').forEach((x) => x.classList.remove('sel')); $('#rdp-detail').classList.add('hidden'); notice($('#rdp-msg'), '', ''); });
++$('#rdp-submit').addEventListener('click', (e) => {
++  const productId = Number(e.currentTarget.dataset.productId); const regionSlug = $('#rdp-region').value; const osId = Number($('#rdp-os').value); const durationDays = Number($('#rdp-duration').value);
++  const customPassword = $('#rdp-passmode').value === 'custom' ? $('#rdp-custompass').value : undefined;
++  if (!productId || !regionSlug) { notice($('#rdp-msg'), 'err', 'Lengkapi pilihan dulu.'); return; }
++  submitOrder('rdp_order', { productId, regionSlug, osId, durationDays, customPassword }, $('#rdp-msg'), e.currentTarget);
+ });
+ 
+-// ---------- install ----------
+-async function loadOsList() {
+-  const { osList } = await api('/api/rdp/os');
+-  const opts = osList.map((o) => `<option value="${o.version}">${o.name}</option>`).join('');
+-  $('#i-os').innerHTML = opts;
+-  try {
+-    const c = await api('/api/rdp/install-cost');
+-    const cost = c && c.ok ? c.installCost : null;
+-    $('#i-info').textContent = (cost ? `Biaya jasa install: ${fmtRp(cost)}. ` : '') + 'Dibayar via saldo (jika login & cukup) atau QRIS. VPS wajib fresh install Ubuntu.';
+-  } catch (_) {
+-    $('#i-info').textContent = 'Biaya jasa install dibayar via saldo atau QRIS. VPS wajib fresh install Ubuntu.';
+-  }
++// ---------- Order VPS ----------
++let vpsPkg = null;
++async function loadVpsProducts() { try { const { products } = await api('/api/vps/products'); buildPkgGrid(products || [], $('#vps-pkg-grid'), selectVpsPkg); } catch (_) {} }
++function selectVpsPkg(pkg, el) { vpsPkg = pkg; $$('#vps-pkg-grid .pkg').forEach((x) => x.classList.remove('sel')); el.classList.add('sel'); if (!fillDurations($('#vps-duration'), pkg)) { notice($('#vps-msg'), 'err', 'Paket ini tidak ada slot.'); return; } $('#vps-detail').classList.remove('hidden'); loadVpsOptions(); }
++async function loadVpsOptions() {
++  if (!vpsPkg) return; notice($('#vps-msg'), '', '');
++  const res = await api(`/api/vps/options?ram=${vpsPkg.ram}&core=${vpsPkg.core}&duration=${$('#vps-duration').value}`);
++  if (!res.ok) { notice($('#vps-msg'), 'err', res.error || 'Gagal memuat opsi.'); return; }
++  $('#vps-submit').dataset.productId = res.productId;
++  $('#vps-region').innerHTML = res.regions.length ? res.regions.map((r) => `<option value="${r.slug}">${r.slug} — ${r.name}</option>`).join('') : '<option value="">(tidak ada region)</option>';
++  $('#vps-os').innerHTML = (res.images || []).map((o) => `<option value="${o.slug}">${o.label}</option>`).join('') || '<option value="">(default Ubuntu 22.04)</option>';
++  $('#vps-price').textContent = `Total: ${fmtRp(res.price)}`;
+ }
+-$('#i-submit').addEventListener('click', async (e) => {
+-  const btn = e.currentTarget;
+-  const ip = $('#i-ip').value.trim();
+-  const sshUser = $('#i-user').value.trim() || 'root';
+-  const sshPassword = $('#i-pass').value;
+-  const osVersion = $('#i-os').value;
+-  const rdpPassword = $('#i-rdppass').value.trim() || undefined;
+-  if (!ip || !sshPassword) { notice($('#install-msg'), 'err', 'IP & password SSH wajib diisi.'); return; }
+-  btn.disabled = true; notice($('#install-msg'), 'info', '<span class="spinner"></span> Memulai…');
+-  try {
+-    const res = await api('/api/rdp/install', { method: 'POST', body: JSON.stringify({ ip, sshUser, sshPassword, osVersion, rdpPassword }) });
+-    handleCheckoutResult(res, $('#install-msg'));
+-  } catch (_) { notice($('#install-msg'), 'err', 'Terjadi kesalahan.'); }
+-  btn.disabled = false;
++$('#vps-duration').addEventListener('change', loadVpsOptions);
++$('#vps-reset').addEventListener('click', () => { vpsPkg = null; $$('#vps-pkg-grid .pkg').forEach((x) => x.classList.remove('sel')); $('#vps-detail').classList.add('hidden'); notice($('#vps-msg'), '', ''); });
++$('#vps-submit').addEventListener('click', (e) => {
++  const productId = Number(e.currentTarget.dataset.productId); const regionSlug = $('#vps-region').value; const imageSlug = $('#vps-os').value || undefined; const durationDays = Number($('#vps-duration').value);
++  if (!productId || !regionSlug) { notice($('#vps-msg'), 'err', 'Lengkapi pilihan dulu.'); return; }
++  submitOrder('vps_order', { productId, regionSlug, imageSlug, durationDays }, $('#vps-msg'), e.currentTarget);
++});
++
++// ---------- Order Cloud9 / Fastpanel (produk + tombol durasi) ----------
++function renderProductList(products, boxEl, kind, msgId) {
++  if (!products.length) { boxEl.innerHTML = '<span class="muted">Belum ada produk. Hubungi admin.</span>'; return; }
++  boxEl.innerHTML = products.map((p, i) => {
++    let btns = '';
++    if (p.price_weekly != null && Number(p.slot_weekly) > 0) btns += `<button class="btn btn-primary btn-sm buy" data-i="${i}" data-days="7">7 hari — ${fmtRp(p.price_weekly)}</button> `;
++    if (p.price_monthly != null && Number(p.slot_monthly) > 0) btns += `<button class="btn btn-primary btn-sm buy" data-i="${i}" data-days="30">30 hari — ${fmtRp(p.price_monthly)}</button>`;
++    if (!btns) btns = '<span class="muted">stok habis</span>';
++    return `<div class="jobcard"><div><b>${p.ram}GB RAM / ${p.core} vCPU</b> <span class="muted">(${p.size_slug || '-'})</span></div><div class="row-flex" style="margin-top:8px">${btns}</div></div>`;
++  }).join('');
++  $$('.buy', boxEl).forEach((b) => b.addEventListener('click', () => {
++    const p = products[Number(b.dataset.i)]; const days = Number(b.dataset.days);
++    submitOrder(kind, { productId: p.id, durationDays: days }, $(msgId), b);
++  }));
++}
++async function loadCloud9Products() { try { const { products } = await api('/api/cloud9/products'); renderProductList(products || [], $('#cloud9-products'), 'cloud9_order', '#cloud9-msg'); } catch (_) {} }
++async function loadFastpanelProducts() { try { const { products } = await api('/api/fastpanel/products'); renderProductList(products || [], $('#fastpanel-products'), 'fastpanel_order', '#fastpanel-msg'); } catch (_) {} }
++
++// ---------- Install forms ----------
++async function loadInstallInfo() {
++  try { const { osList } = await api('/api/rdp/os'); $('#irdp-os').innerHTML = (osList || []).map((o) => `<option value="${o.version}">${o.name}</option>`).join(''); } catch (_) {}
++  try { const c = await api('/api/rdp/install-cost'); if (c && c.ok) $('#irdp-info').textContent = `Biaya jasa install RDP: ${fmtRp(c.installCost)}. Dibayar via saldo/QRIS. VPS wajib fresh Ubuntu.`; } catch (_) {}
++  $('#ic9-info').textContent = 'Biaya install Cloud9 dibayar via saldo/QRIS. VPS fresh Ubuntu/Debian.';
++  $('#ifp-info').textContent = 'Biaya install Fastpanel dibayar via saldo/QRIS. VPS fresh Ubuntu/Debian.';
++}
++$('#irdp-submit').addEventListener('click', (e) => {
++  const ip = $('#irdp-ip').value.trim(); const sshUser = $('#irdp-user').value.trim() || 'root'; const sshPassword = $('#irdp-pass').value; const osVersion = $('#irdp-os').value; const provider = $('#irdp-provider').value; const rdpPassword = $('#irdp-rdppass').value.trim() || undefined;
++  if (!ip || !sshPassword) { notice($('#irdp-msg'), 'err', 'IP & password SSH wajib.'); return; }
++  submitOrder('rdp_install', { ip, sshUser, sshPassword, osVersion, rdpPassword, provider }, $('#irdp-msg'), e.currentTarget);
++});
++$('#ic9-submit').addEventListener('click', (e) => {
++  const ip = $('#ic9-ip').value.trim(); const sshUser = $('#ic9-user').value.trim() || 'root'; const sshPassword = $('#ic9-pass').value;
++  if (!ip || !sshPassword) { notice($('#ic9-msg'), 'err', 'IP & password SSH wajib.'); return; }
++  submitOrder('cloud9_install', { ip, sshUser, sshPassword }, $('#ic9-msg'), e.currentTarget);
++});
++$('#ifp-submit').addEventListener('click', (e) => {
++  const ip = $('#ifp-ip').value.trim(); const sshUser = $('#ifp-user').value.trim() || 'root'; const sshPassword = $('#ifp-pass').value;
++  if (!ip || !sshPassword) { notice($('#ifp-msg'), 'err', 'IP & password SSH wajib.'); return; }
++  submitOrder('fastpanel_install', { ip, sshUser, sshPassword }, $('#ifp-msg'), e.currentTarget);
+ });
+ 
+ // ---------- deposit ----------
+ $$('.dep-quick').forEach((b) => b.addEventListener('click', () => { $('#dep-amount').value = b.dataset.v; }));
+ let depTimer = null;
+ $('#dep-submit').addEventListener('click', async (e) => {
+-  const btn = e.currentTarget;
+-  const amount = Number($('#dep-amount').value);
++  const btn = e.currentTarget; const amount = Number($('#dep-amount').value);
+   if (!amount || amount < 1000) { notice($('#dep-msg'), 'err', 'Minimal Rp 1.000.'); return; }
+   btn.disabled = true; notice($('#dep-msg'), 'info', '<span class="spinner"></span> Membuat QRIS…');
+   try {
+     const res = await api('/api/deposit', { method: 'POST', body: JSON.stringify({ amount }) });
+     if (!res.ok) { notice($('#dep-msg'), 'err', res.error || 'Gagal membuat QRIS.'); btn.disabled = false; return; }
+-    notice($('#dep-msg'), 'ok', 'QRIS dibuat. Scan & bayar sebesar ' + fmtRp(res.amount) + '.');
+-    $('#dep-qr-sub').textContent = 'Scan dengan aplikasi e-wallet / m-banking (QRIS).';
+-    $('#dep-qr-holder').innerHTML = res.qrImage ? `<div class="qr"><img src="${res.qrImage}" alt="QRIS"/></div>` : '<span class="muted">QR string: ' + (res.qrString || '-') + '</span>';
++    notice($('#dep-msg'), 'ok', 'QRIS dibuat. Scan & bayar ' + fmtRp(res.amount) + '.');
++    $('#dep-qr-sub').textContent = 'Scan dengan e-wallet / m-banking (QRIS).';
++    $('#dep-qr-holder').innerHTML = res.qrImage ? `<div class="qr"><img src="${res.qrImage}" alt="QRIS"/></div>` : '<span class="muted">QR: ' + (res.qrString || '-') + '</span>';
+     $('#dep-status').innerHTML = '<div class="notice info"><span class="spinner"></span> Menunggu pembayaran…</div>';
+     if (depTimer) clearInterval(depTimer);
+     depTimer = setInterval(async () => {
+-      try {
+-        const st = await api(`/api/deposit/status?trx=${encodeURIComponent(res.transactionId)}&amount=${res.amount}`);
+-        if (st.status === 'success') {
+-          clearInterval(depTimer);
+-          $('#dep-status').innerHTML = '<div class="notice ok">✅ Pembayaran diterima! Saldo sudah ditambahkan.</div>';
+-          $('#dep-qr-holder').innerHTML = '';
+-          refreshBalance(); loadTx();
+-        }
+-      } catch (_) {}
++      try { const st = await api(`/api/deposit/status?trx=${encodeURIComponent(res.transactionId)}&amount=${res.amount}`); if (st.status === 'success') { clearInterval(depTimer); $('#dep-status').innerHTML = '<div class="notice ok">✅ Pembayaran diterima! Saldo ditambahkan.</div>'; $('#dep-qr-holder').innerHTML = ''; refreshBalance(); loadTx(); } } catch (_) {}
+     }, 6000);
+   } catch (_) { notice($('#dep-msg'), 'err', 'Terjadi kesalahan.'); }
+   btn.disabled = false;
+@@ -345,11 +293,9 @@ $('#dep-submit').addEventListener('click', async (e) => {
+ // ---------- init ----------
+ (async function () {
+   try {
+-    const me = await loadMe();          // login opsional (tamu -> me null)
+-    await loadProducts();
+-    await loadOsList();
+-    if (me) { await loadMine(); await loadTx(); } // fitur akun hanya untuk yang login
+-    // Resume proses & pembayaran yang sedang berjalan (persist saat refresh).
++    const me = await loadMe();
++    await Promise.all([loadRdpProducts(), loadVpsProducts(), loadCloud9Products(), loadFastpanelProducts(), loadInstallInfo()]);
++    if (me) { await loadMine(); await loadTx(); }
+     renderActiveJobs();
+     if (lsGetJobs().length) ensurePolling();
+     if (lsGetCO().length) ensureCOPolling();
+diff --git a/web/server.js b/web/server.js
+index 198feb2..d1873e1 100644
+--- a/web/server.js
++++ b/web/server.js
+@@ -17,6 +17,9 @@ require('./db'); // aktifkan WAL + busy_timeout, buka koneksi DB bersama
+ const db = require('./db');
+ const auth = require('./auth');
+ const rdpService = require('./services/rdpService');
++const vpsService = require('./services/vpsService');
++const cloud9Service = require('./services/cloud9Service');
++const fastpanelService = require('./services/fastpanelService');
+ const depositService = require('./services/depositService');
+ const checkoutService = require('./services/checkoutService');
+ const { getUser, getBalance, isAdmin } = require('../src/utils/userManager');
+@@ -137,15 +140,25 @@ const server = http.createServer(async (req, res) => {
+         const duration = parsed.searchParams.get('duration');
+         return sendJson(res, 200, await rdpService.getOrderOptions(ram, core, duration));
+       }
+-      if (p === '/api/rdp/order' && req.method === 'POST') {
++      // Endpoint order/install GENERIK untuk semua layanan.
++      // body = { kind: 'rdp_order'|'vps_order'|'cloud9_order'|'fastpanel_order'|'rdp_install'|'cloud9_install'|'fastpanel_install', params:{...} }
++      if (p === '/api/order' && req.method === 'POST') {
+         const body = await readBody(req);
+-        if (!body) return sendJson(res, 400, { ok: false, error: 'Body tidak valid.' });
+-        return sendJson(res, 200, await checkoutService.startOrder(uid, body));
++        if (!body || !body.kind) return sendJson(res, 400, { ok: false, error: 'Body tidak valid.' });
++        return sendJson(res, 200, await checkoutService.start(uid, body.kind, body.params || {}));
+       }
+-      if (p === '/api/rdp/install' && req.method === 'POST') {
+-        const body = await readBody(req);
+-        if (!body) return sendJson(res, 400, { ok: false, error: 'Body tidak valid.' });
+-        return sendJson(res, 200, await checkoutService.startInstall(uid, body));
++      // Katalog per layanan.
++      if (p === '/api/vps/products' && req.method === 'GET') {
++        return sendJson(res, 200, { ok: true, products: await vpsService.listProducts() });
++      }
++      if (p === '/api/vps/options' && req.method === 'GET') {
++        return sendJson(res, 200, await vpsService.getOrderOptions(parsed.searchParams.get('ram'), parsed.searchParams.get('core'), parsed.searchParams.get('duration')));
++      }
++      if (p === '/api/cloud9/products' && req.method === 'GET') {
++        return sendJson(res, 200, { ok: true, products: await cloud9Service.listProducts() });
++      }
++      if (p === '/api/fastpanel/products' && req.method === 'GET') {
++        return sendJson(res, 200, { ok: true, products: await fastpanelService.listProducts() });
+       }
+       if (p === '/api/checkout/status' && req.method === 'GET') {
+         const trx = parsed.searchParams.get('trx');
+diff --git a/web/services/checkoutService.js b/web/services/checkoutService.js
+index e887f05..ccdf637 100644
+--- a/web/services/checkoutService.js
++++ b/web/services/checkoutService.js
+@@ -1,26 +1,40 @@
+ /**
+- * Lapisan pembayaran (checkout) untuk web. Aturan (sama seperti bot: tidak ada gratis):
+- *  - Login & saldo cukup  -> potong saldo, langsung provision.
+- *  - Login tapi saldo kurang, ATAU tamu -> bayar QRIS di web, lalu provision.
++ * Lapisan pembayaran (checkout) generik untuk semua layanan web.
++ * Aturan (sama seperti bot, tidak ada gratis):
++ *  - Login & saldo cukup -> potong saldo, langsung provision.
++ *  - Login saldo kurang / tamu -> bayar QRIS, lalu provision.
+  *
+- * Memisahkan "pembayaran" dari "provisioning" (rdpService.provisionOrder/provisionInstall).
++ * Setiap layanan mengekspos prepare(params) -> { ok, amount, [reserve, release,] provision(uid,opts) }.
+  */
+ const QRCode = require('qrcode');
+-const rdpService = require('./rdpService');
+ const { createPayment, checkPaymentStatus } = require('../../src/utils/payment');
+-const { getUser, getBalance, deductBalance, isAdmin } = require('../../src/utils/userManager');
++const { getBalance, deductBalance, addBalance, isAdmin } = require('../../src/utils/userManager');
++
++const rdp = require('./rdpService');
++const vpsService = require('./vpsService');
++const cloud9Service = require('./cloud9Service');
++const fastpanelService = require('./fastpanelService');
+ 
+ const SUCCESS_STATUSES = ['success', 'settlement', 'capture', 'paid', 'completed'];
+-const checkouts = new Map(); // transactionId -> checkout
++const checkouts = new Map();
++
++// kind -> { type: 'order'|'install', prepare, prefix }
++const registry = {
++  rdp_order:        { type: 'order',   prepare: rdp.prepareOrder,             prefix: 'RDP' },
++  vps_order:        { type: 'order',   prepare: vpsService.prepareOrder,      prefix: 'VPS' },
++  cloud9_order:     { type: 'order',   prepare: cloud9Service.prepareOrder,   prefix: 'C9O' },
++  fastpanel_order:  { type: 'order',   prepare: fastpanelService.prepareOrder,prefix: 'FPO' },
++  rdp_install:      { type: 'install', prepare: rdp.prepareInstall,           prefix: 'RIN' },
++  cloud9_install:   { type: 'install', prepare: cloud9Service.prepareInstall, prefix: 'C9I' },
++  fastpanel_install:{ type: 'install', prepare: fastpanelService.prepareInstall, prefix: 'FPI' }
++};
+ 
+-function canUseBalance(uid, amount) {
+-  return (async () => {
+-    if (!uid) return false;
+-    if (isAdmin(uid)) return true;
+-    const bal = await getBalance(uid);
+-    const n = typeof bal === 'string' ? 0 : Number(bal);
+-    return n >= amount;
+-  })();
++async function canUseBalance(uid, amount) {
++  if (!uid) return false;
++  if (isAdmin(uid)) return true;
++  const bal = await getBalance(uid);
++  const n = typeof bal === 'string' ? 0 : Number(bal);
++  return n >= amount;
+ }
+ 
+ async function makeQris(uid, prefix, amount) {
+@@ -35,96 +49,70 @@ async function makeQris(uid, prefix, amount) {
+   return { ok: true, transactionId: payment.data.id, qrString: payment.data.qr_string, qrImage: qrImage || payment.data.qr_image || null, expiresAt };
+ }
+ 
+-// ---------- ORDER ----------
+-async function startOrder(uid, params) {
+-  const amt = await rdpService.getOrderAmount(params.productId, params.durationDays);
+-  if (!amt.ok) return amt;
+-  const amount = amt.amount;
++/**
++ * Mulai checkout untuk layanan apa pun.
++ * @param {string|null} uid  telegram id (null = tamu)
++ * @param {string} kind      salah satu key registry
++ * @param {object} params    parameter layanan
++ */
++async function start(uid, kind, params) {
++  const svc = registry[kind];
++  if (!svc) return { ok: false, error: 'Layanan tidak dikenal.' };
++  const prep = await svc.prepare(params || {});
++  if (!prep.ok) return prep;
++  const amount = Number(prep.amount) || 0;
++  const isOrder = svc.type === 'order';
+ 
++  // Bayar pakai saldo (login & cukup).
+   if (await canUseBalance(uid, amount)) {
+-    // Bayar pakai saldo.
+-    const reserved = await rdpService.reserveOrderSlot(params.productId, params.durationDays);
+-    if (!reserved) return { ok: false, error: 'Slot untuk durasi ini sudah habis.' };
+-    let charged = false;
+-    if (!isAdmin(uid)) {
+-      const ok = await deductBalance(uid, amount);
+-      if (!ok) { await rdpService.releaseOrderSlot(params.productId, params.durationDays); return { ok: false, error: 'Gagal memotong saldo.' }; }
+-      charged = true;
++    if (isOrder && prep.reserve) {
++      const r = await prep.reserve();
++      if (!r) return { ok: false, error: 'Slot/stok untuk pilihan ini sudah habis.' };
+     }
+-    const refund = charged ? { uid, amount } : null;
+-    const res = await rdpService.provisionOrder(uid, params, { refund });
+-    if (!res.ok) {
+-      // Kegagalan sinkron (produk/OS/token) — provisionOrder sudah release slot; refund saldo.
+-      if (charged) { try { const { addBalance } = require('../../src/utils/userManager'); await addBalance(uid, amount); } catch (_) {} }
+-      return res;
+-    }
+-    return { ok: true, mode: 'balance', jobId: res.jobId, amount };
+-  }
+-
+-  // Bayar via QRIS (tamu / saldo kurang). Reserve slot dulu agar tidak keburu habis
+-  // setelah bayar; dilepas otomatis kalau tak terbayar sampai kadaluarsa.
+-  const reserved = await rdpService.reserveOrderSlot(params.productId, params.durationDays);
+-  if (!reserved) return { ok: false, error: 'Slot untuk durasi ini sudah habis.' };
+-  const q = await makeQris(uid, 'ORD', amount);
+-  if (!q.ok) { await rdpService.releaseOrderSlot(params.productId, params.durationDays); return q; }
+-
+-  checkouts.set(q.transactionId, {
+-    type: 'order', uid: uid || 0, refundUid: uid || null, params, amount,
+-    productId: params.productId, durationDays: params.durationDays,
+-    transactionId: q.transactionId, status: 'awaiting_payment', jobId: null,
+-    reserved: true, finalizing: false, expiresAt: q.expiresAt
+-  });
+-  startPoller(q.transactionId);
+-  return { ok: true, mode: 'qris', transactionId: q.transactionId, amount, qrImage: q.qrImage, qrString: q.qrString, expiresAt: q.expiresAt };
+-}
+-
+-// ---------- INSTALL ----------
+-async function startInstall(uid, params) {
+-  // Validasi input dulu supaya tamu tidak bayar untuk data yang tidak valid.
+-  const v = rdpService.validateInstallParams(params);
+-  if (!v.ok) return v;
+-  const amount = await rdpService.getInstallCost();
+-
+-  if (await canUseBalance(uid, amount)) {
+     let charged = false;
+     if (!isAdmin(uid) && amount > 0) {
+       const ok = await deductBalance(uid, amount);
+-      if (!ok) return { ok: false, error: 'Gagal memotong saldo.' };
++      if (!ok) { if (isOrder && prep.release) await prep.release(); return { ok: false, error: 'Gagal memotong saldo.' }; }
+       charged = true;
+     }
+     const refund = charged ? { uid, amount } : null;
+-    const res = await rdpService.provisionInstall(uid, params, { refund });
++    const res = await prep.provision(uid, { refund });
+     if (!res.ok) {
+-      if (charged) { try { const { addBalance } = require('../../src/utils/userManager'); await addBalance(uid, amount); } catch (_) {} }
++      if (charged) { try { await addBalance(uid, amount); } catch (_) {} }
++      if (isOrder && prep.release) await prep.release();
+       return res;
+     }
+     return { ok: true, mode: 'balance', jobId: res.jobId, amount };
+   }
+ 
+-  const q = await makeQris(uid, 'INS', amount);
+-  if (!q.ok) return q;
++  // Bayar via QRIS (tamu / saldo kurang).
++  if (isOrder && prep.reserve) {
++    const r = await prep.reserve();
++    if (!r) return { ok: false, error: 'Slot/stok untuk pilihan ini sudah habis.' };
++  }
++  const q = await makeQris(uid, svc.prefix, amount);
++  if (!q.ok) { if (isOrder && prep.release) await prep.release(); return q; }
++
+   checkouts.set(q.transactionId, {
+-    type: 'install', uid: uid || 0, refundUid: uid || null, params, amount,
+-    transactionId: q.transactionId, status: 'awaiting_payment', jobId: null,
+-    reserved: false, finalizing: false, expiresAt: q.expiresAt
++    kind, isOrder, amount, refundUid: uid || null, prep,
++    transactionId: q.transactionId, jobId: null, finalizing: false,
++    reserved: !!(isOrder && prep.reserve), expiresAt: q.expiresAt
+   });
+   startPoller(q.transactionId);
+   return { ok: true, mode: 'qris', transactionId: q.transactionId, amount, qrImage: q.qrImage, qrString: q.qrString, expiresAt: q.expiresAt };
+ }
+ 
+-// Provision setelah pembayaran QRIS sukses (idempoten).
+ async function finalize(co) {
+   if (co.jobId) return co.jobId;
+   if (co.finalizing) return null;
+   co.finalizing = true;
+   try {
+     const refund = co.refundUid ? { uid: co.refundUid, amount: co.amount } : null;
+-    let res;
+-    if (co.type === 'order') res = await rdpService.provisionOrder(co.uid, co.params, { refund });
+-    else res = await rdpService.provisionInstall(co.uid, co.params, { refund });
++    const res = await co.prep.provision(co.refundUid || 0, { refund });
+     if (res && res.ok) { co.jobId = res.jobId; co.status = 'paid'; return res.jobId; }
+     co.status = 'provision_failed';
+     co.error = (res && res.error) || 'Provision gagal.';
++    if (co.isOrder && co.prep.release) { try { await co.prep.release(); } catch (_) {} }
+     return null;
+   } finally {
+     co.finalizing = false;
+@@ -136,7 +124,7 @@ async function status(transactionId) {
+   if (!co) return { status: 'not_found' };
+   if (co.jobId) return { status: 'paid', jobId: co.jobId };
+   let sr;
+-  try { sr = await checkPaymentStatus(process.env.DOMPETX_API_KEY, transactionId); } catch (_) { return { status: co.status }; }
++  try { sr = await checkPaymentStatus(process.env.DOMPETX_API_KEY, transactionId); } catch (_) { return { status: co.status || 'awaiting_payment' }; }
+   if (sr && sr.success && sr.data && SUCCESS_STATUSES.includes(String(sr.data.status || '').toLowerCase())) {
+     const jobId = await finalize(co);
+     if (jobId) return { status: 'paid', jobId };
+@@ -146,22 +134,20 @@ async function status(transactionId) {
+ }
+ 
+ function startPoller(transactionId) {
+-  const interval = 10000;
+   const tick = async () => {
+     const co = checkouts.get(transactionId);
+     if (!co || co.jobId) return;
+     if (Date.now() > co.expiresAt + 60000) {
+-      // Kadaluarsa tanpa bayar: lepas slot order yang direserve.
+-      if (co.type === 'order' && co.reserved) { try { await rdpService.releaseOrderSlot(co.productId, co.durationDays); } catch (_) {} co.reserved = false; }
++      if (co.isOrder && co.reserved && co.prep.release) { try { await co.prep.release(); } catch (_) {} co.reserved = false; }
+       co.status = 'expired';
+       setTimeout(() => checkouts.delete(transactionId), 5 * 60 * 1000).unref?.();
+       return;
+     }
+     try { await status(transactionId); } catch (_) {}
+     const cur = checkouts.get(transactionId);
+-    if (cur && !cur.jobId) setTimeout(tick, interval).unref?.();
++    if (cur && !cur.jobId) setTimeout(tick, 10000).unref?.();
+   };
+-  setTimeout(tick, interval).unref?.();
++  setTimeout(tick, 10000).unref?.();
+ }
+ 
+-module.exports = { startOrder, startInstall, status };
++module.exports = { start, status };
+diff --git a/web/services/cloud9Service.js b/web/services/cloud9Service.js
+new file mode 100644
+index 0000000..0e062e5
+--- /dev/null
++++ b/web/services/cloud9Service.js
+@@ -0,0 +1,126 @@
++/**
++ * Order Cloud9 (auto create VPS + install, AWS-only mengikuti bot) & Jasa Install
++ * Cloud9 di VPS milik user. Reuse cloud9Manager + cloud9Installer + doApi.
++ */
++const cloud9Manager = require('../../src/utils/cloud9Manager');
++const vpsManager = require('../../src/utils/vpsManager');
++const adminSettings = require('../../src/utils/adminSettings');
++const { installCloud9 } = require('../../src/utils/cloud9Installer');
++const { createDroplet, waitPublicIp, deleteDroplet, isAwsToken, isUpCloudToken } = require('../../src/utils/doApi');
++const { addBalance } = require('../../src/utils/userManager');
++const rdp = require('./rdpService');
++const { newJob, setJob, pushLog, genAlphaNum, rootCloudInit } = rdp._shared;
++
++const CLOUD9_PORT_DEFAULT = 8000;
++const CLOUD9_PORT_UPCLOUD = 8880;
++
++function priceByDuration(prod, days) {
++  return Number(days) === 7 ? (Number(prod.price_weekly) || Number(prod.price)) : Number(prod.price);
++}
++function slotByDuration(prod, days) {
++  return Number(days) === 7 ? Number(prod.slot_weekly || 0) : Number(prod.slot_monthly || prod.slot || 0);
++}
++function awsRegionFromToken(token) {
++  try {
++    const body = String(token).replace(/^aws:/, '');
++    const obj = JSON.parse(Buffer.from(body, 'base64').toString('utf8'));
++    return obj.region || obj.AWS_REGION || process.env.AWS_DEFAULT_REGION || 'us-east-1';
++  } catch (_) { return process.env.AWS_DEFAULT_REGION || 'us-east-1'; }
++}
++function mkLog(jobId, tag) {
++  return (m) => { console.log(`[${tag}] ${m}`); pushLog(jobId, m); };
++}
++
++async function listProducts() {
++  const rows = await cloud9Manager.listActiveProducts();
++  return (rows || []).map((p) => ({
++    id: p.id, ram: Number(p.ram), core: Number(p.core), size_slug: p.size_slug,
++    price_weekly: p.price_weekly != null ? Number(p.price_weekly) : null,
++    price_monthly: p.price != null ? Number(p.price) : null,
++    slot_weekly: Number(p.slot_weekly || 0), slot_monthly: Number(p.slot_monthly || p.slot || 0)
++  }));
++}
++
++async function prepareOrder(params) {
++  const days = Number(params.durationDays) === 7 ? 7 : 30;
++  const prod = await cloud9Manager.getProduct(params.productId);
++  if (!prod) return { ok: false, error: 'Produk Cloud9 tidak ditemukan.' };
++  if (slotByDuration(prod, days) <= 0) return { ok: false, error: 'Slot untuk durasi ini habis.' };
++  const amount = priceByDuration(prod, days);
++  if (!amount) return { ok: false, error: 'Harga durasi ini belum di-set admin.' };
++  const token = await vpsManager.getDoApiToken(prod.api_id);
++  if (!token) return { ok: false, error: 'API cloud tidak ditemukan/nonaktif.' };
++  if (!isAwsToken(token)) return { ok: false, error: 'Order Cloud9 hanya mendukung API AWS.' };
++  return {
++    ok: true, amount,
++    reserve: () => cloud9Manager.decrementStock(params.productId, days).then(() => true).catch(() => false),
++    release: () => cloud9Manager.incrementStock(params.productId, days).catch(() => {}),
++    provision: (uid, opts) => provisionOrder(uid, { productId: params.productId, days }, opts)
++  };
++}
++
++async function provisionOrder(uid, { productId, days }, opts = {}) {
++  uid = String(uid || 0);
++  const prod = await cloud9Manager.getProduct(productId);
++  if (!prod) { await cloud9Manager.incrementStock(productId, days).catch(() => {}); return { ok: false, error: 'Produk tidak ditemukan.' }; }
++  const token = await vpsManager.getDoApiToken(prod.api_id);
++  if (!token) { await cloud9Manager.incrementStock(productId, days).catch(() => {}); return { ok: false, error: 'API cloud tidak ditemukan.' }; }
++  const region = awsRegionFromToken(token);
++  const rootPass = genAlphaNum(12);
++  const refund = (opts.refund && opts.refund.uid) ? opts.refund : null;
++  const jobId = newJob(uid, 'cloud9');
++  setJob(jobId, { status: 'provisioning', step: 'create_vps', message: 'Membuat VPS untuk Cloud9...', progress: 15 });
++
++  (async () => {
++    let dropletId = null;
++    try {
++      const created = await createDroplet(token, `cloud9-${genAlphaNum(6).toLowerCase()}`, region, prod.size_slug, 'ubuntu-22.04', rootCloudInit(rootPass));
++      dropletId = created.dropletId;
++      if (!dropletId) { await cloud9Manager.incrementStock(productId, days).catch(() => {}); if (refund) { try { await addBalance(refund.uid, refund.amount); } catch (_) {} } setJob(jobId, { status: 'failed', step: 'create_vps', message: 'Gagal membuat VPS: ' + (created.error || 'unknown') }); return; }
++      setJob(jobId, { step: 'wait_ip', message: 'Menunggu IP publik...', progress: 40 });
++      const ip = await waitPublicIp(token, dropletId, 40, 10000, region);
++      if (!ip) { try { await deleteDroplet(token, dropletId, region); } catch (_) {} await cloud9Manager.incrementStock(productId, days).catch(() => {}); if (refund) { try { await addBalance(refund.uid, refund.amount); } catch (_) {} } setJob(jobId, { status: 'failed', step: 'wait_ip', message: 'IP VPS belum tersedia.' }); return; }
++      const c9Port = isUpCloudToken(token) ? CLOUD9_PORT_UPCLOUD : CLOUD9_PORT_DEFAULT;
++      setJob(jobId, { step: 'installing', message: 'Menginstall Cloud9 IDE...', progress: 60, server: { ip, port: c9Port } });
++      const result = await installCloud9(ip, 'root', rootPass, { sshMaxWaitMs: 12 * 60 * 1000, cloud9Port: c9Port }, mkLog(jobId, `web-c9 ${ip}`));
++      const nowSec = Math.floor(Date.now() / 1000);
++      await vpsManager.createVpsInstance({ userId: uid, apiId: prod.api_id, productId: prod.id, dropletId, ip, region, image: 'cloud9:ubuntu-22.04', rootPassword: rootPass, expiresAt: nowSec + days * 86400, durationDays: days });
++      setJob(jobId, { status: 'ready', step: 'done', message: 'Cloud9 siap digunakan!', progress: 100, server: { ip, port: result.port || c9Port, url: `http://${ip}:${result.port || c9Port}`, username: result.username, password: result.password } });
++    } catch (e) {
++      console.error('[web] cloud9 order error:', e);
++      try { if (dropletId) await deleteDroplet(token, dropletId, region); } catch (_) {}
++      await cloud9Manager.incrementStock(productId, days).catch(() => {});
++      if (refund) { try { await addBalance(refund.uid, refund.amount); } catch (_) {} }
++      setJob(jobId, { status: 'failed', step: 'error', message: 'Gagal: ' + (e.message || e) + (refund ? ' (saldo dikembalikan).' : '') });
++    }
++  })();
++  return { ok: true, jobId };
++}
++
++async function prepareInstall(params) {
++  const ipRegex = /^(\d{1,3}\.){3}\d{1,3}$/;
++  if (!ipRegex.test(String(params.ip || ''))) return { ok: false, error: 'Format IP tidak valid.' };
++  if (!params.sshPassword) return { ok: false, error: 'Password SSH VPS wajib diisi.' };
++  const amount = await adminSettings.getNumber('cloud9_install_price', 10000);
++  return { ok: true, amount, provision: (uid, opts) => provisionInstall(uid, params, opts) };
++}
++
++async function provisionInstall(uid, { ip, sshUser, sshPassword }, opts = {}) {
++  uid = String(uid || 0);
++  const refund = (opts.refund && opts.refund.uid) ? opts.refund : null;
++  const jobId = newJob(uid, 'cloud9_install');
++  setJob(jobId, { status: 'installing', step: 'installing', message: 'Menginstall Cloud9 IDE...', progress: 40 });
++  (async () => {
++    try {
++      const result = await installCloud9(ip, sshUser || 'root', sshPassword, { sshMaxWaitMs: 8 * 60 * 1000, cloud9Port: CLOUD9_PORT_DEFAULT }, mkLog(jobId, `web-c9-install ${ip}`));
++      setJob(jobId, { status: 'ready', step: 'done', message: 'Cloud9 siap digunakan!', progress: 100, server: { ip, port: result.port || CLOUD9_PORT_DEFAULT, url: `http://${ip}:${result.port || CLOUD9_PORT_DEFAULT}`, username: result.username, password: result.password } });
++    } catch (e) {
++      console.error('[web] cloud9 install error:', e);
++      if (refund) { try { await addBalance(refund.uid, refund.amount); } catch (_) {} }
++      setJob(jobId, { status: 'failed', step: 'error', message: 'Gagal install Cloud9: ' + (e.message || e) + (refund ? ' (saldo dikembalikan).' : '') });
++    }
++  })();
++  return { ok: true, jobId };
++}
++
++module.exports = { listProducts, prepareOrder, prepareInstall };
+diff --git a/web/services/fastpanelService.js b/web/services/fastpanelService.js
+new file mode 100644
+index 0000000..19bc7a1
+--- /dev/null
++++ b/web/services/fastpanelService.js
+@@ -0,0 +1,134 @@
++/**
++ * Order Fastpanel (auto create VPS + install, semua provider) & Jasa Install
++ * Fastpanel di VPS milik user. Reuse fastpanelManager + fastpanelInstaller + doApi.
++ */
++const fastpanelManager = require('../../src/utils/fastpanelManager');
++const vpsManager = require('../../src/utils/vpsManager');
++const adminSettings = require('../../src/utils/adminSettings');
++const { installFastpanel } = require('../../src/utils/fastpanelInstaller');
++const { createDroplet, waitPublicIp, deleteDroplet, isAwsToken, isLinodeToken, isUpCloudToken } = require('../../src/utils/doApi');
++const { addBalance } = require('../../src/utils/userManager');
++const rdp = require('./rdpService');
++const { newJob, setJob, pushLog, genAlphaNum, genWindowsPassword, rootCloudInit } = rdp._shared;
++
++function priceByDuration(prod, days) {
++  return Number(days) === 7 ? (Number(prod.price_weekly) || Number(prod.price)) : Number(prod.price);
++}
++function slotByDuration(prod, days) {
++  return Number(days) === 7 ? Number(prod.slot_weekly || 0) : Number(prod.slot_monthly || prod.slot || 0);
++}
++function ubuntuImageForToken(token) {
++  if (isAwsToken(token)) return 'aws:ubuntu22.04';
++  if (isLinodeToken(token)) return 'linode/ubuntu22.04';
++  if (isUpCloudToken(token)) return 'upcloud/ubuntu22.04';
++  return 'ubuntu-22-04-x64';
++}
++function regionForToken(token) {
++  if (isAwsToken(token)) {
++    try { const o = JSON.parse(Buffer.from(String(token).replace(/^aws:/, ''), 'base64').toString('utf8')); return o.region || 'us-east-1'; } catch (_) { return 'us-east-1'; }
++  }
++  if (isLinodeToken(token)) return process.env.FASTPANEL_LINODE_REGION || 'us-east';
++  if (isUpCloudToken(token)) return process.env.FASTPANEL_UPCLOUD_REGION || 'sg-sin1';
++  return process.env.FASTPANEL_DO_REGION || 'sgp1';
++}
++function genFastpanelPass() {
++  const raw = require('crypto').randomBytes(20).toString('base64').replace(/[^A-Za-z0-9]/g, '');
++  return `Fp${raw.slice(0, 14)}!9`;
++}
++function mkLog(jobId, tag) { return (m) => { console.log(`[${tag}] ${m}`); pushLog(jobId, m); }; }
++
++async function listProducts() {
++  const rows = await fastpanelManager.listActiveProducts();
++  return (rows || []).map((p) => ({
++    id: p.id, ram: Number(p.ram), core: Number(p.core), size_slug: p.size_slug,
++    provider: fastpanelManager.apiProviderKey ? undefined : undefined,
++    price_weekly: p.price_weekly != null ? Number(p.price_weekly) : null,
++    price_monthly: p.price != null ? Number(p.price) : null,
++    slot_weekly: Number(p.slot_weekly || 0), slot_monthly: Number(p.slot_monthly || p.slot || 0)
++  }));
++}
++
++async function prepareOrder(params) {
++  const days = Number(params.durationDays) === 7 ? 7 : 30;
++  const prod = await fastpanelManager.getProduct(params.productId);
++  if (!prod) return { ok: false, error: 'Produk Fastpanel tidak ditemukan.' };
++  if (slotByDuration(prod, days) <= 0) return { ok: false, error: 'Slot untuk durasi ini habis.' };
++  const amount = priceByDuration(prod, days);
++  if (!amount) return { ok: false, error: 'Harga durasi ini belum di-set admin.' };
++  const token = await vpsManager.getDoApiToken(prod.api_id);
++  if (!token) return { ok: false, error: 'API cloud tidak ditemukan/nonaktif.' };
++  return {
++    ok: true, amount,
++    reserve: () => fastpanelManager.decrementStock(params.productId, days).then(() => true).catch(() => false),
++    release: () => fastpanelManager.incrementStock(params.productId, days).catch(() => {}),
++    provision: (uid, opts) => provisionOrder(uid, { productId: params.productId, days }, opts)
++  };
++}
++
++async function provisionOrder(uid, { productId, days }, opts = {}) {
++  uid = String(uid || 0);
++  const prod = await fastpanelManager.getProduct(productId);
++  if (!prod) { await fastpanelManager.incrementStock(productId, days).catch(() => {}); return { ok: false, error: 'Produk tidak ditemukan.' }; }
++  const token = await vpsManager.getDoApiToken(prod.api_id);
++  if (!token) { await fastpanelManager.incrementStock(productId, days).catch(() => {}); return { ok: false, error: 'API cloud tidak ditemukan.' }; }
++  const region = regionForToken(token);
++  const image = ubuntuImageForToken(token);
++  const rootPass = genAlphaNum(12);
++  const fpPass = genFastpanelPass();
++  const refund = (opts.refund && opts.refund.uid) ? opts.refund : null;
++  const jobId = newJob(uid, 'fastpanel');
++  setJob(jobId, { status: 'provisioning', step: 'create_vps', message: 'Membuat VPS untuk Fastpanel...', progress: 15 });
++
++  (async () => {
++    let dropletId = null;
++    try {
++      const created = await createDroplet(token, `fastpanel-${genAlphaNum(6).toLowerCase()}`, region, prod.size_slug, image, rootCloudInit(rootPass));
++      dropletId = created.dropletId;
++      if (!dropletId) { await fastpanelManager.incrementStock(productId, days).catch(() => {}); if (refund) { try { await addBalance(refund.uid, refund.amount); } catch (_) {} } setJob(jobId, { status: 'failed', step: 'create_vps', message: 'Gagal membuat VPS: ' + (created.error || 'unknown') }); return; }
++      setJob(jobId, { step: 'wait_ip', message: 'Menunggu IP publik...', progress: 40 });
++      const ip = await waitPublicIp(token, dropletId, 40, 10000, region);
++      if (!ip) { try { await deleteDroplet(token, dropletId, region); } catch (_) {} await fastpanelManager.incrementStock(productId, days).catch(() => {}); if (refund) { try { await addBalance(refund.uid, refund.amount); } catch (_) {} } setJob(jobId, { status: 'failed', step: 'wait_ip', message: 'IP VPS belum tersedia.' }); return; }
++      setJob(jobId, { step: 'installing', message: 'Menginstall Fastpanel...', progress: 60, server: { ip, port: 8888 } });
++      const result = await installFastpanel(ip, 'root', rootPass, { fastpanelUser: 'fastuser', fastpanelPassword: fpPass, sshMaxWaitMs: 12 * 60 * 1000 }, mkLog(jobId, `web-fp ${ip}`));
++      const nowSec = Math.floor(Date.now() / 1000);
++      await vpsManager.createVpsInstance({ userId: uid, apiId: prod.api_id, productId: prod.id, dropletId, ip, region, image: `fastpanel:${image}`, rootPassword: rootPass, expiresAt: nowSec + days * 86400, durationDays: days });
++      setJob(jobId, { status: 'ready', step: 'done', message: 'Fastpanel siap digunakan!', progress: 100, server: { ip, port: result.port || 8888, url: result.url || `https://${ip}:8888/`, username: result.username, password: result.password } });
++    } catch (e) {
++      console.error('[web] fastpanel order error:', e);
++      try { if (dropletId) await deleteDroplet(token, dropletId, region); } catch (_) {}
++      await fastpanelManager.incrementStock(productId, days).catch(() => {});
++      if (refund) { try { await addBalance(refund.uid, refund.amount); } catch (_) {} }
++      setJob(jobId, { status: 'failed', step: 'error', message: 'Gagal: ' + (e.message || e) + (refund ? ' (saldo dikembalikan).' : '') });
++    }
++  })();
++  return { ok: true, jobId };
++}
++
++async function prepareInstall(params) {
++  const ipRegex = /^(\d{1,3}\.){3}\d{1,3}$/;
++  if (!ipRegex.test(String(params.ip || ''))) return { ok: false, error: 'Format IP tidak valid.' };
++  if (!params.sshPassword) return { ok: false, error: 'Password SSH VPS wajib diisi.' };
++  const amount = await adminSettings.getNumber('fastpanel_install_price', 15000);
++  return { ok: true, amount, provision: (uid, opts) => provisionInstall(uid, params, opts) };
++}
++
++async function provisionInstall(uid, { ip, sshUser, sshPassword }, opts = {}) {
++  uid = String(uid || 0);
++  const refund = (opts.refund && opts.refund.uid) ? opts.refund : null;
++  const fpPass = genFastpanelPass();
++  const jobId = newJob(uid, 'fastpanel_install');
++  setJob(jobId, { status: 'installing', step: 'installing', message: 'Menginstall Fastpanel...', progress: 40 });
++  (async () => {
++    try {
++      const result = await installFastpanel(ip, sshUser || 'root', sshPassword, { fastpanelUser: 'fastuser', fastpanelPassword: fpPass, sshMaxWaitMs: 8 * 60 * 1000 }, mkLog(jobId, `web-fp-install ${ip}`));
++      setJob(jobId, { status: 'ready', step: 'done', message: 'Fastpanel siap digunakan!', progress: 100, server: { ip, port: result.port || 8888, url: result.url || `https://${ip}:8888/`, username: result.username, password: result.password } });
++    } catch (e) {
++      console.error('[web] fastpanel install error:', e);
++      if (refund) { try { await addBalance(refund.uid, refund.amount); } catch (_) {} }
++      setJob(jobId, { status: 'failed', step: 'error', message: 'Gagal install Fastpanel: ' + (e.message || e) + (refund ? ' (saldo dikembalikan).' : '') });
++    }
++  })();
++  return { ok: true, jobId };
++}
++
++module.exports = { listProducts, prepareOrder, prepareInstall };
+diff --git a/web/services/rdpService.js b/web/services/rdpService.js
+index 794e9c1..3fcd381 100644
+--- a/web/services/rdpService.js
++++ b/web/services/rdpService.js
+@@ -10,7 +10,7 @@ const crypto = require('crypto');
+ const net = require('net');
+ 
+ const vpsManager = require('../../src/utils/vpsManager');
+-const { getRegions, getSizesForRegion, createDroplet, waitPublicIp, deleteDroplet, isLinodeToken, isAwsToken, linodeSetDirectDisk } = require('../../src/utils/doApi');
++const { getRegions, getSizesForRegion, createDroplet, waitPublicIp, deleteDroplet, isLinodeToken, isAwsToken, isUpCloudToken, linodeSetDirectDisk, rdpPortForToken } = require('../../src/utils/doApi');
+ const { isAdmin, getBalance, deductBalance, addBalance } = require('../../src/utils/userManager');
+ const { installDedicatedRDP } = require('../../src/utils/dedicatedRdpInstaller');
+ const RDPMonitor = require('../../src/utils/rdpMonitor');
+@@ -221,14 +221,24 @@ async function provisionOrder(uid, { productId, regionSlug, osId, durationDays,
+   const jobId = newJob(uid, 'order');
+   setJob(jobId, { status: 'provisioning', step: 'create_vps', message: 'Membuat VPS...', progress: 8 });
+ 
++  // Port RDP per provider (UpCloud 8443, lainnya 4443) + nama provider + base image.
++  const rdpPort = rdpPortForToken(token);
++  const provider = isAwsToken(token) ? 'aws' : (isLinodeToken(token) ? 'linode' : (isUpCloudToken(token) ? 'upcloud' : 'digitalocean'));
++
+   // Jalankan provisioning async.
+   (async () => {
+     const createSizeSlug = isAwsToken(token) ? normalizeAwsRdpSize(prod.size_slug) : prod.size_slug;
+-    const baseImage = isAwsToken(token) ? 'aws:ubuntu22.04' : (isLinodeToken(token) ? 'linode/ubuntu22.04' : 'ubuntu-22-04-x64');
++    const baseImage = isAwsToken(token) ? 'aws:ubuntu22.04'
++      : (isLinodeToken(token) ? 'linode/ubuntu22.04'
++      : (isUpCloudToken(token) ? 'upcloud/ubuntu22.04' : 'ubuntu-22-04-x64'));
+     let dropletId = null;
++    let sshKey = null;      // UpCloud: auth pakai private key
++    let sshUser = 'root';
+     try {
+       const created = await createDroplet(token, hostname, regionSlug, createSizeSlug, baseImage, cloudInit);
+       dropletId = created.dropletId;
++      sshKey = created.sshPrivateKey || null;
++      if (created.sshUsername) sshUser = created.sshUsername;
+       if (!dropletId) {
+         await releaseOrderSlot(productId, d);
+         if (refund) { try { await addBalance(refund.uid, refund.amount); } catch (_) {} }
+@@ -251,10 +261,10 @@ async function provisionOrder(uid, { productId, regionSlug, osId, durationDays,
+       await vpsManager.createVpsInstance({
+         userId: uid, apiId: prod.api_id, productId: prod.id, dropletId, ip,
+         region: regionSlug, image: `rdp:${selectedOS.version}`, rootPassword: rdpPass,
+-        expiresAt, durationDays: d
++        expiresAt, durationDays: d, rdpPort
+       });
+ 
+-      setJob(jobId, { step: 'wait_ssh', message: 'Menunggu SSH siap...', progress: 30, server: { ip, port: 4443, username: 'administrator', password: rdpPass, os: selectedOS.name, region: regionSlug } });
++      setJob(jobId, { step: 'wait_ssh', message: 'Menunggu SSH siap...', progress: 30, server: { ip, port: rdpPort, username: 'administrator', password: rdpPass, os: selectedOS.name, region: regionSlug } });
+ 
+       const sshReady = await waitForPort(ip, 22, 12 * 60 * 1000, 15000);
+       if (!sshReady) {
+@@ -263,13 +273,12 @@ async function provisionOrder(uid, { productId, regionSlug, osId, durationDays,
+       }
+ 
+       setJob(jobId, { step: 'installing', message: 'Menginstall Windows RDP...', progress: 35 });
+-      const provider = isAwsToken(token) ? 'aws' : (isLinodeToken(token) ? 'linode' : 'digitalocean');
+-      const installPromise = installDedicatedRDP(ip, 'root', rootPass, { osVersion: selectedOS.version, password: rdpPass, provider }, mkInstallLogger(jobId, `web ${ip}`));
++      const installCfg = { osVersion: selectedOS.version, password: rdpPass, provider, rdpPort };
++      if (sshKey) { installCfg.privateKey = sshKey; if (sshUser !== 'root') installCfg.useSudo = true; }
++      const installPromise = installDedicatedRDP(ip, sshUser, rootPass, installCfg, mkInstallLogger(jobId, `web ${ip}`));
+ 
+       // Linode Direct Disk: jadwal tetap 5/7/9 menit dari saat installer mulai (cara lama
+-      // yang terbukti bekerja). JANGAN picu pada reboot pertama (SSH putus) — reboot itu
+-      // dipakai reinstall.sh untuk masuk Alpine & menulis Windows; switch kernel saat itu
+-      // membuat boot gagal (connection timeout).
++      // yang terbukti bekerja). JANGAN picu pada reboot pertama (SSH putus).
+       if (isLinodeToken(token)) {
+         const scheduleDD = (minutes) => setTimeout(async () => {
+           try { await linodeSetDirectDisk(token, dropletId); console.log(`[web ${ip}] Linode Direct Disk diset (${minutes}m).`); }
+@@ -280,14 +289,14 @@ async function provisionOrder(uid, { productId, regionSlug, osId, durationDays,
+ 
+       await installPromise;
+       setJob(jobId, { step: 'monitor', message: 'Menunggu Windows boot & RDP siap...', progress: 70 });
+-      const monitor = new RDPMonitor(ip, 'root', rootPass, rdpPass, 4443);
++      const monitor = new RDPMonitor(ip, sshUser, rootPass, rdpPass, rdpPort);
+       const result = await monitor.waitForRDPReady(RDP_MONITOR_TIMEOUT_MS, mkMonitorLogger(jobId, `web ${ip}`));
+       try { monitor.disconnect(); } catch (_) {}
+ 
+       if (result && result.success && result.rdpReady) {
+-        setJob(jobId, { status: 'ready', step: 'done', message: 'RDP siap digunakan!', progress: 100, server: { ip, port: 4443, username: 'administrator', password: rdpPass, os: selectedOS.name, region: regionSlug } });
++        setJob(jobId, { status: 'ready', step: 'done', message: 'RDP siap digunakan!', progress: 100, server: { ip, port: rdpPort, username: 'administrator', password: rdpPass, os: selectedOS.name, region: regionSlug } });
+       } else {
+-        setJob(jobId, { status: 'installing_timeout', step: 'monitor', message: 'RDP belum bisa dikonfirmasi otomatis (monitor timeout). VPS sudah dibuat & Windows kemungkinan sedang boot — coba connect beberapa menit lagi.', progress: 95, server: { ip, port: 4443, username: 'administrator', password: rdpPass, os: selectedOS.name, region: regionSlug } });
++        setJob(jobId, { status: 'installing_timeout', step: 'monitor', message: 'RDP belum bisa dikonfirmasi otomatis (monitor timeout). VPS sudah dibuat & Windows kemungkinan sedang boot — coba connect beberapa menit lagi.', progress: 95, server: { ip, port: rdpPort, username: 'administrator', password: rdpPass, os: selectedOS.name, region: regionSlug } });
+       }
+     } catch (e) {
+       console.error('[web] provisionOrder error:', e);
+@@ -320,9 +329,11 @@ async function provisionInstall(uid, { ip, sshUser, sshPassword, osVersion, rdpP
+     rdpPass = genWindowsPassword();
+   }
+   const refund = (opts.refund && opts.refund.uid) ? opts.refund : null;
++  // Port RDP: UpCloud 8443, provider lain 4443 (manual install tak punya token, jadi dari pilihan provider user).
++  const rdpPort = String(provider || '').toLowerCase() === 'upcloud' ? 8443 : 4443;
+ 
+   const jobId = newJob(uid, 'install');
+-  setJob(jobId, { status: 'installing', step: 'wait_ssh', message: 'Menghubungi VPS (SSH)...', progress: 20, server: { ip, port: 4443, username: 'administrator', password: rdpPass, os: os.name } });
++  setJob(jobId, { status: 'installing', step: 'wait_ssh', message: 'Menghubungi VPS (SSH)...', progress: 20, server: { ip, port: rdpPort, username: 'administrator', password: rdpPass, os: os.name } });
+ 
+   (async () => {
+     try {
+@@ -333,16 +344,16 @@ async function provisionInstall(uid, { ip, sshUser, sshPassword, osVersion, rdpP
+         return;
+       }
+       setJob(jobId, { step: 'installing', message: 'Menginstall Windows RDP...', progress: 35 });
+-      const installPromise = installDedicatedRDP(ip, sshUser || 'root', sshPassword, { osVersion: os.version, password: rdpPass, provider: provider || 'digitalocean' }, mkInstallLogger(jobId, `web-install ${ip}`));
++      const installPromise = installDedicatedRDP(ip, sshUser || 'root', sshPassword, { osVersion: os.version, password: rdpPass, provider: provider || 'digitalocean', rdpPort }, mkInstallLogger(jobId, `web-install ${ip}`));
+       await installPromise;
+       setJob(jobId, { step: 'monitor', message: 'Menunggu Windows boot & RDP siap...', progress: 70 });
+-      const monitor = new RDPMonitor(ip, sshUser || 'root', sshPassword, rdpPass, 4443);
++      const monitor = new RDPMonitor(ip, sshUser || 'root', sshPassword, rdpPass, rdpPort);
+       const result = await monitor.waitForRDPReady(RDP_MONITOR_TIMEOUT_MS, mkMonitorLogger(jobId, `web-install ${ip}`));
+       try { monitor.disconnect(); } catch (_) {}
+       if (result && result.success && result.rdpReady) {
+-        setJob(jobId, { status: 'ready', step: 'done', message: 'RDP siap digunakan!', progress: 100, server: { ip, port: 4443, username: 'administrator', password: rdpPass, os: os.name } });
++        setJob(jobId, { status: 'ready', step: 'done', message: 'RDP siap digunakan!', progress: 100, server: { ip, port: rdpPort, username: 'administrator', password: rdpPass, os: os.name } });
+       } else {
+-        setJob(jobId, { status: 'installing_timeout', step: 'monitor', message: 'RDP belum bisa dikonfirmasi otomatis (monitor timeout). Windows kemungkinan masih boot — coba connect beberapa menit lagi.', progress: 95, server: { ip, port: 4443, username: 'administrator', password: rdpPass, os: os.name } });
++        setJob(jobId, { status: 'installing_timeout', step: 'monitor', message: 'RDP belum bisa dikonfirmasi otomatis (monitor timeout). Windows kemungkinan masih boot — coba connect beberapa menit lagi.', progress: 95, server: { ip, port: rdpPort, username: 'administrator', password: rdpPass, os: os.name } });
+       }
+     } catch (e) {
+       console.error('[web] provisionInstall error:', e);
+@@ -363,7 +374,7 @@ async function listMyRdp(userId) {
+     .map((r) => ({
+       id: r.id,
+       ip: r.ip,
+-      server: r.ip ? `${r.ip}:4443` : '-',
++      server: r.ip ? `${r.ip}:${r.rdp_port || 4443}` : '-',
+       region: r.region || '-',
+       os: String(r.image || '').replace(/^rdp:/, ''),
+       username: 'administrator',
+@@ -377,6 +388,25 @@ function osOptions() {
+   return getStandardDedicatedOs().map((o) => ({ id: o.id, name: o.name, version: o.version }));
+ }
+ 
++// Bungkus "prepare" seragam untuk lapisan checkout (saldo vs QRIS + refund).
++async function prepareOrder(params) {
++  const amt = await getOrderAmount(params.productId, params.durationDays);
++  if (!amt.ok) return amt;
++  return {
++    ok: true,
++    amount: amt.amount,
++    reserve: () => reserveOrderSlot(params.productId, params.durationDays),
++    release: () => releaseOrderSlot(params.productId, params.durationDays),
++    provision: (uid, opts) => provisionOrder(uid, params, opts)
++  };
++}
++async function prepareInstall(params) {
++  const v = validateInstallParams(params);
++  if (!v.ok) return v;
++  const amount = await getInstallCost();
++  return { ok: true, amount, provision: (uid, opts) => provisionInstall(uid, params, opts) };
++}
++
+ // Validasi input install (dipakai sebelum minta bayar QRIS supaya user tak bayar untuk input invalid).
+ function validateInstallParams({ ip, sshPassword, osVersion, rdpPassword }) {
+   const ipRegex = /^(\d{1,3}\.){3}\d{1,3}$/;
+@@ -400,5 +430,9 @@ module.exports = {
+   listMyRdp,
+   osOptions,
+   validateInstallParams,
+-  getJob
++  prepareOrder,
++  prepareInstall,
++  getJob,
++  // helper bersama dipakai service lain (vps/cloud9/fastpanel)
++  _shared: { newJob, setJob, mkInstallLogger, mkMonitorLogger, pushLog, genAlphaNum, genWindowsPassword, rootCloudInit, normalizeAwsRdpSize, waitForPort }
+ };
+diff --git a/web/services/vpsService.js b/web/services/vpsService.js
+new file mode 100644
+index 0000000..4c3dc43
+--- /dev/null
++++ b/web/services/vpsService.js
+@@ -0,0 +1,110 @@
++/**
++ * Order VPS (auto-create VPS biasa, tanpa install RDP/panel). Reuse logika bot
++ * (vpsOrderHandler.createVps) tanpa objek Telegram. Harga/stok dari vps_products.
++ */
++const vpsManager = require('../../src/utils/vpsManager');
++const { getRegions, getImages, createDroplet, waitPublicIp, deleteDroplet, isAwsToken, isLinodeToken, isUpCloudToken } = require('../../src/utils/doApi');
++const rdp = require('./rdpService');
++const { newJob, setJob, genAlphaNum, rootCloudInit, normalizeAwsRdpSize, waitForPort } = rdp._shared;
++
++let upcloudApi = null;
++try { upcloudApi = require('../../src/utils/upcloudApi'); } catch (_) { upcloudApi = null; }
++
++async function listProducts() {
++  const groups = await vpsManager.listActiveProductGroups('vps');
++  return groups.map((g) => ({
++    ram: Number(g.ram), core: Number(g.core),
++    price_daily: g.price_daily != null ? Number(g.price_daily) : null,
++    price_weekly: g.price_weekly != null ? Number(g.price_weekly) : null,
++    price_monthly: g.price_monthly != null ? Number(g.price_monthly) : null,
++    slot_daily: Number(g.slot_daily || 0), slot_weekly: Number(g.slot_weekly || 0), slot_monthly: Number(g.slot_monthly || 0)
++  }));
++}
++
++async function getOrderOptions(ram, core, durationDays) {
++  const prod = await vpsManager.getAvailableProductBySpecDuration('vps', Number(ram), Number(core), Number(durationDays));
++  if (!prod) return { ok: false, error: 'Paket/slot untuk durasi ini tidak tersedia.' };
++  const token = await vpsManager.getDoApiToken(prod.api_id);
++  if (!token) return { ok: false, error: 'API cloud tidak ditemukan / nonaktif.' };
++  let regions = []; let images = [];
++  try { regions = await getRegions(token); } catch (_) {}
++  try { images = await getImages(token); } catch (_) {}
++  const d = Number(durationDays);
++  const price = (d === 1) ? Number(prod.price_daily) : (d === 7 ? Number(prod.price_weekly) : Number(prod.price));
++  return {
++    ok: true, productId: prod.id, price,
++    regions: (regions || []).slice(0, 60).map((r) => ({ slug: r.slug, name: r.name })),
++    images: (images || []).slice(0, 40).map((i) => ({ slug: i.slug, label: i.label || i.slug }))
++  };
++}
++
++// Reuse penghitung harga & reservasi slot dari rdpService (tabel vps_products sama).
++async function prepareOrder(params) {
++  const amt = await rdp.getOrderAmount(params.productId, params.durationDays);
++  if (!amt.ok) return amt;
++  return {
++    ok: true, amount: amt.amount,
++    reserve: () => rdp.reserveOrderSlot(params.productId, params.durationDays),
++    release: () => rdp.releaseOrderSlot(params.productId, params.durationDays),
++    provision: (uid, opts) => provisionVps(uid, params, opts)
++  };
++}
++
++async function provisionVps(uid, { productId, regionSlug, imageSlug, durationDays }, opts = {}) {
++  uid = String(uid || 0);
++  const d = Number(durationDays);
++  const prod = await vpsManager.getProduct(productId);
++  if (!prod) { await rdp.releaseOrderSlot(productId, d); return { ok: false, error: 'Produk tidak ditemukan.' }; }
++  const token = await vpsManager.getDoApiToken(prod.api_id);
++  if (!token) { await rdp.releaseOrderSlot(productId, d); return { ok: false, error: 'API cloud tidak ditemukan.' }; }
++
++  const rootPass = genAlphaNum(12);
++  const cloudInit = rootCloudInit(rootPass);
++  const hostname = `vps-${uid}-${genAlphaNum(6).toLowerCase()}`;
++  const image = imageSlug || (isAwsToken(token) ? 'aws:ubuntu22.04' : (isLinodeToken(token) ? 'linode/ubuntu22.04' : (isUpCloudToken(token) ? 'upcloud/ubuntu22.04' : 'ubuntu-22-04-x64')));
++  const refund = (opts.refund && opts.refund.uid) ? opts.refund : null;
++
++  const jobId = newJob(uid, 'vps');
++  setJob(jobId, { status: 'provisioning', step: 'create_vps', message: 'Membuat VPS...', progress: 15 });
++
++  (async () => {
++    let dropletId = null;
++    try {
++      const size = isAwsToken(token) ? normalizeAwsRdpSize(prod.size_slug) : prod.size_slug;
++      const created = await createDroplet(token, hostname, regionSlug, size, image, cloudInit);
++      dropletId = created.dropletId;
++      if (!dropletId) {
++        await rdp.releaseOrderSlot(productId, d);
++        if (refund) { try { await require('../../src/utils/userManager').addBalance(refund.uid, refund.amount); } catch (_) {} }
++        setJob(jobId, { status: 'failed', step: 'create_vps', message: 'Gagal membuat VPS: ' + (created.error || 'unknown') });
++        return;
++      }
++      setJob(jobId, { step: 'wait_ip', message: 'Menunggu IP publik...', progress: 45 });
++      const ip = await waitPublicIp(token, dropletId, 40, 10000, regionSlug);
++      if (!ip) {
++        try { await deleteDroplet(token, dropletId, regionSlug); } catch (_) {}
++        await rdp.releaseOrderSlot(productId, d);
++        if (refund) { try { await require('../../src/utils/userManager').addBalance(refund.uid, refund.amount); } catch (_) {} }
++        setJob(jobId, { status: 'failed', step: 'wait_ip', message: 'IP VPS belum tersedia. Coba region lain.' });
++        return;
++      }
++      // UpCloud: aktifkan login root+password (template UpCloud key-only).
++      if (isUpCloudToken(token) && created.sshPrivateKey && upcloudApi && typeof upcloudApi.upcloudProvisionRootPassword === 'function') {
++        setJob(jobId, { step: 'config', message: 'Menyiapkan akses root...', progress: 65 });
++        try { await upcloudApi.upcloudProvisionRootPassword(ip, created.sshPrivateKey, rootPass, { maxWaitMs: 6 * 60 * 1000 }); } catch (e) { console.warn('[web vps] upcloud root pass:', e.message || e); }
++      }
++      const nowSec = Math.floor(Date.now() / 1000);
++      await vpsManager.createVpsInstance({ userId: uid, apiId: prod.api_id, productId: prod.id, dropletId, ip, region: regionSlug, image, rootPassword: rootPass, expiresAt: nowSec + d * 86400, durationDays: d });
++      setJob(jobId, { step: 'wait_ssh', message: 'Menunggu VPS siap (SSH)...', progress: 80 });
++      await waitForPort(ip, 22, 8 * 60 * 1000, 12000);
++      setJob(jobId, { status: 'ready', step: 'done', message: 'VPS siap digunakan!', progress: 100, server: { ip, port: 22, username: 'root', password: rootPass, os: image, region: regionSlug } });
++    } catch (e) {
++      console.error('[web] provisionVps error:', e);
++      setJob(jobId, { status: 'failed', step: 'error', message: 'Terjadi kesalahan: ' + (e.message || e) });
++    }
++  })();
++
++  return { ok: true, jobId };
++}
++
++module.exports = { listProducts, getOrderOptions, prepareOrder };

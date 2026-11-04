@@ -1,0 +1,1092 @@
+From 6d66d3ab7c8218ee0bc70cf0bb75feac702878e7 Mon Sep 17 00:00:00 2001
+From: LadyHwesta <tiesa@meskis.net>
+Date: Tue, 15 Sep 2026 11:51:17 -0700
+Subject: [PATCH] Automate dedicated-VPS creation via UpCloud's API
+
+Direct follow-up to the deployment-agent work: "for customers that
+will have their own private vps, I just created an API key on
+UpCloud. Can we automate the deployment of the initial VPS server this
+way?" Closes the one prerequisite the bootstrap script itself can't -
+the box existing at all - without changing the earlier decision that
+the bootstrap script itself still runs by hand, by Tiesa, never the
+customer.
+
+- upcloud_client.py: thin UpCloudClient (create/get/stop/delete
+  server, list zones/plans), same shape as every other API client in
+  this repo.
+- upcloud_account.py: upcloud.account holds the API token, Tiesa's own
+  SSH public key (injected into every new server so she can run the
+  bootstrap script afterward), and zone/plan/OS-template defaults.
+  System group only - not even plain internal users can read it,
+  since a compromised token can spend real money broadly.
+- deployment.server gains vps_provider/upcloud_account_id/upcloud_uuid/
+  upcloud_state fields and three actions (Create UpCloud Server, Check
+  VPS Status, Destroy VPS). action_request()'s generated checklist
+  gains one more task, "Create the UpCloud VPS," ahead of "Confirm
+  server access," when applicable.
+
+**Live-verified 2026-09-15** against the user's real UpCloud account -
+created a real STARTER-1xCPU-1GB server from the Debian 12 template,
+confirmed SSH login with the injected key actually worked, then
+stopped and deleted it (confirmed gone via a follow-up 404). Two real
+findings baked into the client:
+- `metadata` in the create-server body must be the literal string
+  "yes", not a JSON boolean - `true` is rejected outright
+  (METADATA_INVALID), needed at all because cloning a cloud-init-based
+  template (the standard Debian/Ubuntu ones) fails otherwise
+  (METADATA_DISABLED_ON_CLOUD-INIT).
+- Reaching state "started" does NOT mean SSH is actually reachable yet
+  - a real connection got refused immediately after "started", only
+  succeeding ~15s later. UpCloudClient.wait_for_state() and the
+  Check VPS Status notification both account for this.
+
+Also fixed a real design gap this surfaced: deployment.server's own
+hostname/agent_url were required=True, but neither is actually known
+at creation time for an UpCloud-provisioned server (the IP doesn't
+exist until Create UpCloud Server runs, the agent isn't installed
+until the bootstrap script runs after that). Both relaxed to optional,
+with _get_client() raising a clear guard instead of relying on a DB
+constraint.
+
+329 tests green across the full 12-module regression suite (41 in
+this module alone, up from 24).
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+---
+ README.md                                     |   8 +-
+ managed_odoo_instances/README.md              |  45 +++++
+ managed_odoo_instances/__manifest__.py        |  11 +-
+ managed_odoo_instances/models/__init__.py     |   2 +
+ .../models/deployment_instance.py             |  27 ++-
+ .../models/deployment_server.py               | 143 +++++++++++++++-
+ .../models/upcloud_account.py                 |  48 ++++++
+ .../models/upcloud_client.py                  | 154 ++++++++++++++++++
+ .../security/ir.model.access.csv              |   1 +
+ managed_odoo_instances/tests/__init__.py      |   2 +
+ .../tests/test_deployment_instance.py         |  24 +++
+ .../tests/test_deployment_server_upcloud.py   | 112 +++++++++++++
+ .../tests/test_upcloud_client.py              | 125 ++++++++++++++
+ .../views/deployment_server_views.xml         |  26 +++
+ managed_odoo_instances/views/menus.xml        |   3 +
+ .../views/upcloud_account_views.xml           |  48 ++++++
+ 16 files changed, 768 insertions(+), 11 deletions(-)
+ create mode 100644 managed_odoo_instances/models/upcloud_account.py
+ create mode 100644 managed_odoo_instances/models/upcloud_client.py
+ create mode 100644 managed_odoo_instances/tests/test_deployment_server_upcloud.py
+ create mode 100644 managed_odoo_instances/tests/test_upcloud_client.py
+ create mode 100644 managed_odoo_instances/views/upcloud_account_views.xml
+
+diff --git a/README.md b/README.md
+index bdc0aa3..b716709 100644
+--- a/README.md
++++ b/README.md
+@@ -134,8 +134,12 @@ Custom Odoo 19 modules.
+   attachment (sent to Tiesa to run by hand, never the customer).
+   Bills through `reseller_subscriptions`'s own
+   `contract.billing.mixin`, but only starts invoicing once an instance
+-  is actually marked live. See its README for what's still a
+-  deliberate manual step (the X-Odoo-Dbfilter routing middleware
++  is actually marked live. Optionally automates the one prerequisite
++  the bootstrap script can't - creating a dedicated VPS in the first
++  place - via UpCloud's real API (`upcloud.account`), **live-verified
++  2026-09-15**: a real server was created, confirmed reachable over
++  SSH with an injected key, then destroyed. See its README for what's
++  still a deliberate manual step (the X-Odoo-Dbfilter routing middleware
+   itself, deeper per-instance configuration) and
+   `meskis-deploy-agent`'s own README for what's not yet live-verified
+   (the bootstrap script itself, against a real server).
+diff --git a/managed_odoo_instances/README.md b/managed_odoo_instances/README.md
+index ab069d8..d656bec 100644
+--- a/managed_odoo_instances/README.md
++++ b/managed_odoo_instances/README.md
+@@ -57,6 +57,44 @@ customers aren't technical enough for "SSH in and run this" to make
+ sense, and this project checklist is itself the real onboarding
+ runbook, not just a delivery mechanism for one script.
+ 
++## Automated VPS creation via UpCloud
++
++For a dedicated server whose `deployment.server.vps_provider` is set
++to `upcloud`, the "does the box even exist yet" prerequisite is
++automated too - `upcloud_account.py`/`upcloud_client.py`, and three
++new buttons on the server record (Create UpCloud Server, Check VPS
++Status, Destroy VPS). This doesn't change the bootstrap-script
++decision at all: the generated checklist just gains one more task,
++"Create the UpCloud VPS," ahead of "Confirm server access" - once the
++VPS exists and SSH is reachable, everything from there is exactly as
++before (Tiesa runs the bootstrap script by hand).
++
++**Live-verified 2026-09-15** against the user's real UpCloud account -
++created a real `STARTER-1xCPU-1GB` server from the Debian 12 template
++in `us-chi1`, confirmed SSH login with the injected key actually
++worked, then stopped and deleted it (confirmed gone via a follow-up
++404). Two real findings baked into the client, not obvious from a
++casual reading of UpCloud's docs:
++
++- `metadata` in the create-server request body must be the **string**
++  `"yes"`, not a JSON boolean - `true` is rejected outright
++  (`METADATA_INVALID`). It's required at all because cloning a
++  cloud-init-based template (the standard Debian/Ubuntu ones) fails
++  with `METADATA_DISABLED_ON_CLOUD-INIT` without it.
++- A server reaching UpCloud's own `state: "started"` does **not**
++  mean SSH is actually reachable yet - a real connection attempt got
++  refused immediately after `started`, and only succeeded about 15
++  seconds later. `action_check_upcloud_status()`'s own notification
++  text says as much rather than implying "started" means "ready."
++
++`upcloud.account` (System group only - not even plain internal users
++can read it, since a compromised token can spend real money broadly
++across every server, not just one deployment) holds the API token,
++Tiesa's own SSH public key (injected into every new server's root
++login, matching the "Tiesa runs the bootstrap script, never the
++customer" decision), and default zone/plan/OS-template - each
++`deployment.server` can override any of those per-server.
++
+ ## What's a deliberate manual step, not automated
+ 
+ - **The X-Odoo-Dbfilter routing middleware itself.** The shared
+@@ -101,7 +139,14 @@ request time, not twice on a repeated call. `DeploymentAgentClient`
+ and `deployment.server._get_client()`/`action_test_connection()` are
+ tested against `requests` mocked at the module boundary, same
+ convention as `HestiaCPClient`'s/`SignalWireClient`'s own tests.
++`UpCloudClient` and the three `deployment.server` UpCloud actions get
++the same treatment, plus a project-generation test confirming the
++extra "Create the UpCloud VPS" task appears (and in the right order)
++only when `vps_provider == 'upcloud'`.
+ 
+ Not run against the real shared Meskis Works server or any real
+ dedicated VPS - see `meskis-deploy-agent`'s own README for what's
+ still unverified there (`scripts/bootstrap.sh` itself, specifically).
++**The UpCloud integration itself is the one piece of this whole
++project actually live-verified against real infrastructure** - see
++"Automated VPS creation via UpCloud" above.
+diff --git a/managed_odoo_instances/__manifest__.py b/managed_odoo_instances/__manifest__.py
+index 052b81e..ac15d0b 100644
+--- a/managed_odoo_instances/__manifest__.py
++++ b/managed_odoo_instances/__manifest__.py
+@@ -1,7 +1,7 @@
+ # -*- coding: utf-8 -*-
+ {
+     'name': 'Managed Odoo Instances',
+-    'version': '19.0.1.0.0',
++    'version': '19.0.2.0.0',
+     'category': 'Sales/Subscriptions',
+     'summary': 'Deploy and bill customer Odoo instances - shared multi-tenant or dedicated VPS',
+     'description': """
+@@ -37,6 +37,14 @@
+   nonprofit/club/paramedic suites as presets) mapping to real
+   technical module names, each linked to a sellable ``product.template``.
+ 
++``upcloud.account``/``upcloud_client.py`` optionally automate the one
++prerequisite step the bootstrap script itself can't: creating the VPS
++in the first place, via UpCloud's real API (live-verified 2026-09-15 -
++a real server was created, confirmed reachable over SSH with an
++injected key, then destroyed). The bootstrap script - still run by
++hand, by Tiesa, never the customer - picks up from there exactly as
++before.
++
+ See README.md for what's still a manual step by design (deeper
+ per-instance configuration, the X-Odoo-Dbfilter routing middleware
+ itself) and what's not yet live-verified.
+@@ -48,6 +56,7 @@
+     'data': [
+         'security/ir.model.access.csv',
+         'data/deployment_app_data.xml',
++        'views/upcloud_account_views.xml',
+         'views/deployment_server_views.xml',
+         'views/deployment_instance_views.xml',
+         'views/deployment_app_views.xml',
+diff --git a/managed_odoo_instances/models/__init__.py b/managed_odoo_instances/models/__init__.py
+index 55fe1e7..1ef8b66 100644
+--- a/managed_odoo_instances/models/__init__.py
++++ b/managed_odoo_instances/models/__init__.py
+@@ -1,5 +1,7 @@
+ # -*- coding: utf-8 -*-
+ from . import deployment_agent_client
++from . import upcloud_client
++from . import upcloud_account
+ from . import deployment_app
+ from . import deployment_server
+ from . import deployment_instance
+diff --git a/managed_odoo_instances/models/deployment_instance.py b/managed_odoo_instances/models/deployment_instance.py
+index 9669e11..e127ab4 100644
+--- a/managed_odoo_instances/models/deployment_instance.py
++++ b/managed_odoo_instances/models/deployment_instance.py
+@@ -126,16 +126,32 @@ def _create_bootstrap_tasks(self, sequence):
+         Returns the next free sequence number for whatever follows.
+         """
+         self.ensure_one()
++        step = sequence
++
++        if self.server_id.vps_provider == 'upcloud':
++            self.env['project.task'].create({
++                'project_id': self.project_id.id, 'sequence': step,
++                'name': _("Create the UpCloud VPS"),
++                'description': _(
++                    "Click Create UpCloud Server on this deployment's "
++                    "server record, then Check VPS Status a minute or "
++                    "two later before moving on - reaching \"started\" "
++                    "doesn't necessarily mean SSH is up yet."),
++            })
++            step += 10
++
+         self.env['project.task'].create({
+-            'project_id': self.project_id.id, 'sequence': sequence,
++            'project_id': self.project_id.id, 'sequence': step,
+             'name': _("Confirm server access (%(hostname)s)",
+                       hostname=self.server_id.hostname),
+             'description': _(
+                 "Make sure you can SSH into %(hostname)s as root before "
+                 "the next step.", hostname=self.server_id.hostname),
+         })
++        step += 10
++
+         run_task = self.env['project.task'].create({
+-            'project_id': self.project_id.id, 'sequence': sequence + 10,
++            'project_id': self.project_id.id, 'sequence': step,
+             'name': _("Run the bootstrap script on the server"),
+             'description': _(
+                 "Copy the attached bootstrap.sh onto %(hostname)s and run "
+@@ -145,6 +161,7 @@ def _create_bootstrap_tasks(self, sequence):
+                 "continuing. Never send this script to the customer - "
+                 "it's for you to run by hand.", hostname=self.server_id.hostname),
+         })
++        step += 10
+         with file_open(BOOTSTRAP_SCRIPT_RESOURCE, 'rb') as f:
+             script_content = f.read()
+         self.env['ir.attachment'].create({
+@@ -155,14 +172,16 @@ def _create_bootstrap_tasks(self, sequence):
+             'res_model': 'project.task',
+             'res_id': run_task.id,
+         })
++
+         self.env['project.task'].create({
+-            'project_id': self.project_id.id, 'sequence': sequence + 20,
++            'project_id': self.project_id.id, 'sequence': step,
+             'name': _("Confirm the agent is reachable"),
+             'description': _(
+                 "Paste the printed token into this server's Agent Token "
+                 "field, then click Test Connection on the server record."),
+         })
+-        return sequence + 40
++        step += 20
++        return step
+ 
+     def _deployment_task_vals(self, sequence):
+         self.ensure_one()
+diff --git a/managed_odoo_instances/models/deployment_server.py b/managed_odoo_instances/models/deployment_server.py
+index 6873e44..5d4f51c 100644
+--- a/managed_odoo_instances/models/deployment_server.py
++++ b/managed_odoo_instances/models/deployment_server.py
+@@ -1,4 +1,6 @@
+ # -*- coding: utf-8 -*-
++import re
++
+ from odoo import _, fields, models
+ from odoo.exceptions import UserError
+ 
+@@ -18,9 +20,11 @@ class DeploymentServer(models.Model):
+ 
+     name = fields.Char(required=True)
+     hostname = fields.Char(
+-        required=True,
+         help="This server's own admin hostname or IP - not a "
+-             "customer's domain (a shared server hosts many).")
++             "customer's domain (a shared server hosts many). Not "
++             "required at creation time for an UpCloud-provisioned "
++             "server - Create UpCloud Server fills it in with the "
++             "real public IP once the VPS actually exists.")
+     kind = fields.Selection(
+         [('shared', 'Shared Multi-Tenant'), ('dedicated', 'Dedicated')],
+         required=True, default='dedicated')
+@@ -29,9 +33,11 @@ class DeploymentServer(models.Model):
+         help="For a dedicated server, the customer it belongs to. "
+              "Left empty for the shared server.")
+     agent_url = fields.Char(
+-        required=True,
+         help="Base URL of this server's own deploy agent, "
+-             "e.g. https://vps1.example.com:8765")
++             "e.g. https://vps1.example.com:8765 - not required at "
++             "creation time (an UpCloud-provisioned server doesn't "
++             "even have a hostname yet until Create UpCloud Server "
++             "runs), only once actually calling the agent.")
+     agent_token = fields.Char(
+         help="Bearer token for the agent - generated by "
+              "scripts/bootstrap.sh (see meskis-deploy-agent) and "
+@@ -44,8 +50,35 @@ class DeploymentServer(models.Model):
+     last_health_check = fields.Datetime(readonly=True)
+     last_health_ok = fields.Boolean(readonly=True)
+ 
++    # -- optional: automated VPS creation via UpCloud, for kind='dedicated' -
++    vps_provider = fields.Selection(
++        [('manual', 'Manual / Customer-Provided'), ('upcloud', 'UpCloud')],
++        default='manual', required=True,
++        help="'Manual' covers both a customer's own server and any "
++             "VPS provider without an automated integration here - "
++             "the bootstrap script still gets run by hand either way, "
++             "this only automates the earlier \"does the box exist "
++             "yet at all\" step.")
++    upcloud_account_id = fields.Many2one('upcloud.account', string="UpCloud Account")
++    upcloud_uuid = fields.Char(readonly=True, copy=False, help="Set once the VPS is created.")
++    upcloud_state = fields.Char(
++        readonly=True, copy=False,
++        help="UpCloud's own state string for this server (maintenance/"
++             "started/stopped/...) - refreshed by Check VPS Status, "
++             "not live.")
++    upcloud_zone = fields.Char(help="Defaults from the UpCloud account if left empty.")
++    upcloud_plan = fields.Char(help="Defaults from the UpCloud account if left empty.")
++    upcloud_template_uuid = fields.Char(
++        help="Defaults from the UpCloud account if left empty.")
++
+     def _get_client(self):
+         self.ensure_one()
++        if not self.agent_url:
++            raise UserError(_(
++                "%(server)s has no agent URL yet - it needs a real "
++                "hostname/IP first (Create UpCloud Server sets this "
++                "automatically; for a manual server, set it by hand).",
++                server=self.name))
+         if not self.agent_token:
+             raise UserError(_(
+                 "%(server)s has no agent token yet - run the bootstrap "
+@@ -93,3 +126,105 @@ def action_test_connection(self):
+                 'type': 'success',
+             },
+         }
++
++    # -- UpCloud VPS creation ------------------------------------------------
++
++    def _upcloud_provisional_hostname(self):
++        """A safe, valid-looking hostname to hand UpCloud for a server
++        whose own hostname field hasn't been set yet - only used as
++        the VM's internal label; deployment.server's own hostname
++        field gets overwritten with the real public IP right after.
++        """
++        self.ensure_one()
++        slug = re.sub(r'[^a-z0-9-]+', '-', (self.name or 'server').lower()).strip('-') or 'server'
++        return f'{slug}.upcloud.internal'
++
++    def action_create_upcloud_server(self):
++        """Creates the actual VPS (real money) and stores its UUID/IP
++        - deliberately does NOT block waiting for it to finish booting
++        (UpCloud's own create call returns state "maintenance", and
++        confirmed live that "started" alone doesn't even mean SSH is
++        up yet - can take upwards of a minute end to end). Click
++        "Check VPS Status" afterward, once, before running the
++        bootstrap script.
++        """
++        self.ensure_one()
++        if self.vps_provider != 'upcloud':
++            raise UserError(_("This server isn't configured for UpCloud provisioning."))
++        if not self.upcloud_account_id:
++            raise UserError(_("Choose an UpCloud Account first."))
++        if self.upcloud_uuid:
++            raise UserError(_("%(server)s already has an UpCloud VPS created.", server=self.name))
++
++        account = self.upcloud_account_id
++        client = account._get_client()
++        server = client.create_server(
++            zone=self.upcloud_zone or account.default_zone,
++            plan=self.upcloud_plan or account.default_plan,
++            template_uuid=self.upcloud_template_uuid or account.default_template_uuid,
++            title=self.name,
++            # This is UpCloud's own idea of the VM's hostname (a
++            # sensible placeholder if not set yet) - overwritten below
++            # with the real public IP the moment it comes back, so the
++            # field goes on to mean "how to actually reach this
++            # server" from here on, same as every other deployment.server.
++            hostname=self.hostname or self._upcloud_provisional_hostname(),
++            ssh_public_key=account.ssh_public_key,
++        )
++        public_ip = next(
++            (ip['address'] for ip in server.get('ip_addresses', {}).get('ip_address', [])
++             if ip.get('access') == 'public'), None)
++        self.write({
++            'upcloud_uuid': server['uuid'],
++            'upcloud_state': server.get('state'),
++            'hostname': public_ip or self.hostname,
++        })
++        return {
++            'type': 'ir.actions.client',
++            'tag': 'display_notification',
++            'params': {
++                'title': _("VPS creation started"),
++                'message': _(
++                    "UUID %(uuid)s, IP %(ip)s - check status in a "
++                    "minute or two before trying to SSH in.",
++                    uuid=server['uuid'], ip=public_ip or '?'),
++                'type': 'success',
++            },
++        }
++
++    def action_check_upcloud_status(self):
++        self.ensure_one()
++        if not self.upcloud_uuid:
++            raise UserError(_("%(server)s has no UpCloud VPS created yet.", server=self.name))
++        server = self.upcloud_account_id._get_client().get_server(self.upcloud_uuid)
++        self.upcloud_state = server.get('state')
++        return {
++            'type': 'ir.actions.client',
++            'tag': 'display_notification',
++            'params': {
++                'title': _("UpCloud status: %(state)s", state=self.upcloud_state),
++                'message': _(
++                    "SSH may take a little longer to come up even "
++                    "after this shows \"started\"."
++                ) if self.upcloud_state == 'started' else _(
++                    "Still provisioning - check again shortly."),
++                'type': 'success' if self.upcloud_state == 'started' else 'info',
++            },
++        }
++
++    def action_destroy_upcloud_server(self):
++        """One-way and real money - stops then deletes the VPS
++        (including its storage). Used for tearing down an abandoned/
++        cancelled deployment, not part of the normal happy path.
++        """
++        self.ensure_one()
++        if not self.upcloud_uuid:
++            raise UserError(_("%(server)s has no UpCloud VPS to destroy.", server=self.name))
++        client = self.upcloud_account_id._get_client()
++        client.stop_server(self.upcloud_uuid)
++        # A delete right after stop isn't guaranteed to succeed - the
++        # server needs to actually reach "stopped" first (confirmed
++        # live, see UpCloudClient.wait_for_state's own docstring).
++        client.wait_for_state(self.upcloud_uuid, 'stopped')
++        client.delete_server(self.upcloud_uuid, delete_storages=True)
++        self.write({'upcloud_uuid': False, 'upcloud_state': False})
+diff --git a/managed_odoo_instances/models/upcloud_account.py b/managed_odoo_instances/models/upcloud_account.py
+new file mode 100644
+index 0000000..e6e9dcc
+--- /dev/null
++++ b/managed_odoo_instances/models/upcloud_account.py
+@@ -0,0 +1,48 @@
++# -*- coding: utf-8 -*-
++from odoo import fields, models
++
++from .upcloud_client import UpCloudClient
++
++# Confirmed live 2026-09-15: the standard Debian/Ubuntu cloud-init
++# templates, by their real UUIDs on the user's own account.
++DEFAULT_TEMPLATE_UUID = '01000000-0000-4000-8000-000020070100'  # Debian 12 (Bookworm)
++
++
++class UpCloudAccount(models.Model):
++    """The reseller's own UpCloud account - one record normally covers
++    every dedicated server provisioned this way (a single API token),
++    but kept as its own model rather than a singleton config screen so
++    a second account (different billing entity, different region
++    defaults) is possible without a schema change later.
++    """
++    _name = 'upcloud.account'
++    _description = 'UpCloud Account'
++    _rec_name = 'name'
++
++    name = fields.Char(required=True)
++    api_token = fields.Char(
++        required=True,
++        help="An UpCloud API token (the \"ucat_...\" kind, created in "
++             "the UpCloud control panel or via upctl) - not a "
++             "subaccount username/password.")
++    ssh_public_key = fields.Text(
++        required=True,
++        help="Injected into every new server's root login at "
++             "creation, so you (never the customer) can SSH in "
++             "afterward to run the bootstrap script.")
++    default_zone = fields.Char(
++        default='us-chi1', required=True,
++        help="An UpCloud zone id, e.g. \"us-chi1\" - see UpCloud's "
++             "own zone list for the full set.")
++    default_plan = fields.Char(
++        default='STARTER-1xCPU-2GB', required=True,
++        help="An UpCloud plan name, e.g. \"STARTER-1xCPU-2GB\".")
++    default_template_uuid = fields.Char(
++        default=DEFAULT_TEMPLATE_UUID, required=True,
++        help="The OS template's UUID to clone for a new server's "
++             "disk - defaults to Debian 12, matching "
++             "meskis-deploy-agent's own bootstrap script.")
++
++    def _get_client(self):
++        self.ensure_one()
++        return UpCloudClient(self.api_token)
+diff --git a/managed_odoo_instances/models/upcloud_client.py b/managed_odoo_instances/models/upcloud_client.py
+new file mode 100644
+index 0000000..4ad3c23
+--- /dev/null
++++ b/managed_odoo_instances/models/upcloud_client.py
+@@ -0,0 +1,154 @@
++# -*- coding: utf-8 -*-
++"""Thin HTTP client for UpCloud's API (https://developers.upcloud.com/1.3/).
++Isolated in its own module, same reasoning as every other API client in
++this repo (HestiaCPClient, SignalWireClient, DeploymentAgentClient) -
++one small wire-format surface, kept correct in one place.
++
++**Live-verified 2026-09-15** against the user's real UpCloud account:
++created a real STARTER-1xCPU-1GB server in us-chi1 from the Debian 12
++template, confirmed it actually came up (SSH login with the injected
++key worked, real Debian 12 install), then stopped and deleted it
++(server + storage) - confirmed gone via a follow-up 404. Two real
++findings that don't match a naive reading of the docs:
++
++- ``metadata`` in the create-server request body must be the literal
++  **string** ``"yes"``, not a JSON boolean - ``true`` is rejected with
++  ``METADATA_INVALID``. Needed at all because cloning a cloud-init-
++  based template (which the standard Debian/Ubuntu templates are)
++  fails outright with ``METADATA_DISABLED_ON_CLOUD-INIT`` without it.
++- The server reaching ``state: started`` does **not** mean SSH is
++  actually reachable yet - a real attempt got "Connection refused"
++  immediately after ``started``, and only succeeded ~15s later.
++  ``wait_for_ssh_ready`` bakes in that extra wait/retry rather than
++  treating ``started`` alone as "ready."
++"""
++import logging
++import time
++
++import requests
++
++from odoo.exceptions import UserError
++
++_logger = logging.getLogger(__name__)
++
++BASE_URL = 'https://api.upcloud.com'
++TIMEOUT = 30
++
++
++class UpCloudAPIError(UserError):
++    """Raised when the UpCloud API is unreachable or returns an error."""
++
++
++class UpCloudClient:
++    """:param token: an UpCloud API token (the ``ucat_...`` kind, created
++        in the UpCloud control panel or via ``upctl`` - not a
++        subaccount username/password).
++    """
++
++    def __init__(self, token):
++        self.token = token
++
++    def _request(self, method, path, json_body=None, params=None):
++        url = f'{BASE_URL}{path}'
++        try:
++            response = requests.request(
++                method, url, json=json_body, params=params, timeout=TIMEOUT,
++                headers={'Authorization': f'Bearer {self.token}'})
++        except requests.RequestException as exc:
++            _logger.warning('UpCloud API request failed (%s %s): %s', method, path, exc)
++            raise UpCloudAPIError(f'Could not reach the UpCloud API: {exc}') from exc
++
++        if response.status_code >= 400:
++            detail = response.text
++            try:
++                detail = response.json().get('error', {}).get('error_message', detail)
++            except ValueError:
++                pass
++            raise UpCloudAPIError(
++                f'UpCloud API request to {path} failed '
++                f'(HTTP {response.status_code}): {detail}')
++        return response.json() if response.content else {}
++
++    def list_zones(self):
++        result = self._request('GET', '/1.3/zone')
++        return [z['id'] for z in result.get('zones', {}).get('zone', [])]
++
++    def list_plans(self):
++        result = self._request('GET', '/1.3/plan')
++        return result.get('plans', {}).get('plan', [])
++
++    def create_server(self, zone, plan, template_uuid, title, hostname, ssh_public_key,
++                       username='root', storage_size=10):
++        """Creates a real server (real money) and returns the API's own
++        response dict for it - state will be "maintenance", not
++        "started", immediately after this returns; poll get_server()
++        (or use wait_for_started()) for actual readiness.
++        """
++        body = {
++            'server': {
++                'zone': zone,
++                'title': title,
++                'hostname': hostname,
++                'plan': plan,
++                # String "yes", not a JSON boolean - see this module's
++                # own docstring for why (confirmed live).
++                'metadata': 'yes',
++                'storage_devices': {
++                    'storage_device': [{
++                        'action': 'clone',
++                        'storage': template_uuid,
++                        'title': f'{title}-os',
++                        'size': storage_size,
++                        'tier': 'standard',
++                    }],
++                },
++                'networking': {
++                    'interfaces': {
++                        'interface': [{
++                            'type': 'public',
++                            'ip_addresses': {'ip_address': [{'family': 'IPv4'}]},
++                        }],
++                    },
++                },
++                'login_user': {
++                    'username': username,
++                    'ssh_keys': {'ssh_key': [ssh_public_key]},
++                },
++            },
++        }
++        result = self._request('POST', '/1.3/server', json_body=body)
++        return result['server']
++
++    def get_server(self, uuid):
++        result = self._request('GET', f'/1.3/server/{uuid}')
++        return result['server']
++
++    def stop_server(self, uuid):
++        self._request('POST', f'/1.3/server/{uuid}/stop', json_body={
++            'stop_server': {'stop_type': 'hard'}})
++
++    def delete_server(self, uuid, delete_storages=True):
++        params = {'storages': 1} if delete_storages else None
++        self._request('DELETE', f'/1.3/server/{uuid}', params=params)
++
++    def wait_for_state(self, uuid, state, timeout=180, poll_interval=5):
++        """Polls get_server() until it reaches `state` or timeout -
++        needed for stop_server() specifically (confirmed live: its
++        response, like create_server()'s, reports the server's state
++        from *before* the action finishes - a delete_server() call
++        made immediately after stop_server() without waiting for
++        "stopped" isn't guaranteed to succeed). Not used by
++        action_create_upcloud_server/action_check_upcloud_status
++        (those deliberately return right away rather than blocking an
++        HTTP request for up to a few minutes) - only by
++        action_destroy_upcloud_server, a rare, one-off admin action
++        where waiting a few seconds for correctness matters more.
++        """
++        deadline = time.monotonic() + timeout
++        while time.monotonic() < deadline:
++            server = self.get_server(uuid)
++            if server['state'] == state:
++                return server
++            time.sleep(poll_interval)
++        raise UpCloudAPIError(
++            f'Server {uuid} did not reach "{state}" within {timeout}s.')
+diff --git a/managed_odoo_instances/security/ir.model.access.csv b/managed_odoo_instances/security/ir.model.access.csv
+index 9b72a17..8818a1c 100644
+--- a/managed_odoo_instances/security/ir.model.access.csv
++++ b/managed_odoo_instances/security/ir.model.access.csv
+@@ -5,3 +5,4 @@ access_deployment_instance_user,deployment.instance user,model_deployment_instan
+ access_deployment_instance_system,deployment.instance system,model_deployment_instance,base.group_system,1,1,1,1
+ access_deployment_app_user,deployment.app user,model_deployment_app,base.group_user,1,0,0,0
+ access_deployment_app_system,deployment.app system,model_deployment_app,base.group_system,1,1,1,1
++access_upcloud_account_system,upcloud.account system,model_upcloud_account,base.group_system,1,1,1,1
+diff --git a/managed_odoo_instances/tests/__init__.py b/managed_odoo_instances/tests/__init__.py
+index 439bb23..874a16d 100644
+--- a/managed_odoo_instances/tests/__init__.py
++++ b/managed_odoo_instances/tests/__init__.py
+@@ -1,4 +1,6 @@
+ # -*- coding: utf-8 -*-
+ from . import test_deployment_agent_client
++from . import test_upcloud_client
+ from . import test_deployment_server
++from . import test_deployment_server_upcloud
+ from . import test_deployment_instance
+diff --git a/managed_odoo_instances/tests/test_deployment_instance.py b/managed_odoo_instances/tests/test_deployment_instance.py
+index 029a74d..690664b 100644
+--- a/managed_odoo_instances/tests/test_deployment_instance.py
++++ b/managed_odoo_instances/tests/test_deployment_instance.py
+@@ -28,6 +28,16 @@ def setUpClass(cls):
+             'agent_url': 'https://vps2.example.com:8765', 'agent_token': 'vps2-token',
+             'bootstrap_state': 'done',
+         })
++        cls.upcloud_account = cls.env['upcloud.account'].create({
++            'name': 'Test UpCloud Account', 'api_token': 'ucat_test',
++            'ssh_public_key': 'ssh-ed25519 AAAA...',
++        })
++        cls.dedicated_server_upcloud = cls.env['deployment.server'].create({
++            'name': 'Dedicated - UpCloud', 'hostname': 'pending.example.com',
++            'kind': 'dedicated', 'partner_id': cls.partner.id,
++            'agent_url': 'https://vps3.example.com:8765', 'bootstrap_state': 'pending',
++            'vps_provider': 'upcloud', 'upcloud_account_id': cls.upcloud_account.id,
++        })
+         cls.free_app = cls.env['deployment.app'].create({
+             'name': 'Test Suite', 'module_names': 'base,mail',
+         })
+@@ -82,6 +92,20 @@ def test_request_on_a_pending_dedicated_server_includes_bootstrap_tasks(self):
+         self.assertTrue(bootstrap_task.attachment_ids)
+         self.assertEqual(bootstrap_task.attachment_ids.name, 'bootstrap.sh')
+ 
++    def test_request_on_an_upcloud_dedicated_server_adds_a_create_vps_task(self):
++        instance = self._instance(self.dedicated_server_upcloud)
++
++        instance.action_request()
++
++        self.assertEqual(len(instance.project_id.task_ids), 9, "3 bootstrap + 1 VPS + 5 deploy")
++        create_vps_task = instance.project_id.task_ids.filtered(
++            lambda t: 'Create the UpCloud VPS' in t.name)
++        self.assertTrue(create_vps_task)
++        # comes before "Confirm server access"
++        confirm_access_task = instance.project_id.task_ids.filtered(
++            lambda t: 'Confirm server access' in t.name)
++        self.assertLess(create_vps_task.sequence, confirm_access_task.sequence)
++
+     def test_request_on_an_already_bootstrapped_dedicated_server_skips_bootstrap_tasks(self):
+         instance = self._instance(self.dedicated_server_done)
+ 
+diff --git a/managed_odoo_instances/tests/test_deployment_server_upcloud.py b/managed_odoo_instances/tests/test_deployment_server_upcloud.py
+new file mode 100644
+index 0000000..1e45fde
+--- /dev/null
++++ b/managed_odoo_instances/tests/test_deployment_server_upcloud.py
+@@ -0,0 +1,112 @@
++# -*- coding: utf-8 -*-
++from unittest.mock import MagicMock, patch
++
++from odoo.exceptions import UserError
++from odoo.tests.common import TransactionCase, tagged
++
++
++@tagged('post_install', '-at_install')
++class TestDeploymentServerUpCloud(TransactionCase):
++
++    @classmethod
++    def setUpClass(cls):
++        super().setUpClass()
++        cls.account = cls.env['upcloud.account'].create({
++            'name': 'Test UpCloud Account', 'api_token': 'ucat_test',
++            'ssh_public_key': 'ssh-ed25519 AAAA...',
++            'default_zone': 'us-chi1', 'default_plan': 'STARTER-1xCPU-1GB',
++            'default_template_uuid': '01000000-0000-4000-8000-000020070100',
++        })
++        cls.server = cls.env['deployment.server'].create({
++            'name': 'New Dedicated VPS', 'hostname': 'placeholder.example.com',
++            'kind': 'dedicated', 'vps_provider': 'upcloud',
++            'upcloud_account_id': cls.account.id,
++        })
++
++    def _mock_upcloud_client(self):
++        patcher = patch(
++            'odoo.addons.managed_odoo_instances.models.upcloud_account.UpCloudClient')
++        mock_cls = patcher.start()
++        self.addCleanup(patcher.stop)
++        return mock_cls.return_value
++
++    def test_create_server_stores_uuid_and_ip(self):
++        mock_client = self._mock_upcloud_client()
++        mock_client.create_server.return_value = {
++            'uuid': 'abc-123', 'state': 'maintenance',
++            'ip_addresses': {'ip_address': [
++                {'access': 'public', 'address': '203.0.113.5', 'family': 'IPv4'}]},
++        }
++
++        self.server.action_create_upcloud_server()
++
++        self.assertEqual(self.server.upcloud_uuid, 'abc-123')
++        self.assertEqual(self.server.upcloud_state, 'maintenance')
++        self.assertEqual(self.server.hostname, '203.0.113.5')
++
++    def test_create_server_passes_account_defaults_when_no_override(self):
++        mock_client = self._mock_upcloud_client()
++        mock_client.create_server.return_value = {
++            'uuid': 'abc-123', 'state': 'maintenance', 'ip_addresses': {'ip_address': []}}
++
++        self.server.action_create_upcloud_server()
++
++        mock_client.create_server.assert_called_once()
++        kwargs = mock_client.create_server.call_args[1]
++        self.assertEqual(kwargs['zone'], 'us-chi1')
++        self.assertEqual(kwargs['plan'], 'STARTER-1xCPU-1GB')
++        self.assertEqual(kwargs['ssh_public_key'], 'ssh-ed25519 AAAA...')
++
++    def test_create_server_per_server_override_wins(self):
++        server = self.env['deployment.server'].create({
++            'name': 'Override VPS', 'hostname': 'placeholder2.example.com',
++            'kind': 'dedicated', 'vps_provider': 'upcloud',
++            'upcloud_account_id': self.account.id, 'upcloud_zone': 'de-fra1',
++        })
++        mock_client = self._mock_upcloud_client()
++        mock_client.create_server.return_value = {
++            'uuid': 'xyz', 'state': 'maintenance', 'ip_addresses': {'ip_address': []}}
++
++        server.action_create_upcloud_server()
++
++        kwargs = mock_client.create_server.call_args[1]
++        self.assertEqual(kwargs['zone'], 'de-fra1')
++
++    def test_create_server_without_an_account_raises(self):
++        server = self.env['deployment.server'].create({
++            'name': 'No Account VPS', 'hostname': 'placeholder3.example.com',
++            'kind': 'dedicated', 'vps_provider': 'upcloud',
++        })
++        with self.assertRaises(UserError):
++            server.action_create_upcloud_server()
++
++    def test_create_server_twice_raises(self):
++        self.server.upcloud_uuid = 'already-created'
++        with self.assertRaises(UserError):
++            self.server.action_create_upcloud_server()
++
++    def test_check_status_updates_the_stored_state(self):
++        self.server.upcloud_uuid = 'abc-123'
++        mock_client = self._mock_upcloud_client()
++        mock_client.get_server.return_value = {'uuid': 'abc-123', 'state': 'started'}
++
++        result = self.server.action_check_upcloud_status()
++
++        self.assertEqual(self.server.upcloud_state, 'started')
++        self.assertEqual(result['params']['type'], 'success')
++
++    def test_check_status_without_a_vps_raises(self):
++        with self.assertRaises(UserError):
++            self.server.action_check_upcloud_status()
++
++    def test_destroy_stops_waits_then_deletes(self):
++        self.server.upcloud_uuid = 'abc-123'
++        mock_client = self._mock_upcloud_client()
++
++        self.server.action_destroy_upcloud_server()
++
++        mock_client.stop_server.assert_called_once_with('abc-123')
++        mock_client.wait_for_state.assert_called_once_with('abc-123', 'stopped')
++        mock_client.delete_server.assert_called_once_with('abc-123', delete_storages=True)
++        self.assertFalse(self.server.upcloud_uuid)
++        self.assertFalse(self.server.upcloud_state)
+diff --git a/managed_odoo_instances/tests/test_upcloud_client.py b/managed_odoo_instances/tests/test_upcloud_client.py
+new file mode 100644
+index 0000000..cc3e4a9
+--- /dev/null
++++ b/managed_odoo_instances/tests/test_upcloud_client.py
+@@ -0,0 +1,125 @@
++# -*- coding: utf-8 -*-
++from unittest.mock import MagicMock, patch
++
++import requests
++from odoo.tests.common import TransactionCase, tagged
++
++from odoo.addons.managed_odoo_instances.models.upcloud_client import (
++    UpCloudAPIError, UpCloudClient)
++
++
++@tagged('post_install', '-at_install')
++class TestUpCloudClient(TransactionCase):
++
++    def setUp(self):
++        super().setUp()
++        self.client = UpCloudClient('ucat_test_token')
++
++    def test_create_server_sends_metadata_as_the_string_yes_not_a_boolean(self):
++        """Confirmed live 2026-09-15: a JSON boolean is rejected
++        outright (METADATA_INVALID) - only the literal string "yes"
++        works, needed at all because the standard Debian/Ubuntu
++        templates are cloud-init-based (METADATA_DISABLED_ON_CLOUD-INIT
++        otherwise). The single most important thing this test file
++        guards against regressing.
++        """
++        with patch('requests.request') as mock_request:
++            mock_request.return_value = MagicMock(
++                status_code=202, content=b'{"server": {"uuid": "abc", "state": "maintenance"}}',
++                json=lambda: {'server': {'uuid': 'abc', 'state': 'maintenance'}})
++            self.client.create_server(
++                zone='us-chi1', plan='STARTER-1xCPU-1GB',
++                template_uuid='01000000-0000-4000-8000-000020070100',
++                title='test-server', hostname='test.example.com',
++                ssh_public_key='ssh-ed25519 AAAA...')
++
++        _method, _url = mock_request.call_args[0]
++        body = mock_request.call_args[1]['json']
++        self.assertEqual(body['server']['metadata'], 'yes')
++        self.assertIsInstance(body['server']['metadata'], str)
++
++    def test_create_server_sends_the_right_shape(self):
++        with patch('requests.request') as mock_request:
++            mock_request.return_value = MagicMock(
++                status_code=202,
++                content=b'{"server": {"uuid": "abc", "state": "maintenance"}}',
++                json=lambda: {'server': {'uuid': 'abc', 'state': 'maintenance'}})
++            self.client.create_server(
++                zone='us-chi1', plan='STARTER-1xCPU-1GB',
++                template_uuid='01000000-0000-4000-8000-000020070100',
++                title='test-server', hostname='test.example.com',
++                ssh_public_key='ssh-ed25519 AAAA...')
++
++        method, url = mock_request.call_args[0]
++        kwargs = mock_request.call_args[1]
++        self.assertEqual(method, 'POST')
++        self.assertEqual(url, 'https://api.upcloud.com/1.3/server')
++        self.assertEqual(kwargs['headers']['Authorization'], 'Bearer ucat_test_token')
++        server = kwargs['json']['server']
++        self.assertEqual(server['zone'], 'us-chi1')
++        self.assertEqual(server['plan'], 'STARTER-1xCPU-1GB')
++        self.assertEqual(server['hostname'], 'test.example.com')
++        self.assertEqual(
++            server['storage_devices']['storage_device'][0]['storage'],
++            '01000000-0000-4000-8000-000020070100')
++        self.assertEqual(
++            server['login_user']['ssh_keys']['ssh_key'], ['ssh-ed25519 AAAA...'])
++
++    def test_create_server_returns_the_server_dict(self):
++        with patch('requests.request') as mock_request:
++            mock_request.return_value = MagicMock(
++                status_code=202,
++                content=b'{"server": {"uuid": "abc-123", "state": "maintenance"}}',
++                json=lambda: {'server': {'uuid': 'abc-123', 'state': 'maintenance'}})
++            result = self.client.create_server(
++                zone='us-chi1', plan='STARTER-1xCPU-1GB',
++                template_uuid='01000000-0000-4000-8000-000020070100',
++                title='t', hostname='h', ssh_public_key='k')
++
++        self.assertEqual(result['uuid'], 'abc-123')
++        self.assertEqual(result['state'], 'maintenance')
++
++    def test_error_response_surfaces_the_real_error_message(self):
++        with patch('requests.request') as mock_request:
++            mock_request.return_value = MagicMock(
++                status_code=409,
++                content=b'{"error": {"error_code": "X", "error_message": "boom"}}',
++                text='{"error": {"error_code": "X", "error_message": "boom"}}',
++                json=lambda: {'error': {'error_code': 'X', 'error_message': 'boom'}})
++            with self.assertRaises(UpCloudAPIError) as cm:
++                self.client.create_server(
++                    zone='z', plan='p', template_uuid='t',
++                    title='t', hostname='h', ssh_public_key='k')
++
++        self.assertIn('boom', str(cm.exception))
++
++    def test_network_failure_raises(self):
++        with patch('requests.request', side_effect=requests.ConnectionError('refused')):
++            with self.assertRaises(UpCloudAPIError):
++                self.client.list_zones()
++
++    def test_delete_server_passes_storages_param(self):
++        with patch('requests.request') as mock_request:
++            mock_request.return_value = MagicMock(status_code=204, content=b'')
++            self.client.delete_server('abc-123', delete_storages=True)
++
++        method, url = mock_request.call_args[0]
++        self.assertEqual(method, 'DELETE')
++        self.assertEqual(url, 'https://api.upcloud.com/1.3/server/abc-123')
++        self.assertEqual(mock_request.call_args[1]['params'], {'storages': 1})
++
++    def test_wait_for_state_polls_until_the_target_state(self):
++        states = iter(['maintenance', 'maintenance', 'stopped'])
++        with patch.object(self.client, 'get_server', side_effect=lambda uuid: {
++                'uuid': uuid, 'state': next(states)}):
++            with patch('time.sleep'):
++                result = self.client.wait_for_state('abc-123', 'stopped', poll_interval=0)
++
++        self.assertEqual(result['state'], 'stopped')
++
++    def test_wait_for_state_times_out(self):
++        with patch.object(self.client, 'get_server',
++                           return_value={'uuid': 'abc', 'state': 'maintenance'}):
++            with patch('time.sleep'):
++                with self.assertRaises(UpCloudAPIError):
++                    self.client.wait_for_state('abc-123', 'started', timeout=0, poll_interval=0)
+diff --git a/managed_odoo_instances/views/deployment_server_views.xml b/managed_odoo_instances/views/deployment_server_views.xml
+index f599d55..69a3059 100644
+--- a/managed_odoo_instances/views/deployment_server_views.xml
++++ b/managed_odoo_instances/views/deployment_server_views.xml
+@@ -24,6 +24,16 @@
+                 <header>
+                     <button name="action_test_connection" type="object"
+                             string="Test Connection" class="btn-primary" />
++                    <button name="action_create_upcloud_server" type="object"
++                            string="Create UpCloud Server" class="btn-primary"
++                            invisible="vps_provider != 'upcloud' or upcloud_uuid" />
++                    <button name="action_check_upcloud_status" type="object"
++                            string="Check VPS Status"
++                            invisible="vps_provider != 'upcloud' or not upcloud_uuid" />
++                    <button name="action_destroy_upcloud_server" type="object"
++                            string="Destroy VPS" class="btn-secondary"
++                            confirm="This deletes the real VPS and its storage. Continue?"
++                            invisible="vps_provider != 'upcloud' or not upcloud_uuid" />
+                 </header>
+                 <sheet>
+                     <group>
+@@ -42,6 +52,22 @@
+                             <field name="last_health_ok" readonly="1" />
+                         </group>
+                     </group>
++                    <group string="Automated VPS Creation" invisible="kind != 'dedicated'">
++                        <group>
++                            <field name="vps_provider" />
++                            <field name="upcloud_account_id"
++                                   invisible="vps_provider != 'upcloud'" />
++                            <field name="upcloud_uuid" readonly="1"
++                                   invisible="vps_provider != 'upcloud'" />
++                            <field name="upcloud_state" readonly="1"
++                                   invisible="vps_provider != 'upcloud'" />
++                        </group>
++                        <group invisible="vps_provider != 'upcloud'">
++                            <field name="upcloud_zone" />
++                            <field name="upcloud_plan" />
++                            <field name="upcloud_template_uuid" />
++                        </group>
++                    </group>
+                 </sheet>
+                 <chatter />
+             </form>
+diff --git a/managed_odoo_instances/views/menus.xml b/managed_odoo_instances/views/menus.xml
+index 07aa05a..68aadc1 100644
+--- a/managed_odoo_instances/views/menus.xml
++++ b/managed_odoo_instances/views/menus.xml
+@@ -8,5 +8,8 @@
+               parent="menu_managed_odoo_root" action="action_deployment_server" sequence="20" />
+     <menuitem id="menu_deployment_app" name="Deployable Apps"
+               parent="menu_managed_odoo_root" action="action_deployment_app" sequence="30" />
++    <menuitem id="menu_upcloud_account" name="UpCloud Accounts"
++              parent="menu_managed_odoo_root" action="action_upcloud_account"
++              groups="base.group_system" sequence="40" />
+ 
+ </odoo>
+diff --git a/managed_odoo_instances/views/upcloud_account_views.xml b/managed_odoo_instances/views/upcloud_account_views.xml
+new file mode 100644
+index 0000000..6e0ada0
+--- /dev/null
++++ b/managed_odoo_instances/views/upcloud_account_views.xml
+@@ -0,0 +1,48 @@
++<?xml version="1.0" encoding="utf-8" ?>
++<odoo>
++
++    <record id="view_upcloud_account_list" model="ir.ui.view">
++        <field name="name">upcloud.account.list</field>
++        <field name="model">upcloud.account</field>
++        <field name="arch" type="xml">
++            <list>
++                <field name="name" />
++                <field name="default_zone" />
++                <field name="default_plan" />
++            </list>
++        </field>
++    </record>
++
++    <record id="view_upcloud_account_form" model="ir.ui.view">
++        <field name="name">upcloud.account.form</field>
++        <field name="model">upcloud.account</field>
++        <field name="arch" type="xml">
++            <form>
++                <sheet>
++                    <group>
++                        <group>
++                            <field name="name" />
++                            <field name="api_token" password="True" />
++                        </group>
++                        <group>
++                            <field name="default_zone" />
++                            <field name="default_plan" />
++                            <field name="default_template_uuid" />
++                        </group>
++                    </group>
++                    <group string="SSH Access">
++                        <field name="ssh_public_key" nolabel="1" colspan="2"
++                               placeholder="ssh-ed25519 AAAA..." />
++                    </group>
++                </sheet>
++            </form>
++        </field>
++    </record>
++
++    <record id="action_upcloud_account" model="ir.actions.act_window">
++        <field name="name">UpCloud Accounts</field>
++        <field name="res_model">upcloud.account</field>
++        <field name="view_mode">list,form</field>
++    </record>
++
++</odoo>

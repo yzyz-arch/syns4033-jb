@@ -1,0 +1,303 @@
+From 5d12f0619cfb5786b11ef8e2a10b497f07a74e76 Mon Sep 17 00:00:00 2001
+From: "Nintu (agent)" <nintu@simple-host.local>
+Date: Sun, 27 Sep 2026 22:04:44 +0000
+Subject: [PATCH] Setup assistant: redaction catches JSON keys, log prefixes,
+ colour codes, quoted values, curl/mysql/--password credentials, secret
+ headers, more secret names, SAS sig, UpCloud tokens and non-ASCII emails; the
+ hint says to check before sending
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ CHANGELOG.md                                  |  1 +
+ FEATURES.md                                   |  7 +-
+ internal/handler/setupredact.go               | 61 ++++++++++-----
+ internal/handler/static/privacy.html          |  2 +-
+ internal/handler/static/setup/assist.js       | 29 +++++---
+ .../handler/testdata/setup-redact-cases.json  | 74 ++++++++++++++++++-
+ 6 files changed, 142 insertions(+), 32 deletions(-)
+
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index f3974bba..15fffd28 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -4,6 +4,7 @@ One line per shipped change, newest first. Add a line here in the same commit as
+ 
+ ## Unreleased
+ 
++- Setup assistant review fixes: pasted output loses more secret shapes before it is sent (JSON keys, `docker compose logs` prefixes, terminal colour codes, quoted values, `curl -uuser:pass`/`-fsSu`, `--password`, `mysql -p`, Authorization/Cookie/Set-Cookie/X-…-Key headers, `SMTP_PASS`/`*_PASSPHRASE`/`SECRET_KEY_BASE`, URL passwords with `/`, Azure SAS `sig=`, UpCloud `ucat_` tokens, non-ASCII emails), the same in the page and on the server; the hint now says we remove the ones we recognise and to check before sending.
+ - **UpCloud, recommended for a small box** on https://simple-host.app/setup?product=small-box: "Where it runs" offers UpCloud (recommended) or a server you already have. UpCloud shows why (the smallest server, 1 CPU and 1 GB for about $5/month, runs Simple Host comfortably; we test on it), a **Create your UpCloud account — $25 in credits** button (a referral link, and the page says so: the credit is UpCloud's offer for new accounts through it, on their terms) and the steps: create the account, create an API user in the UpCloud control panel, answer the questions, then give your AI agent the prompt. The files step gives a one-line command that sets the API user in your own terminal (the password is not shown) and a prompt that has your agent create the smallest Ubuntu 24.04 server with `upctl` or the UpCloud API, add your SSH key, have you add the DNS records, install, check health and HTTPS and tell you the admin page; the page never asks for UpCloud credentials. The install command now fetches the installer from its pinned release instead of `main`. The advanced docs and the run-hackathon skill's install and provider pages carry the recommendation. Skills 0.26.2.
+ - **Setup assistant** on https://simple-host.app/setup: an Assistant button opens a panel (beside the form on wide screens) that answers questions about the settings of the product you are setting up, fills in the form from a plain request ("Set this up for a 200-person company with Microsoft sign-in and stricter security"), and cleans up your choices ("Clean up my choices": odd values explained, conflicts flagged, resets to the default offered). Suggested changes show as "Set X to Y — why" with Apply, Ignore and Apply all; nothing changes until you apply it, applying goes through the form's own checks, and the files follow. It can also help with an error: paste the output (or open `/setup?product=…#help`), review exactly what will be sent with keys, tokens, passwords and email addresses removed, then Send for help; the answer gives the likely cause, a command to confirm it and the fix. `POST /v1/setup/assist` (same-origin, streamed like Ask) sends the model only the product, where you are in the form, the non-secret choices, the answers picked from lists, your message, the last few turns and any output you chose to send (redacted again on the server); every proposed change is checked against the settings list and never loosens a security-sensitive setting past both its default and your value. New settings `SETUP_ASSIST_DAILY_MAX` (300; 0 turns it off and hides the panel), `SETUP_ASSIST_MAX_IN_FLIGHT` (1), `SETUP_ASSIST_PER_NETWORK_DAILY` (40). Needs migration `v073-setup-assist-daily.sql`. Privacy page updated.
+ - **Set it up with your AI agent**: the setup helper's files step gives one block to copy into the AI agent you use in a terminal, with what the machine needs, every step with your files in it (secrets stay blanks for the agent to ask for), how to check the result, and where to paste an error for help.
+diff --git a/FEATURES.md b/FEATURES.md
+index 63c5a1d4..da955f01 100644
+--- a/FEATURES.md
++++ b/FEATURES.md
+@@ -751,9 +751,10 @@ through the form's own validation and state (`window.shSetup` in setup.js), the
+ highlighted, and on the files step the files follow at once ("Updated with the assistant.", no second check); a value
+ already in force shows "Already set". Empty panel: two example requests per product. **Troubleshooting**: "Paste an
+ error" (or `/setup?product=…#help`, or pasting multi-line output into the field) opens a box for output from the
+-installer, the person's AI agent, kubectl, docker or Caddy logs; "Review what will be sent" shows it redacted (keys,
+-tokens, passwords, secret assignments, private keys, JWTs, email addresses, long secret-looking strings; hostnames and
+-addresses stay) with how many things were hidden, only the last 8 KB of a long paste, and nothing goes until **Send for
++installer, the person's AI agent, kubectl, docker or Caddy logs; "Review what will be sent" shows it redacted (the
++shapes the rules recognise: keys, tokens, passwords, secret assignments and headers, credentials on curl/mysql command
++lines, private keys, JWTs, email addresses, long secret-looking strings, after terminal colour codes are stripped;
++hostnames and addresses stay; the hint says to check before sending) with how many things were hidden, only the last 8 KB of a long paste, and nothing goes until **Send for
+ help**; the answer gives the likely cause, a command to confirm, and the fix, with a setting as an Apply item. A typed
+ message is redacted too. The conversation (last 4 turns per product) lives in the open page only.
+ 
+diff --git a/internal/handler/setupredact.go b/internal/handler/setupredact.go
+index 8dca7e75..0480ab64 100644
+--- a/internal/handler/setupredact.go
++++ b/internal/handler/setupredact.go
+@@ -15,14 +15,22 @@ import (
+ // and their order are the same as redact() in static/setup/assist.js, and
+ // testdata/setup-redact-cases.json holds the cases both are tested against.
+ //
+-// What goes: private key and certificate blocks, passwords in URLs, bearer
+-// and basic credentials, a password given to curl -u / --user, the value of any assignment whose name ends in KEY,
+-// SECRET, TOKEN, PASSWORD, DSN, SALT, HASH or CREDENTIAL(S) (env lines, YAML,
+-// JSON), the same NAME=value pairs inside a line (password=, token=,
+-// DB_PASSWORD=), JWTs, Simple Host keys and tokens
+-// (shk_, shat_, shrt_, shac_, shc_, shcs_, shint_), common provider keys,
+-// email addresses, and long hex or mixed-case base64 strings. Hostnames, IP
+-// addresses and paths stay: they are what a diagnosis needs.
++// What goes: private key and certificate blocks, passwords in URLs (a "/" or
++// "@" in the password included), Authorization, Cookie, Set-Cookie and
++// X-...-Key/Token/Secret header values, bearer and basic credentials, a
++// password given to curl -u / --user (also glued: -uuser:pass, -fsSu),
++// --password and mysql -p, the value of any assignment whose name ends in
++// KEY, SECRET, TOKEN, PASS, PASSWORD, PASSPHRASE, DSN, SALT, HASH, COOKIE,
++// SIG or CREDENTIAL(S) (optionally followed by _ID, _BASE or _B64): at a line
++// start, after a docker compose "service | " prefix, as a quoted JSON key
++// anywhere, or as NAME=value anywhere, quoted values included. Then JWTs,
++// Simple Host keys and tokens (shk_, shat_, shrt_, shac_, shc_, shcs_,
++// shint_), common provider keys (UpCloud's ucat_ too), email addresses
++// (non-ASCII ones included), and long hex or mixed-case base64 strings.
++// Terminal colour codes and zero-width characters are removed first, so they
++// cannot split a name from its value. Hostnames, IP addresses and paths stay:
++// they are what a diagnosis needs. The rules catch the shapes they know; the
++// page says so, and shows the person what will be sent before it is.
+ 
+ type setupRedactRule struct {
+ 	re   *regexp.Regexp
+@@ -30,17 +38,28 @@ type setupRedactRule struct {
+ 	keep func(match string) bool // when set, a match it keeps is left alone
+ }
+ 
++const (
++	setupRedactName     = `[A-Za-z0-9_.-]*(?:key|secret|token|pass|passwd|password|passphrase|pwd|dsn|salt|credentials?|cookie|sig|signature)(?:[_.-]?(?:base|b64|base64|id))?`
++	setupRedactLineName = `[A-Za-z0-9_.-]*(?:key|secret|token|pass|passwd|password|passphrase|pwd|dsn|salt|hash|credentials?|cookie|sig|signature)(?:[_.-]?(?:base|b64|base64|id))?`
++	setupRedactEmailCh  = `\x{a1}-\x{1fff}\x{2070}-\x{2fff}\x{3001}-\x{d7ff}\x{f900}-\x{ffef}`
++)
++
+ var setupRedactRules = []setupRedactRule{
+ 	{re: regexp.MustCompile(`(?s)-----BEGIN ([A-Z0-9 ]+)-----.*?(?:-----END [A-Z0-9 ]+-----|$)`), with: "[redacted ${1}]"},
+-	{re: regexp.MustCompile(`([A-Za-z][A-Za-z0-9+.-]*://)([^\t\n\f\r :/@]+):([^\t\n\f\r /@]+)@`), with: "${1}${2}:[redacted]@"},
++	{re: regexp.MustCompile(`([A-Za-z][A-Za-z0-9+.-]*://)([^\t\n\f\r :/@]+):([^\t\n\f\r '"<>?#]+)@`), with: "${1}${2}:[redacted]@"},
++	{re: regexp.MustCompile(`(?i)\b((?:proxy-)?authorization["']?[ \t]*[:=][ \t]*["']?)(?:([A-Za-z]+)([ \t]+))?[^\t\n\f\r '",]+`), with: "${1}${2}${3}[redacted]"},
++	{re: regexp.MustCompile(`(?i)\b(set-cookie|cookie|x-[A-Za-z0-9-]*(?:key|token|secret|signature|auth|session)[A-Za-z0-9-]*)(["']?[ \t]*:[ \t]*["']?)[^\t\n\f\r '"][^\n'"]*`), with: "${1}${2}[redacted]"},
+ 	{re: regexp.MustCompile(`(?i)\b(bearer|basic)([ \t]+)[A-Za-z0-9._~+/=-]{8,}`), with: "${1}${2}[redacted]"},
+-	{re: regexp.MustCompile(`(?m)(^|[ \t])(-u|--user)([ \t]+|=)(?:(['"])([^\n:'"]+):[^\n'"]*|([^\t\n\f\r :'"]+):[^\t\n\f\r '"]+)`), with: "${1}${2}${3}${4}${5}${6}:[redacted]"},
+-	{re: regexp.MustCompile(`(?im)^([ \t]*(?:export[ \t]+)?["']?[A-Za-z0-9_.-]*(?:key|secret|token|password|passwd|pwd|dsn|salt|hash|credentials?|key_id)["']?[ \t]*[:=][ \t]*)[^\t\n\f\r ].*$`), with: "${1}[redacted]"},
+-	{re: regexp.MustCompile(`(?i)\b([A-Za-z0-9_.-]*(?:key|secret|token|password|passwd|pwd|dsn|salt|credentials?))=[^\t\n\f\r &;'",]+`), with: "${1}=[redacted]"},
+-	{re: regexp.MustCompile(`\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}`), with: "[redacted token]"},
+-	{re: regexp.MustCompile(`\b(?:sh(?:k|at|rt|ac|c|cs|int)_|sk-|sk_|pk_|rk_|re_|ghp_|gho_|ghu_|ghs_|ghr_|github_pat_|glpat-|xai-|xox[abpors]-)[A-Za-z0-9_-]{12,}`), with: "[redacted key]"},
++	{re: regexp.MustCompile(`(?m)(^|[ \t])(-[A-Za-z]*u|--user)([ \t]*|=)(?:(['"])([^\n:'"]+):[^\n'"]*|([^\t\n\f\r :'"]+):[^\t\n\f\r '"]+)`), with: "${1}${2}${3}${4}${5}${6}:[redacted]"},
++	{re: regexp.MustCompile(`(^|[ \t])(--pass(?:word|wd)?)([ \t]+|=)(["']?)[^\t\n\f\r '"]+`), with: "${1}${2}${3}${4}[redacted]"},
++	{re: regexp.MustCompile(`\b(mysql(?:dump|admin)?|mariadb(?:-dump|-admin)?)\b([^\n]*?[ \t])-p[^\t\n\f\r '"]+`), with: "${1}${2}-p[redacted]"},
++	{re: regexp.MustCompile(`(?im)^([ \t]*(?:[A-Za-z0-9_.-]+[ \t]+\|[ \t]*)?(?:export[ \t]+)?["']?` + setupRedactLineName + `["']?[ \t]*[:=][ \t]*)[^\t\n\f\r ].*$`), with: "${1}[redacted]"},
++	{re: regexp.MustCompile(`(?i)(["']` + setupRedactName + `["'][ \t]*:[ \t]*)(?:"(?:[^"\\\n]|\\.)*"|'[^'\n]*'|[^\t\n\f\r ,;}]+)`), with: "${1}[redacted]"},
++	{re: regexp.MustCompile(`(?i)\b(` + setupRedactName + `)=(?:"[^"\n]*"|'[^'\n]*'|[^\t\n\f\r &;'",]+)`), with: "${1}=[redacted]"},
++	{re: regexp.MustCompile(`\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{2,}`), with: "[redacted token]"},
++	{re: regexp.MustCompile(`\b(?:sh(?:k|at|rt|ac|c|cs|int)_|sk-|sk_|pk_|rk_|re_|ghp_|gho_|ghu_|ghs_|ghr_|github_pat_|glpat-|xai-|xox[abpors]-|ucat_)[A-Za-z0-9_-]{12,}`), with: "[redacted key]"},
+ 	{re: regexp.MustCompile(`\b(?:AKIA|ASIA)[0-9A-Z]{16}\b`), with: "[redacted key]"},
+-	{re: regexp.MustCompile(`[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+`), with: "[email]"},
++	{re: regexp.MustCompile(`[A-Za-z0-9._%+` + setupRedactEmailCh + `-]+[@\x{ff20}][A-Za-z0-9` + setupRedactEmailCh + `-]+(?:\.[A-Za-z0-9` + setupRedactEmailCh + `-]+)+`), with: "[email]"},
+ 	{re: regexp.MustCompile(`\b[0-9a-fA-F]{32,}\b`), with: "[redacted]"},
+ 	// Long base64-like strings with digits, lower and upper case: secrets,
+ 	// not paths or names.
+@@ -49,13 +68,21 @@ var setupRedactRules = []setupRedactRule{
+ 	}},
+ }
+ 
+-// setupRedact returns s with line endings made \n, control characters other
+-// than tab and newline removed, and every secret-looking part replaced.
++// Terminal escape sequences: CSI (colours, cursor) and OSC (titles, links).
++var setupRedactANSI = regexp.MustCompile(`\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b\n]*(?:\x07|\x1b\\)?`)
++
++// setupRedact returns s with line endings made \n, terminal escape
++// sequences, zero-width characters and control characters other than tab
++// and newline removed, and every secret-looking part replaced.
+ // Character classes are spelled out (not \s, \S) so the page's JavaScript,
+ // whose \s also takes Unicode spaces, matches exactly the same text.
+ func setupRedact(s string) string {
+ 	s = strings.NewReplacer("\r\n", "\n", "\r", "\n", "\u2028", "\n", "\u2029", "\n").Replace(s)
++	s = setupRedactANSI.ReplaceAllString(s, "")
+ 	s = strings.Map(func(r rune) rune {
++		if r >= 0x200b && r <= 0x200d || r == 0x2060 || r == 0xfeff {
++			return -1
++		}
+ 		if r == '\n' || r == '\t' || (r >= 0x20 && r != 0x7f && !(r >= 0x80 && r < 0xa0)) {
+ 			return r
+ 		}
+diff --git a/internal/handler/static/privacy.html b/internal/handler/static/privacy.html
+index 6a3b96f0..0e2a91fd 100644
+--- a/internal/handler/static/privacy.html
++++ b/internal/handler/static/privacy.html
+@@ -110,7 +110,7 @@ <h2 id="builder">Building with the AI in Simple Host</h2>
+       <li><strong>Create with AI.</strong> If you use the builder on simple-host.app, your prompt and any files you attach are sent to xAI's Grok to write the site. xAI handles them under its own terms and privacy policy. We do not save your prompt in our database.</li>
+       <li><strong>Ask assistants.</strong> Some of our own pages (the features, architecture and enterprise pages) have an "Ask" button that opens a small panel, such as "Ask about Simple Host". The question you type there is sent to xAI's Grok, together with a summary of those pages, to write the answer. A follow-up question also sends your last few questions and answers, so the answer has their context. Your browser keeps those last few questions and answers in this tab only, so the conversation stays with you as you move between the same assistant's pages; they are never sent to us to keep, and are gone when you close the tab. xAI handles it under its own terms and privacy policy. Nothing about you goes with it: not your IP address, browser, cookies or account. We do not store or log the question, and it is not linked to you. Our web server's standard log still records the request itself (time, address, IP, User-Agent), as for any page, and deletes it after 30 days.</li>
+       <li><strong>Setup check.</strong> The setup helper (simple-host.app/setup) can check your choices just before it shows your files; you can skip it. It sends xAI's Grok only the product and the names and values of the numbers, durations, switches, choices and limits you changed, never hostnames, email addresses, secrets or anything about you, and we do not store or log them. To keep one network from using up everyone's checks, the server counts checks per network (your IP address shortened to its network, such as 198.51.100.0) in memory for that day only; the count is never written down. Our web server's standard log still records the request itself (time, address, IP, User-Agent), as for any page, and deletes it after 30 days.</li>
+-      <li><strong>Setup assistant.</strong> The setup helper also has an assistant you can ask about settings, ask to fill in the form, or ask for help with an error. Each message sends xAI's Grok the product, where you are in the form, the same kind of choices as the check (numbers, durations, switches, choices and limits) and the answers you picked from lists (such as your sign-in provider or bucket provider), your message and the conversation's last few turns, which live only in the open page. Error output goes only when you paste it and click Send for help: keys, tokens, passwords and email addresses are removed first, in your browser and again on our server, and you see exactly what will be sent. Hostnames and addresses in the output stay, because they help find the cause. Never the hostnames, emails or secrets you type into the form, and nothing about you. We do not store or log any of it. The server counts messages per network in memory for that day only, as for the check. Our web server's standard log still records the request itself (time, address, IP, User-Agent), as for any page, and deletes it after 30 days.</li>
++      <li><strong>Setup assistant.</strong> The setup helper also has an assistant you can ask about settings, ask to fill in the form, or ask for help with an error. Each message sends xAI's Grok the product, where you are in the form, the same kind of choices as the check (numbers, durations, switches, choices and limits) and the answers you picked from lists (such as your sign-in provider or bucket provider), your message and the conversation's last few turns, which live only in the open page. Error output goes only when you paste it and click Send for help: the keys, tokens, passwords and email addresses we recognise are removed, in your browser and again on our server, and you see exactly what will be sent, so you can check it before sending. Hostnames and addresses in the output stay, because they help find the cause. Never the hostnames, emails or secrets you type into the form, and nothing about you. We do not store or log any of it. The server counts messages per network in memory for that day only, as for the check. Our web server's standard log still records the request itself (time, address, IP, User-Agent), as for any page, and deletes it after 30 days.</li>
+       <li><strong>UpCloud sign-up link.</strong> The setup helper recommends UpCloud for running your own server. Its "Create your UpCloud account" button is a referral link: if you follow it, UpCloud learns you came from us, as with any referral, and gives new accounts the credit it describes. The page never asks for, sends or stores UpCloud credentials; the prompt it gives your AI agent tells the agent to use the ones you set in your own terminal and never to show or save them.</li>
+       <li><strong>Voice input.</strong> If you speak a prompt, the recording is turned into text on our own server and deleted straight after. It is not sent to anyone else.</li>
+     </ul>
+diff --git a/internal/handler/static/setup/assist.js b/internal/handler/static/setup/assist.js
+index c5f612fe..0d6e0374 100644
+--- a/internal/handler/static/setup/assist.js
++++ b/internal/handler/static/setup/assist.js
+@@ -32,24 +32,35 @@
+   // <redact> The same rules, in the same order, as setupRedact in
+   // internal/handler/setupredact.go; both are tested against
+   // internal/handler/testdata/setup-redact-cases.json.
++  // What a secret's name ends with (DB_PASSWORD, SMTP_PASS, GPG_PASSPHRASE,
++  // SECRET_KEY_BASE, AWS_ACCESS_KEY_ID, sig).
++  var NAME = '[A-Za-z0-9_.-]*(?:key|secret|token|pass|passwd|password|passphrase|pwd|dsn|salt|credentials?|cookie|sig|signature)(?:[_.-]?(?:base|b64|base64|id))?';
++  var LINE_NAME = '[A-Za-z0-9_.-]*(?:key|secret|token|pass|passwd|password|passphrase|pwd|dsn|salt|hash|credentials?|cookie|sig|signature)(?:[_.-]?(?:base|b64|base64|id))?';
+   var REDACT = [
+     [/-----BEGIN ([A-Z0-9 ]+)-----[\s\S]*?(?:-----END [A-Z0-9 ]+-----|$)/g, '[redacted $1]'],
+-    [/([A-Za-z][A-Za-z0-9+.-]*:\/\/)([^\t\n\f\r :\/@]+):([^\t\n\f\r \/@]+)@/g, '$1$2:[redacted]@'],
++    [/([A-Za-z][A-Za-z0-9+.-]*:\/\/)([^\t\n\f\r :\/@]+):([^\t\n\f\r '"<>?#]+)@/g, '$1$2:[redacted]@'],
++    [/\b((?:proxy-)?authorization["']?[ \t]*[:=][ \t]*["']?)(?:([A-Za-z]+)([ \t]+))?[^\t\n\f\r '",]+/gi, '$1$2$3[redacted]'],
++    [/\b(set-cookie|cookie|x-[A-Za-z0-9-]*(?:key|token|secret|signature|auth|session)[A-Za-z0-9-]*)(["']?[ \t]*:[ \t]*["']?)[^\t\n\f\r '"][^\n'"]*/gi, '$1$2[redacted]'],
+     [/\b(bearer|basic)([ \t]+)[A-Za-z0-9._~+\/=-]{8,}/gi, '$1$2[redacted]'],
+-    [/(^|[ \t])(-u|--user)([ \t]+|=)(?:(['"])([^\n:'"]+):[^\n'"]*|([^\t\n\f\r :'"]+):[^\t\n\f\r '"]+)/gm, '$1$2$3$4$5$6:[redacted]'],
+-    [/^([ \t]*(?:export[ \t]+)?["']?[A-Za-z0-9_.-]*(?:key|secret|token|password|passwd|pwd|dsn|salt|hash|credentials?|key_id)["']?[ \t]*[:=][ \t]*)[^\t\n\f\r ].*$/gim, '$1[redacted]'],
+-    [/\b([A-Za-z0-9_.-]*(?:key|secret|token|password|passwd|pwd|dsn|salt|credentials?))=[^\t\n\f\r &;'",]+/gi, '$1=[redacted]'],
+-    [/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g, '[redacted token]'],
+-    [/\b(?:sh(?:k|at|rt|ac|c|cs|int)_|sk-|sk_|pk_|rk_|re_|ghp_|gho_|ghu_|ghs_|ghr_|github_pat_|glpat-|xai-|xox[abpors]-)[A-Za-z0-9_-]{12,}/g, '[redacted key]'],
++    [/(^|[ \t])(-[A-Za-z]*u|--user)([ \t]*|=)(?:(['"])([^\n:'"]+):[^\n'"]*|([^\t\n\f\r :'"]+):[^\t\n\f\r '"]+)/gm, '$1$2$3$4$5$6:[redacted]'],
++    [/(^|[ \t])(--pass(?:word|wd)?)([ \t]+|=)(["']?)[^\t\n\f\r '"]+/g, '$1$2$3$4[redacted]'],
++    [/\b(mysql(?:dump|admin)?|mariadb(?:-dump|-admin)?)\b([^\n]*?[ \t])-p[^\t\n\f\r '"]+/g, '$1$2-p[redacted]'],
++    [new RegExp('^([ \\t]*(?:[A-Za-z0-9_.-]+[ \\t]+\\|[ \\t]*)?(?:export[ \\t]+)?["\']?' + LINE_NAME + '["\']?[ \\t]*[:=][ \\t]*)[^\\t\\n\\f\\r ].*$', 'gim'), '$1[redacted]'],
++    [new RegExp('(["\']' + NAME + '["\'][ \\t]*:[ \\t]*)(?:"(?:[^"\\\\\\n]|\\\\.)*"|\'[^\'\\n]*\'|[^\\t\\n\\f\\r ,;}]+)', 'gi'), '$1[redacted]'],
++    [new RegExp('\\b(' + NAME + ')=(?:"[^"\\n]*"|\'[^\'\\n]*\'|[^\\t\\n\\f\\r &;\'",]+)', 'gi'), '$1=[redacted]'],
++    [/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{2,}/g, '[redacted token]'],
++    [/\b(?:sh(?:k|at|rt|ac|c|cs|int)_|sk-|sk_|pk_|rk_|re_|ghp_|gho_|ghu_|ghs_|ghr_|github_pat_|glpat-|xai-|xox[abpors]-|ucat_)[A-Za-z0-9_-]{12,}/g, '[redacted key]'],
+     [/\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/g, '[redacted key]'],
+-    [/[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+/g, '[email]'],
++    [/[A-Za-z0-9._%+\u00a1-\u1fff\u2070-\u2fff\u3001-\ud7ff\uf900-\uffef-]+[@\uff20][A-Za-z0-9\u00a1-\u1fff\u2070-\u2fff\u3001-\ud7ff\uf900-\uffef-]+(?:\.[A-Za-z0-9\u00a1-\u1fff\u2070-\u2fff\u3001-\ud7ff\uf900-\uffef-]+)+/g, '[email]'],
+     [/\b[0-9a-fA-F]{32,}\b/g, '[redacted]'],
+     // Long base64-like strings with digits, lower and upper case: secrets,
+     // not paths or names.
+     [/[A-Za-z0-9+\/_=-]{32,}/g, function (m) { return /[0-9]/.test(m) && /[a-z]/.test(m) && /[A-Z]/.test(m) ? '[redacted]' : m; }]
+   ];
+   function redact(s) {
+-    s = String(s).replace(/\r\n?/g, '\n').replace(/[\u2028\u2029]/g, '\n').replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g, '');
++    s = String(s).replace(/\r\n?/g, '\n').replace(/[\u2028\u2029]/g, '\n')
++      .replace(/\u001b\[[0-9;?]*[ -\/]*[@-~]/g, '').replace(/\u001b\][^\u0007\u001b\n]*(?:\u0007|\u001b\\)?/g, '')
++      .replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u200b-\u200d\u2060\ufeff]/g, '');
+     REDACT.forEach(function (r) { s = s.replace(r[0], r[1]); });
+     return s;
+   }
+@@ -179,7 +190,7 @@
+     pasteBox.textContent = '';
+     if (!review) {
+       pasteBox.appendChild(el('label', { for: 'sh-assist-paste-in', text: 'Paste the error output' }));
+-      pasteBox.appendChild(el('p', { class: 'sh-assist-hint', id: 'sh-assist-paste-hint', text: 'From the installer, your AI agent, kubectl, or the docker, Caddy or server log. Keys, tokens, passwords and email addresses are removed first, and you see exactly what will be sent.' }));
++      pasteBox.appendChild(el('p', { class: 'sh-assist-hint', id: 'sh-assist-paste-hint', text: 'From the installer, your AI agent, kubectl, or the docker, Caddy or server log. We remove the keys, tokens, passwords and email addresses we recognise; check what will be sent before you send it.' }));
+       pasteBox.appendChild(pasteIn);
+       pasteBox.appendChild(el('div', { class: 'sh-assist-acts' }, [
+         el('button', { class: 'sh-assist-apply', type: 'button', text: 'Review what will be sent', onclick: function () {
+diff --git a/internal/handler/testdata/setup-redact-cases.json b/internal/handler/testdata/setup-redact-cases.json
+index 5f904e96..05eae691 100644
+--- a/internal/handler/testdata/setup-redact-cases.json
++++ b/internal/handler/testdata/setup-redact-cases.json
+@@ -125,13 +125,83 @@
+   "out": "tls: no certificate for sites.hack.example.com (203.0.113.7): dial tcp 203.0.113.7:80: connect: connection refused"
+  },
+  {
+-  "name": "control characters",
++  "name": "control characters and terminal colours",
+   "in": "ok\u0007\u001b[31mred\u001b[0m\ttab",
+-  "out": "ok[31mred[0m\ttab"
++  "out": "okred\ttab"
+  },
+  {
+   "name": "UpCloud API user in a curl command and the environment",
+   "in": "+ curl -fsS -u apiuser:Tr0ub4dor https://api.upcloud.com/1.3/account\ncurl --user='apiuser:pa ss' https://x\nUPCLOUD_USERNAME=apiuser\nUPCLOUD_PASSWORD=Tr0ub4dor\nerror: AUTHENTICATION_FAILED Authentication failed using the given username and password.\ncurl -u \"$UPCLOUD_USERNAME:$UPCLOUD_PASSWORD\" https://api.upcloud.com/1.3/server",
+   "out": "+ curl -fsS -u apiuser:[redacted] https://api.upcloud.com/1.3/account\ncurl --user='apiuser:[redacted]' https://x\nUPCLOUD_USERNAME=apiuser\nUPCLOUD_PASSWORD=[redacted]\nerror: AUTHENTICATION_FAILED Authentication failed using the given username and password.\ncurl -u \"$UPCLOUD_USERNAME:[redacted]\" https://api.upcloud.com/1.3/server"
++ },
++ {
++  "name": "json key/value secrets anywhere",
++  "in": "{\"level\":\"error\",\"password\":\"hunter2\",\"msg\":\"login failed\"} {\"SecretAccessKey\": \"wJalrXUtnFEMI\"} {\"token\":\"a\\\"b\"}",
++  "out": "{\"level\":\"error\",\"password\":[redacted],\"msg\":\"login failed\"} {\"SecretAccessKey\": [redacted]} {\"token\":[redacted]}"
++ },
++ {
++  "name": "docker compose log prefixes",
++  "in": "simple-host-1  | password: hunter2\npostgres-1     | DB_PASSWORD=hunter2 ok\nsimple-host-1  | listening on :8080",
++  "out": "simple-host-1  | password: [redacted]\npostgres-1     | DB_PASSWORD=[redacted]\nsimple-host-1  | listening on :8080"
++ },
++ {
++  "name": "ansi colours around a name",
++  "in": "\u001b[32mDB_PASSWORD\u001b[0m=hunter2\n\u001b]0;title\u0007\u001b[1;31mERROR\u001b[0m token=\u001b[33mabc\u001b[0m",
++  "out": "DB_PASSWORD=[redacted]\nERROR token=[redacted]"
++ },
++ {
++  "name": "quoted values",
++  "in": "host=db password='hunter2' sslmode=require\nerror: PGPASSWORD=\"hun ter2\" psql failed",
++  "out": "host=db password=[redacted] sslmode=require\nerror: PGPASSWORD=[redacted] psql failed"
++ },
++ {
++  "name": "curl credentials glued and combined",
++  "in": "curl -uadmin:hunter2 https://x\ncurl -fsSu admin:hunter2 https://x",
++  "out": "curl -uadmin:[redacted] https://x\ncurl -fsSu admin:[redacted] https://x"
++ },
++ {
++  "name": "password flags",
++  "in": "app --password hunter2 --verbose\napp --password=hunter2\ndocker login --password-stdin\nmysql -h db -u root -phunter2 app\ndocker run -p8080:80 img",
++  "out": "app --password [redacted] --verbose\napp --password=[redacted]\ndocker login --password-stdin\nmysql -h db -u root -p[redacted] app\ndocker run -p8080:80 img"
++ },
++ {
++  "name": "secret headers",
++  "in": "X-API-Key: abcd1234\ncurl -H \"X-Api-Key: abcd1234\" https://x\nAuthorization: Token abcd1234efgh\nCookie: session=abc; other=1\nSet-Cookie: sh_session=abc; Path=/; HttpOnly\n\"Authorization\": \"Bearer abc.def\"",
++  "out": "X-API-Key: [redacted]\ncurl -H \"X-Api-Key: [redacted]\" https://x\nAuthorization: Token [redacted]\nCookie: [redacted]\nSet-Cookie: [redacted]\n\"Authorization\": \"Bearer [redacted]\""
++ },
++ {
++  "name": "more secret names",
++  "in": "SMTP_PASS=hunter2\nGPG_PASSPHRASE=x y\nSECRET_KEY_BASE=abc\nAWS_ACCESS_KEY_ID=AKIAx\nerror: SMTP_PASS=hunter2 SMTP_PORT=587",
++  "out": "SMTP_PASS=[redacted]\nGPG_PASSPHRASE=[redacted]\nSECRET_KEY_BASE=[redacted]\nAWS_ACCESS_KEY_ID=[redacted]\nerror: SMTP_PASS=[redacted] SMTP_PORT=587"
++ },
++ {
++  "name": "url passwords with / and @",
++  "in": "dial postgres://app:pa/ss@db/x failed\ndial postgres://app:p@ss@db:5432/x?sslmode=require\nsee https://x.example.com:8443/a/b ok",
++  "out": "dial postgres://app:[redacted]@db/x failed\ndial postgres://app:[redacted]@db:5432/x?sslmode=require\nsee https://x.example.com:8443/a/b ok"
++ },
++ {
++  "name": "azure sas signature",
++  "in": "GET https://acct.blob.core.windows.net/c/b?sv=2022-11-02&ss=b&sig=AbC123%2BdEf%3D&se=2026 403",
++  "out": "GET https://acct.blob.core.windows.net/c/b?sv=2022-11-02&ss=b&sig=[redacted]&se=2026 403"
++ },
++ {
++  "name": "upcloud token and short jwt",
++  "in": "token ucat_01JH5D3ZZJVZS6JAKJ4S1XY7G5 and eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.abc",
++  "out": "token [redacted key] and [redacted token]"
++ },
++ {
++  "name": "non-ascii emails",
++  "in": "alex@exämple.com and josé@example.com and alex＠example.com",
++  "out": "[email] and [email] and [email]"
++ },
++ {
++  "name": "zero-width character inside a name",
++  "in": "TOKEN​=hunter2",
++  "out": "TOKEN=[redacted]"
++ },
++ {
++  "name": "settings and prose that are not secrets kept",
++  "in": "RATE_LIMIT_VISITOR_AUTH=30 KEY_IDLE_EXPIRY_DAYS=5\nthe key: see docs\ngo test -run TestX ./...",
++  "out": "RATE_LIMIT_VISITOR_AUTH=30 KEY_IDLE_EXPIRY_DAYS=5\nthe key: see docs\ngo test -run TestX ./..."
+  }
+ ]

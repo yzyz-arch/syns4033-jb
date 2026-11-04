@@ -1,0 +1,982 @@
+From 7004345caffc0f80d970caab1456e24748a1be06 Mon Sep 17 00:00:00 2001
+From: lunarthegrey <lunar@cypherpunk.is>
+Date: Thu, 22 Oct 2026 21:39:12 -0500
+Subject: [PATCH] Edges: read UpCloud's load balancer plan list as the bare
+ array it is
+
+The UpCloud price read failed on every try with schema_mismatch: FCP
+parsed `GET /1.3/load-balancer/plans` as `{ plans: [...] }`, but UpCloud
+answers a bare JSON array (its API docs, and upcloud-go-api's
+`[]LoadBalancerPlan` and recorded getloadbalancerplans.yaml). The
+inventory swallowed the same mismatch, so the size picker had no plans.
+
+- The plan list is read as a bare array, page by page (limit/offset,
+  10 by default), keeping fields UpCloud adds. An answer that is not a
+  list of named plans fails the read with `plan_list_unreadable`
+  (counted as a provider fault, like schema_mismatch).
+- The price list is read tolerantly: `prices.zone[]` by zone name, each
+  item `{amount, price}` in cents an hour for `amount` units; other
+  shapes of zone or item are skipped. A listed price's month is 672
+  hours: UpCloud bills an hourly price for at most 28 days, as its own
+  CLI prices a month (730 overstated it by ~8.6%).
+- The plan's price key is still undocumented: every spelling of the
+  product prefix is matched (with or without `plan_`). A plan the list
+  does not name takes the dated table, one in neither has no known price
+  without failing the read, and a warning names the zone's other item
+  keys so the real key can be read from the logs.
+- Fixtures in UpCloud's recorded shapes; wire contract gains the price
+  read's calls; the location card words the price-read failure.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ convex/edgeProviderOps.ts                     |  10 +-
+ .../pricing/upcloud_load_balancer_plans.json  |   6 +
+ .../fixtures/pricing/upcloud_price.json       |  32 +++
+ convex/lib/edges/providers/plans.test.ts      | 272 ++++++++++++++----
+ convex/lib/edges/providers/upcloud.ts         | 211 ++++++++++----
+ .../lib/edges/providers/wireContract.test.ts  |  16 +-
+ convex/lib/edges/providers/wireContract.ts    |  22 +-
+ convex/operationsSafety.test.ts               |   2 +
+ docs/edges.md                                 |  43 +--
+ src/client/lib/edgeCodes.ts                   |  11 +
+ .../edges/providers/LocationsCard.svelte      |   5 +-
+ tests/edge-connection/providers.ts            |   4 +-
+ 12 files changed, 494 insertions(+), 140 deletions(-)
+ create mode 100644 convex/lib/edges/providers/fixtures/pricing/upcloud_load_balancer_plans.json
+ create mode 100644 convex/lib/edges/providers/fixtures/pricing/upcloud_price.json
+
+diff --git a/convex/edgeProviderOps.ts b/convex/edgeProviderOps.ts
+index 4100a3fd..2032b093 100644
+--- a/convex/edgeProviderOps.ts
++++ b/convex/edgeProviderOps.ts
+@@ -241,13 +241,19 @@ async function run<R>(fn: () => Promise<R>, names?: string[]): Promise<R> {
+  * opposed to FCP refusing a request or the provider refusing it for a reason
+  * the caller handles (a 404 in discovery, a 409 on create): a timeout or a
+  * network error, a 5xx, a refused credential (401 / 403), rate limiting (429),
+- * or an answer the adapter could not read. Null = not a provider fault.
++ * or an answer the adapter could not read (`schema_mismatch`, or an adapter's
++ * own word for one: `plan_list_unreadable`). Null = not a provider fault.
+  */
+ export function apiFailureCode(err: unknown): string | null {
+   if (!(err instanceof EdgeProviderError)) return null;
+   const m = err.meta;
+   if (m.timedOut) return 'timeout';
+-  if (m.code === 'schema_mismatch' || m.code === 'redirect_refused') return m.code;
++  if (
++    m.code === 'schema_mismatch' ||
++    m.code === 'plan_list_unreadable' ||
++    m.code === 'redirect_refused'
++  )
++    return m.code;
+   if (m.status === undefined) return m.code ? null : 'network';
+   if (m.status >= 500 || m.status === 401 || m.status === 403 || m.status === 429)
+     return String(m.status);
+diff --git a/convex/lib/edges/providers/fixtures/pricing/upcloud_load_balancer_plans.json b/convex/lib/edges/providers/fixtures/pricing/upcloud_load_balancer_plans.json
+new file mode 100644
+index 00000000..530c5685
+--- /dev/null
++++ b/convex/lib/edges/providers/fixtures/pricing/upcloud_load_balancer_plans.json
+@@ -0,0 +1,6 @@
++[
++  { "name": "development", "per_server_max_sessions": 1000, "server_number": 1 },
++  { "name": "production-small", "per_server_max_sessions": 50000, "server_number": 2 },
++  { "name": "production-medium", "per_server_max_sessions": 50000, "server_number": 5 },
++  { "name": "essentials", "per_server_max_sessions": 1000, "server_number": 1 }
++]
+diff --git a/convex/lib/edges/providers/fixtures/pricing/upcloud_price.json b/convex/lib/edges/providers/fixtures/pricing/upcloud_price.json
+new file mode 100644
+index 00000000..275b80d1
+--- /dev/null
++++ b/convex/lib/edges/providers/fixtures/pricing/upcloud_price.json
+@@ -0,0 +1,32 @@
++{
++  "prices": {
++    "zone": [
++      {
++        "firewall": { "amount": 1, "price": 0.56 },
++        "io_request_maxiops": { "amount": 1000000, "price": 0 },
++        "ipv4_address": { "amount": 1, "price": 0.336 },
++        "managed_load_balancer_development": { "amount": 1, "price": 1.4881 },
++        "managed_load_balancer_essentials": { "amount": 1, "price": 0 },
++        "managed_load_balancer_production-medium": { "amount": 1, "price": 11.1607 },
++        "managed_load_balancer_production-small": { "amount": 1, "price": 4.4643 },
++        "name": "zz-zone1",
++        "network_private_vlan": { "amount": 1, "price": 0.694 },
++        "public_ipv4_bandwidth_out": { "amount": 1, "price": 1 },
++        "server_core": { "amount": 1, "price": 1.12 },
++        "server_memory": { "amount": 256, "price": 0.14 },
++        "server_plan_1xCPU-1GB": { "amount": 1, "price": 1.0416 },
++        "server_plan_1xCPU-2GB": { "amount": 1, "price": 1.488 },
++        "storage_maxiops": { "amount": 1, "price": 0.031 }
++      },
++      {
++        "firewall": { "amount": 1, "price": 0.56 },
++        "ipv4_address": { "amount": 1, "price": 0.336 },
++        "managed_load_balancer_development": { "amount": 1, "price": 1.6369 },
++        "managed_load_balancer_production-small": { "amount": 1, "price": 4.9107 },
++        "name": "zz-zone2",
++        "server_core": { "amount": 1, "price": 1.12 },
++        "server_plan_1xCPU-1GB": { "amount": 1, "price": 1.0416 }
++      }
++    ]
++  }
++}
+diff --git a/convex/lib/edges/providers/plans.test.ts b/convex/lib/edges/providers/plans.test.ts
+index 313baf16..70ff32a3 100644
+--- a/convex/lib/edges/providers/plans.test.ts
++++ b/convex/lib/edges/providers/plans.test.ts
+@@ -6,7 +6,14 @@
+  *  - Gcore: the flavor list with `include_prices=true`; the v2 price preview
+  *    for a flavor the list does not price;
+  *  - UpCloud: the account's price list for the zone, else the pricing page's
+- *    dated table;
++ *    dated table. Its fixtures follow UpCloud's recorded answers: the plan
++ *    list is a bare array (the `development` and `production-small` rows as
++ *    upcloud-go-api records them in `getloadbalancerplans.yaml`), the price
++ *    list is `prices.zone[]` with `{ amount, price }` items in cents an hour
++ *    (trimmed from its `getpricezones.yaml`, zone names replaced). UpCloud
++ *    does not document a load balancer plan's price key:
++ *    `managed_load_balancer_<plan>` is FCP's assumption, and the reader takes
++ *    every spelling of it;
+  *  - OVHcloud: the flavor list joined by name to the public cloud catalog
+  *    (micro-cents);
+  *  - Scaleway: the public product catalog, else the zone's size list priced
+@@ -16,7 +23,14 @@
+  */
+ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+ import { gcoreProvider } from './gcore';
+-import { UPCLOUD_LB_PRICES, upcloudProvider } from './upcloud';
++import {
++  UPCLOUD_BILLED_HOURS_PER_MONTH,
++  UPCLOUD_LB_PRICES,
++  upcloudPlanListOf,
++  upcloudProvider,
++  upcloudZonePricesOf,
++} from './upcloud';
++import { EdgeProviderError } from './http';
+ import {
+   __resetOvhCatalogCache,
+   __resetOvhSkewCache,
+@@ -41,6 +55,8 @@ import { edgeLayerOf } from './capabilities';
+ import { EDGE_PROVIDER_IDS } from '../../edgeProviderIds';
+ import ovhCatalog from './fixtures/pricing/ovh_public_cloud_catalog_lb.json';
+ import scalewayCatalog from './fixtures/pricing/scaleway_catalog_lb_zone.json';
++import upcloudPlansFixture from './fixtures/pricing/upcloud_load_balancer_plans.json';
++import upcloudPriceFixture from './fixtures/pricing/upcloud_price.json';
+ 
+ afterEach(() => {
+   vi.unstubAllGlobals();
+@@ -146,26 +162,10 @@ describe('gcore: the priced flavor list, the price preview for what it hides', (
+ 
+ describe('upcloud: the price list for the zone, else the pricing page', () => {
+   const cfg: UpcloudConfig = { type: 'upcloud', token: 'SECRET_UC_TOKEN', zone: 'zz-zone1' };
+-  const plansAnswer = {
+-    plans: [
+-      { name: 'development', per_server_max_sessions: 1000, server_number: 1 },
+-      { name: 'production-small', per_server_max_sessions: 50000, server_number: 2 },
+-      { name: 'something-new', per_server_max_sessions: 1000, server_number: 1 },
+-    ],
+-  };
++  /** A plan's monthly price: UpCloud bills an hourly price for at most 672 hours a month. */
++  const monthly = (centsAnHour: number) =>
++    Math.round((centsAnHour / 100) * UPCLOUD_BILLED_HOURS_PER_MONTH * 100) / 100;
+ 
+-  const priceList = {
+-    prices: {
+-      zone: [
+-        { name: 'zz-other', managed_load_balancer_development: { amount: 1, price: 9 } },
+-        {
+-          name: 'zz-zone1',
+-          ipv4_address: { amount: 1, price: 0.3 },
+-          'managed_load_balancer_production-small': { amount: 1, price: 4.2 },
+-        },
+-      ],
+-    },
+-  };
+   /** The account's own answers: its username, then its details (the billing currency). */
+   const account = (currency: string | null) => (c: { path: string }) =>
+     c.path === '/1.3/account'
+@@ -176,63 +176,227 @@ describe('upcloud: the price list for the zone, else the pricing page', () => {
+           : jsonRes({ account: { username: 'uc-user', country: 'ZZZ', currency } })
+         : null;
+ 
+-  test('a plan the price list names is priced from it, in the account’s billing currency', async () => {
+-    const stub = mockFetch((c) => {
+-      if (c.path === '/1.3/load-balancer/plans') return jsonRes(plansAnswer);
+-      if (c.path === '/1.3/price') return jsonRes(priceList);
+-      return account('USD')(c) ?? notFound();
+-    });
++  /** UpCloud as the recorded fixtures answer it, with any route overridden. */
++  const upcloud =
++    (over: { plans?: unknown; price?: unknown; currency?: string | null } = {}) =>
++    (c: { path: string }) => {
++      if (c.path === '/1.3/load-balancer/plans') return jsonRes(over.plans ?? upcloudPlansFixture);
++      if (c.path === '/1.3/price') return jsonRes(over.price ?? upcloudPriceFixture);
++      return account(over.currency === undefined ? 'EUR' : over.currency)(c) ?? notFound();
++    };
++
++  test('every plan of the recorded answers is priced from its zone, a month being 672 hours', async () => {
++    const stub = mockFetch(upcloud());
+     const plans = await upcloudProvider.plans!(cfg);
+-    expect(plans.find((p) => p.size === 'production-small')).toEqual({
+-      size: 'production-small',
+-      label: 'production-small (2 nodes, 50,000 sessions each)',
+-      perHour: 0.042,
+-      perMonth: null,
+-      currency: 'USD',
++    expect(plans.map((p) => p.size)).toEqual([
++      'development',
++      'production-small',
++      'production-medium',
++      'essentials',
++    ]);
++    expect(plans[0]).toEqual({
++      size: 'development',
++      label: 'development (1 node, 1,000 sessions each)',
++      perHour: 0.014881,
++      perMonth: 10,
++      currency: 'EUR',
+       traffic: { kind: 'unlimited' },
+       bandwidthMbps: null,
+       acceptsOutsideNode: null,
+       source: 'api',
+     });
+-    // Not named in this zone's list: the dated table of the pricing page.
+-    expect(plans.find((p) => p.size === 'development')).toMatchObject({
+-      perMonth: UPCLOUD_LB_PRICES.monthly.development,
++    // The pricing page's monthly figures, read back from cents an hour.
++    expect(plans.map((p) => [p.size, p.perMonth, p.source])).toEqual([
++      ['development', 10, 'api'],
++      ['production-small', 30, 'api'],
++      ['production-medium', 75, 'api'],
++      ['essentials', 0, 'api'],
++    ]);
++    expect(plans[1]!.label).toBe('production-small (2 nodes, 50,000 sessions each)');
++    // The plan list is read page by page, and nothing is written.
++    const listed = stub.calls.filter((c) => c.path === '/1.3/load-balancer/plans');
++    expect(listed.map((c) => c.query)).toEqual(['?limit=100&offset=0']);
++    expect(stub.calls.every((c) => c.method === 'GET')).toBe(true);
++    expect(JSON.stringify(plans)).not.toContain('SECRET_UC_TOKEN');
++  });
++
++  test("only the location's zone prices it: another zone's list never does", async () => {
++    mockFetch(upcloud());
++    const plans = await upcloudProvider.plans!({ ...cfg, zone: 'zz-zone2' });
++    expect(plans.map((p) => [p.size, p.perMonth, p.currency, p.source])).toEqual([
++      ['development', monthly(1.6369), 'EUR', 'api'],
++      ['production-small', monthly(4.9107), 'EUR', 'api'],
++      // Not named in this zone's list: the pricing page's dated table.
++      [
++        'production-medium',
++        UPCLOUD_LB_PRICES.monthly['production-medium'],
++        UPCLOUD_LB_PRICES.currency,
++        'catalog',
++      ],
++      ['essentials', UPCLOUD_LB_PRICES.monthly.essentials, UPCLOUD_LB_PRICES.currency, 'catalog'],
++    ]);
++    expect(plans[0]!.perMonth).toBe(11);
++    // A zone the list does not hold at all: the table for every plan.
++    mockFetch(upcloud());
++    const elsewhere = await upcloudProvider.plans!({ ...cfg, zone: 'zz-zone9' });
++    expect(elsewhere.every((p) => p.source === 'catalog')).toBe(true);
++    expect(elsewhere.find((p) => p.size === 'production-small')?.perMonth).toBe(30);
++  });
++
++  test('a plan in neither the list nor the table has no known price, and the read still answers', async () => {
++    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
++    mockFetch(
++      upcloud({
++        plans: [
++          ...upcloudPlansFixture,
++          { name: 'something-new', per_server_max_sessions: 1000, server_number: 1 },
++        ],
++      }),
++    );
++    const plans = await upcloudProvider.plans!(cfg);
++    expect(plans.find((p) => p.size === 'something-new')).toEqual({
++      size: 'something-new',
++      label: 'something-new (1 node, 1,000 sessions each)',
+       perHour: null,
+-      source: 'catalog',
+-      catalogAsOf: UPCLOUD_LB_PRICES.asOf,
+-    });
+-    // In neither: no price.
+-    expect(plans.find((p) => p.size === 'something-new')).toMatchObject({
+-      currency: null,
+       perMonth: null,
++      currency: null,
++      traffic: { kind: 'unlimited' },
++      bandwidthMbps: null,
++      acceptsOutsideNode: null,
++      source: 'api',
+     });
+-    expect(stub.calls.every((c) => c.method === 'GET')).toBe(true);
++    expect(plans.filter((p) => p.perMonth !== null)).toHaveLength(4);
++    // The log names the plan and the zone's other item keys, never a price or the key.
++    expect(warn).toHaveBeenCalledTimes(1);
++    const said = String(warn.mock.calls[0]![0]);
++    expect(said).toContain('something-new');
++    expect(said).toContain('ipv4_address');
++    expect(said).not.toContain('server_plan_');
++    expect(said).not.toContain('SECRET_UC_TOKEN');
++    expect(said).not.toMatch(/\d\.\d/);
++    warn.mockRestore();
+   });
+ 
+   test('a price list whose currency cannot be read is not used: the table answers', async () => {
+-    mockFetch((c) => {
+-      if (c.path === '/1.3/load-balancer/plans') return jsonRes(plansAnswer);
+-      if (c.path === '/1.3/price') return jsonRes(priceList);
+-      return account(null)(c) ?? notFound();
+-    });
++    mockFetch(upcloud({ currency: null }));
+     const plans = await upcloudProvider.plans!(cfg);
+     expect(plans.find((p) => p.size === 'production-small')).toMatchObject({
+       perMonth: 30,
+       currency: 'EUR',
+       source: 'catalog',
++      catalogAsOf: UPCLOUD_LB_PRICES.asOf,
+     });
+   });
+ 
+-  test('a price list that cannot be read falls back to the table for every plan', async () => {
++  test('a price list that cannot be read, or is not the documented shape, falls back to the table', async () => {
+     mockFetch((c) =>
+-      c.path === '/1.3/load-balancer/plans' ? jsonRes(plansAnswer) : jsonRes({}, 401),
++      c.path === '/1.3/load-balancer/plans' ? jsonRes(upcloudPlansFixture) : jsonRes({}, 401),
+     );
+     const plans = await upcloudProvider.plans!(cfg);
+-    expect(plans.find((p) => p.size === 'production-small')).toMatchObject({
+-      perMonth: 30,
+-      currency: 'EUR',
+-      source: 'catalog',
++    expect(plans.every((p) => p.source === 'catalog')).toBe(true);
++    for (const price of [{}, { prices: { zone: 'not a list' } }, []]) {
++      mockFetch(upcloud({ price }));
++      const read = await upcloudProvider.plans!(cfg);
++      expect(read.find((p) => p.size === 'development')).toMatchObject({
++        perMonth: 10,
++        source: 'catalog',
++      });
++    }
++  });
++
++  test('a plan list that is not a list of named plans fails the read with plan_list_unreadable', async () => {
++    // The shape this adapter once expected: UpCloud answers a bare array.
++    for (const plans of [{ plans: upcloudPlansFixture }, [{ per_server_max_sessions: 1 }]]) {
++      mockFetch(upcloud({ plans }));
++      const err = await upcloudProvider.plans!(cfg).then(
++        () => null,
++        (e: unknown) => e,
++      );
++      expect(err).toBeInstanceOf(EdgeProviderError);
++      expect((err as EdgeProviderError).meta).toMatchObject({
++        provider: 'upcloud',
++        step: 'plans',
++        code: 'plan_list_unreadable',
++        retryable: false,
++      });
++    }
++    expect(() => upcloudPlanListOf({ plans: [] })).toThrow(/not a list/);
++    expect(() => upcloudPlanListOf([{ name: 'development' }, { name: '' }])).toThrow(
++      /plan 2 has no name/,
++    );
++  });
++
++  test('the plan list keeps fields UpCloud adds and reads past its first page', async () => {
++    expect(
++      upcloudPlanListOf([
++        { name: 'development', server_number: '1', per_server_max_sessions: null, zones: [] },
++      ]),
++    ).toEqual([
++      { name: 'development', server_number: null, per_server_max_sessions: null, zones: [] },
++    ]);
++    const many = Array.from({ length: 130 }, (_, i) => ({ name: `plan-${i}` }));
++    const stub = mockFetch((c) => {
++      if (c.path !== '/1.3/load-balancer/plans') return upcloud()(c);
++      const q = new URLSearchParams(c.query);
++      const offset = Number(q.get('offset') ?? 0);
++      return jsonRes(many.slice(offset, offset + Math.min(Number(q.get('limit') ?? 10), 100)));
++    });
++    expect(await upcloudProvider.plans!(cfg)).toHaveLength(130);
++    expect(
++      stub.calls.filter((c) => c.path === '/1.3/load-balancer/plans').map((c) => c.query),
++    ).toEqual(['?limit=100&offset=0', '?limit=100&offset=100']);
++  });
++
++  test('the inventory lists the plans as sizes, and an unreadable list leaves none', async () => {
++    mockFetch((c) => (c.path === '/1.3/load-balancer' ? jsonRes([]) : upcloud()(c)));
++    expect((await upcloudProvider.inventory(cfg)).flavors).toEqual(
++      upcloudPlansFixture.map((p) => ({ id: p.name, label: p.name })),
++    );
++    mockFetch((c) =>
++      c.path === '/1.3/load-balancer' ? jsonRes([]) : upcloud({ plans: { plans: [] } })(c),
++    );
++    expect((await upcloudProvider.inventory(cfg)).flavors).toEqual([]);
++  });
++
++  test('the zone price reader: every spelling of the product key, units, and items skipped', () => {
++    const read = upcloudZonePricesOf(
++      {
++        prices: {
++          currency: 'usd',
++          zone: [
++            'not a zone',
++            { description: 'no name' },
++            {
++              name: 'zz-zone1',
++              load_balancer_development: { amount: 1, price: 1.5 },
++              'LoadBalancer_Production-Small': { amount: 2, price: 9 },
++              'managed_load_balancer_plan_production-medium': { amount: 1, price: 11 },
++              managed_load_balancer_essentials: { price: 'free' },
++              'server_plan_1xCPU-1GB': { amount: 1, price: 1.0416 },
++              managed_kubernetes_control_plane: { amount: 1, price: 4 },
++              ipv4_address: { amount: 1, price: 0.336 },
++            },
++          ],
++        },
++      },
++      'zz-zone1',
++    );
++    expect(read).toEqual({
++      currency: 'USD',
++      plans: new Map([
++        ['development', 0.015],
++        ['production_small', 0.045],
++        ['production_medium', 0.11],
++      ]),
++      otherKeys: ['ipv4_address', 'managed_kubernetes_control_plane'],
++    });
++    expect(upcloudZonePricesOf(upcloudPriceFixture, 'zz-zone9')).toEqual({
++      currency: null,
++      plans: null,
++      otherKeys: [],
+     });
++    expect(upcloudZonePricesOf({ prices: [] }, 'zz-zone1')).toBeNull();
++    expect(upcloudZonePricesOf('<html>', 'zz-zone1')).toBeNull();
+   });
+ });
+ 
+diff --git a/convex/lib/edges/providers/upcloud.ts b/convex/lib/edges/providers/upcloud.ts
+index a6bd0697..777b1f26 100644
+--- a/convex/lib/edges/providers/upcloud.ts
++++ b/convex/lib/edges/providers/upcloud.ts
+@@ -140,33 +140,37 @@ const ZoneList = z.object({
+       .default([]),
+   }),
+ });
+-const Plans = z
++/**
++ * One plan of `GET /1.3/load-balancer/plans`, which answers a bare JSON array
++ * (paged: `limit` 10 by default, at most 100). Only `name` is needed; the
++ * label's facts are kept when they are numbers, and fields UpCloud adds are
++ * carried along unread.
++ */
++const PlanRow = z
+   .object({
+-    plans: z
+-      .array(
+-        z
+-          .object({
+-            name: z.string(),
+-            server_number: z.number().nullish(),
+-            per_server_max_sessions: z.number().nullish(),
+-          })
+-          .passthrough(),
+-      )
+-      .default([]),
++    name: z.string().trim().min(1),
++    server_number: z.number().nullish().catch(null),
++    per_server_max_sessions: z.number().nullish().catch(null),
+   })
+   .passthrough();
+-/** `GET /1.3/price`: per zone, every priced item as `{ amount, price }` (price in cents an hour). */
++export type UpcloudPlanRow = z.infer<typeof PlanRow>;
++/**
++ * `GET /1.3/price`: `prices.zone[]`, one object per zone, its `name` and every
++ * priced item as `{ amount, price }` (price in cents an hour for `amount`
++ * units). A zone entry of another shape is skipped, not fatal.
++ */
+ const PriceList = z
+   .object({
+     prices: z
+       .object({
+-        zone: z.array(z.record(z.string(), z.unknown())).default([]),
++        zone: z.array(z.unknown()).default([]),
+         /** Not in UpCloud's documented example; taken when an answer carries it. */
+-        currency: z.string().nullish(),
++        currency: z.string().nullish().catch(null),
+       })
+       .passthrough(),
+   })
+   .passthrough();
++const PriceZone = z.object({ name: z.string() }).catchall(z.unknown());
+ /** `GET /1.3/account` (the key's own account) and `GET /1.3/account/details/{username}` (its currency). */
+ const AccountSelf = z
+   .object({ account: z.object({ username: z.string() }).passthrough() })
+@@ -174,7 +178,9 @@ const AccountSelf = z
+ const AccountDetails = z
+   .object({ account: z.object({ currency: z.string().nullish() }).passthrough() })
+   .passthrough();
+-const PriceItem = z.object({ amount: z.number().nullish(), price: z.number() }).passthrough();
++const PriceItem = z
++  .object({ amount: z.number().nullish().catch(null), price: z.number() })
++  .passthrough();
+ 
+ // --- helpers -------------------------------------------------------------------------
+ 
+@@ -285,6 +291,45 @@ async function listLbs(cfg: UpcloudConfig, step: string): Promise<z.infer<typeof
+   }
+ }
+ 
++/**
++ * The plan list's answer as plans (exported for tests): a list of named
++ * plans, else `plan_list_unreadable` saying what is missing. A size is never
++ * guessed from an answer that does not name it.
++ */
++export function upcloudPlanListOf(answer: unknown, step = 'plans'): UpcloudPlanRow[] {
++  const unreadable = (why: string) =>
++    new EdgeProviderError(`upcloud plan list unreadable on ${step}: ${why}`, {
++      provider: 'upcloud',
++      step,
++      code: 'plan_list_unreadable',
++      retryable: false,
++      timedOut: false,
++    });
++  if (!Array.isArray(answer)) throw unreadable('the answer is not a list');
++  return answer.map((raw, i) => {
++    const row = PlanRow.safeParse(raw);
++    if (!row.success) throw unreadable(`plan ${i + 1} has no name`);
++    return row.data;
++  });
++}
++
++/** Every load balancer plan, page by page (the list answers 10 unless asked for more). */
++async function listPlans(cfg: UpcloudConfig, step: string): Promise<UpcloudPlanRow[]> {
++  const out: UpcloudPlanRow[] = [];
++  for (let offset = 0; ; offset += LB_PAGE) {
++    const answer = await up(
++      cfg,
++      step,
++      'GET',
++      `/load-balancer/plans?limit=${LB_PAGE}&offset=${offset}`,
++      z.unknown(),
++    );
++    const page = upcloudPlanListOf(answer, step);
++    out.push(...page);
++    if (page.length < LB_PAGE) return out;
++  }
++}
++
+ function getLb(cfg: UpcloudConfig, step: string, uuid: string) {
+   return up(cfg, step, 'GET', `/load-balancer/${encodeURIComponent(uuid)}`, Lb);
+ }
+@@ -539,7 +584,9 @@ export const upcloudProvider: EdgeProvider<UpcloudConfig, UpcloudTemplateParams>
+       up(cfg, 'inventory', 'GET', `/ip_address`, IpAddressList).catch(() => ({
+         ip_addresses: { ip_address: [] },
+       })),
+-      up(cfg, 'inventory', 'GET', `/load-balancer/plans`, Plans).catch(() => ({ plans: [] })),
++      // A plan list that cannot be read leaves the size picker empty; the
++      // price read that follows the pull records why (`plansError`).
++      listPlans(cfg, 'inventory').catch(() => []),
+     ]);
+     // The listings cover the whole account; an inventory is one location's
+     // (its zone), so a resource of another zone belongs to another location.
+@@ -558,7 +605,7 @@ export const upcloudProvider: EdgeProvider<UpcloudConfig, UpcloudTemplateParams>
+         .filter((ip) => inZone(ip.zone))
+         .filter((ip) => (ip.floating ?? '').toLowerCase() === 'yes')
+         .map((ip) => ({ id: ip.address, address: ip.address, attachedTo: ip.server ?? null })),
+-      flavors: plans.plans.map((p) => ({ id: p.name, label: p.name })),
++      flavors: plans.map((p) => ({ id: p.name, label: p.name })),
+     };
+   },
+ 
+@@ -567,24 +614,35 @@ export const upcloudProvider: EdgeProvider<UpcloudConfig, UpcloudTemplateParams>
+    * location's zone (`GET /1.3/price`, cents an hour in the account's billing
+    * currency, which the list does not name: read from the account's details)
+    * where it names the plan, else the dated table of the pricing page
+-   * (`UPCLOUD_LB_PRICES`). A price list whose currency cannot be read is not
+-   * used. UpCloud charges no data transfer for a load balancer.
++   * (`UPCLOUD_LB_PRICES`), else not known. A price list whose currency cannot
++   * be read is not used. Only an unreadable plan list fails the read
++   * (`plan_list_unreadable`). UpCloud charges no data transfer for a load
++   * balancer.
+    */
+   async plans(cfg) {
+     // Every call settles before the read answers: a failed plan list never
+     // leaves the price reads running unawaited.
+-    const [listed, prices, currency] = await Promise.allSettled([
+-      up(cfg, 'plans', 'GET', `/load-balancer/plans`, Plans),
+-      up(cfg, 'plans', 'GET', `/price`, PriceList),
++    const [listed, priceList, currency] = await Promise.allSettled([
++      listPlans(cfg, 'plans'),
++      up(cfg, 'plans', 'GET', `/price`, z.unknown()),
+       upcloudCurrency(cfg),
+     ]);
+     if (listed.status === 'rejected') throw listed.reason;
+-    const plans = listed.value;
+-    const list = prices.status === 'fulfilled' ? prices.value : null;
+-    const billed =
+-      list?.prices.currency ?? (currency.status === 'fulfilled' ? currency.value : null);
+-    const zone = billed ? (list?.prices.zone.find((z) => z.name === cfg.zone) ?? null) : null;
+-    return plans.plans.map((p) => upcloudPlanOf(p, zone, billed ?? null));
++    const list =
++      priceList.status === 'fulfilled' ? upcloudZonePricesOf(priceList.value, cfg.zone) : null;
++    const billed = list?.currency ?? (currency.status === 'fulfilled' ? currency.value : null);
++    const prices = billed ? (list?.plans ?? null) : null;
++    const plans = listed.value.map((p) => upcloudPlanOf(p, prices, billed));
++    // UpCloud does not document the key of a load balancer plan in the price
++    // list: say which keys the zone's list holds when a plan is not among
++    // them, so the key can be read from the logs (item names only, never a price).
++    const unnamed = prices ? listed.value.filter((p) => !prices.has(priceKey(p.name))) : [];
++    if (unnamed.length > 0 && list)
++      console.warn(
++        `[upcloud plans] the zone's price list names no price for ${unnamed.map((p) => p.name).join(', ')}; ` +
++          `its other items: ${list.otherKeys.join(', ') || 'none'}`,
++      );
++    return plans;
+   },
+ 
+   planDestroy: (_cfg, ledger) => orderByKind(ledger, UPCLOUD_DESTROY_ORDER),
+@@ -641,28 +699,66 @@ export const UPCLOUD_LB_PRICES = {
+ } as const;
+ 
+ /**
+- * The price list's item for a plan. UpCloud documents the list's shape but not
+- * the key of a load balancer plan, so the plan's name is matched in the keys a
+- * load balancer item can have (case, `-` and `_` aside).
++ * The hours of a month UpCloud bills an hourly price for: at most 672 (28
++ * days), as UpCloud's own CLI prices a month (`upctl server plans --prices`).
++ * A price-list price a month is its hourly price times this.
+  */
+-function priceItemOf(
+-  zone: Record<string, unknown> | null,
+-  plan: string,
+-): { amount: number; price: number } | null {
+-  if (!zone) return null;
+-  const norm = (s: string) => s.toLowerCase().replace(/-/g, '_');
+-  const name = norm(plan);
+-  const wanted = new Set(
+-    ['managed_load_balancer', 'managed_loadbalancer', 'load_balancer', 'loadbalancer'].map(
+-      (p) => `${p}_${name}`,
+-    ),
+-  );
+-  for (const [key, raw] of Object.entries(zone)) {
+-    if (!wanted.has(norm(key))) continue;
++export const UPCLOUD_BILLED_HOURS_PER_MONTH = 672;
++
++/** How plan names and price-list keys are compared: trimmed, lower case, `_` for `-`. */
++function priceKey(s: string): string {
++  return s.trim().toLowerCase().replace(/-/g, '_');
++}
++
++/**
++ * A price-list key that prices a load balancer plan, as `priceKey` spells it:
++ * the plan's name after a load balancer prefix (`managed_load_balancer_`,
++ * `load_balancer_`, `loadbalancer_`, with or without `plan_` after it, the way
++ * a server plan is `server_plan_<name>`). UpCloud documents the list's shape
++ * but not this key, so every spelling of the product is taken.
++ */
++const LB_PRICE_KEY = /^(?:managed_)?load_?balancer_(?:plan_)?(.+)$/;
++
++/** One zone's load balancer prices in the price list (`upcloudZonePricesOf`). */
++export interface UpcloudZonePrices {
++  /** The list's own currency, when it names one (UpCloud's documented example does not). */
++  currency: string | null;
++  /** Plan (`priceKey` of its name) -> price an hour; null when the list has no such zone. */
++  plans: Map<string, number> | null;
++  /** The zone's item keys that price neither a server plan nor a load balancer plan. */
++  otherKeys: string[];
++}
++
++/**
++ * The load balancer plan prices of one zone of a `GET /1.3/price` answer
++ * (exported for tests): each item's `price` is cents an hour for `amount`
++ * units (1 for a plan), so a plan's price an hour is `price / 100 / amount`.
++ * An item of another shape is skipped. Null when the answer is not the
++ * documented shape at all.
++ */
++export function upcloudZonePricesOf(answer: unknown, zone: string): UpcloudZonePrices | null {
++  const list = PriceList.safeParse(answer);
++  if (!list.success) return null;
++  const c = list.data.prices.currency?.trim().toUpperCase();
++  const currency = c && /^[A-Z]{3}$/.test(c) ? c : null;
++  const entry = list.data.prices.zone
++    .map((z) => PriceZone.safeParse(z))
++    .find((z) => z.success && z.data.name === zone)?.data;
++  if (!entry) return { currency, plans: null, otherKeys: [] };
++  const plans = new Map<string, number>();
++  const otherKeys: string[] = [];
++  for (const [key, raw] of Object.entries(entry)) {
++    if (key === 'name' || key.startsWith('server_plan_')) continue;
++    const plan = LB_PRICE_KEY.exec(priceKey(key))?.[1];
++    if (!plan) {
++      otherKeys.push(key);
++      continue;
++    }
+     const item = PriceItem.safeParse(raw);
+-    if (item.success) return { amount: item.data.amount ?? 1, price: item.data.price };
++    if (item.success && item.data.price >= 0)
++      plans.set(plan, item.data.price / 100 / Math.max(1, item.data.amount ?? 1));
+   }
+-  return null;
++  return { currency, plans, otherKeys: otherKeys.sort() };
+ }
+ 
+ /**
+@@ -684,13 +780,14 @@ async function upcloudCurrency(cfg: UpcloudConfig): Promise<string | null> {
+ 
+ /**
+  * One plan of `GET /load-balancer/plans` as a plan, priced from the zone's
+- * price list (cents an hour, in `currency`, the account's billing one) or the
+- * pricing page's table (exported for tests). With no zone list (or no
+- * currency for it), the table.
++ * price list (`prices`, an hour in `currency`, the account's billing one; a
++ * month is `UPCLOUD_BILLED_HOURS_PER_MONTH` of them) or the pricing page's
++ * table (exported for tests). With no zone list (or no currency for it), the
++ * table; a plan in neither has no known price.
+  */
+ export function upcloudPlanOf(
+-  p: z.infer<typeof Plans>['plans'][number],
+-  zone: Record<string, unknown> | null,
++  p: UpcloudPlanRow,
++  prices: ReadonlyMap<string, number> | null,
+   currency: string | null,
+ ): ProviderPlan {
+   const nodes = typeof p.server_number === 'number' ? p.server_number : null;
+@@ -706,12 +803,12 @@ export function upcloudPlanOf(
+     bandwidthMbps: null,
+     acceptsOutsideNode: null,
+   };
+-  const item = currency ? priceItemOf(zone, p.name) : null;
+-  if (item && currency)
++  const perHour = currency ? (prices?.get(priceKey(p.name)) ?? null) : null;
++  if (perHour !== null && currency)
+     return {
+       ...base,
+-      perHour: item.price / 100 / Math.max(1, item.amount),
+-      perMonth: null,
++      perHour,
++      perMonth: Math.round(perHour * UPCLOUD_BILLED_HOURS_PER_MONTH * 100) / 100,
+       currency,
+       source: 'api',
+     };
+diff --git a/convex/lib/edges/providers/wireContract.test.ts b/convex/lib/edges/providers/wireContract.test.ts
+index a847e276..e372a982 100644
+--- a/convex/lib/edges/providers/wireContract.test.ts
++++ b/convex/lib/edges/providers/wireContract.test.ts
+@@ -418,9 +418,20 @@ describe('wire contract: upcloud', () => {
+   const route = (c: Captured): Response => {
+     const p = c.path;
+     if (p === '/1.3/account') return jsonRes({ account: { username: 'automation' } });
++    if (p === '/1.3/account/details/automation')
++      return jsonRes({ account: { username: 'automation', currency: 'EUR' } });
++    if (p === '/1.3/price')
++      return jsonRes({
++        prices: {
++          zone: [
++            { name: 'fi-hel1', managed_load_balancer_development: { amount: 1, price: 1.4881 } },
++          ],
++        },
++      });
+     if (p === '/1.3/zone')
+       return jsonRes({ zones: { zone: [{ id: 'fi-hel1', description: 'Helsinki' }] } });
+-    if (p === '/1.3/load-balancer/plans') return jsonRes({ plans: [{ name: 'development' }] });
++    if (p === '/1.3/load-balancer/plans')
++      return jsonRes([{ name: 'development', per_server_max_sessions: 1000, server_number: 1 }]);
+     if (p === '/1.3/load-balancer') return c.method === 'POST' ? jsonRes(LB) : jsonRes([LB]);
+     if (p === `/1.3/load-balancer/${LB.uuid}/ip-addresses`) return jsonRes({});
+     if (p === `/1.3/load-balancer/${LB.uuid}`) return jsonRes(c.method === 'DELETE' ? {} : LB);
+@@ -454,6 +465,9 @@ describe('wire contract: upcloud', () => {
+     await upcloudProvider.describe(cfg, ledger);
+     await upcloudProvider.inspect(cfg, ledger);
+     await upcloudProvider.inventory(cfg);
++    expect(await upcloudProvider.plans!(cfg)).toMatchObject([
++      { size: 'development', perMonth: 10, currency: 'EUR', source: 'api' },
++    ]);
+     // No confirmDestroyed: the idempotent DELETE is re-issued instead.
+     expect(await destroyAll(upcloudProvider as never, cfg as never, ledger)).toEqual([
+       'lb',
+diff --git a/convex/lib/edges/providers/wireContract.ts b/convex/lib/edges/providers/wireContract.ts
+index b7e1d910..d2446ec4 100644
+--- a/convex/lib/edges/providers/wireContract.ts
++++ b/convex/lib/edges/providers/wireContract.ts
+@@ -131,9 +131,24 @@ export const WIRE_CONTRACTS: Record<EdgeProviderId, WireContract> = {
+ 
+   // --- L4: UpCloud managed load balancers ---------------------------------------------
+   upcloud: {
+-    source: 'https://developers.upcloud.com/1.3/ (Managed Load Balancer), 2026-09-16',
++    source:
++      'https://developers.upcloud.com/1.3/ (Managed Load Balancer, Pricing, Accounts), 2026-10-22',
+     calls: [
+-      { method: 'GET', path: '^/1\\.3/account$', purpose: 'credential test' },
++      {
++        method: 'GET',
++        path: '^/1\\.3/account$',
++        purpose: "credential test; the key's own username (price read)",
++      },
++      {
++        method: 'GET',
++        path: '^/1\\.3/account/details/[^/]+$',
++        purpose: "the account's billing currency, the price list's (price read)",
++      },
++      {
++        method: 'GET',
++        path: '^/1\\.3/price$',
++        purpose: 'the price list, per zone, in cents an hour (price read)',
++      },
+       { method: 'GET', path: '^/1\\.3/zone$', purpose: 'location form: the zones' },
+       {
+         method: 'POST',
+@@ -150,7 +165,8 @@ export const WIRE_CONTRACTS: Record<EdgeProviderId, WireContract> = {
+       {
+         method: 'GET',
+         path: '^/1\\.3/load-balancer/plans$',
+-        purpose: 'list the service plans (inventory)',
++        purpose: 'list the service plans, page by page (inventory and price read)',
++        query: ['limit', 'offset'],
+       },
+       {
+         method: 'GET',
+diff --git a/convex/operationsSafety.test.ts b/convex/operationsSafety.test.ts
+index d3e8cad5..2393f9c9 100644
+--- a/convex/operationsSafety.test.ts
++++ b/convex/operationsSafety.test.ts
+@@ -197,6 +197,8 @@ describe('provider failures are visible', () => {
+     expect(apiFailureCode(err({ status: 401 }))).toBe('401');
+     expect(apiFailureCode(err({ status: 429 }))).toBe('429');
+     expect(apiFailureCode(err({ status: 200, code: 'schema_mismatch' }))).toBe('schema_mismatch');
++    // An adapter's own word for an answer it could not read counts the same way.
++    expect(apiFailureCode(err({ code: 'plan_list_unreadable' }))).toBe('plan_list_unreadable');
+     // A refusal the caller handles is not the API failing.
+     expect(apiFailureCode(err({ status: 404 }))).toBeNull();
+     expect(apiFailureCode(err({ status: 409, code: 'conflict' }))).toBeNull();
+diff --git a/docs/edges.md b/docs/edges.md
+index 955c5e12..7cf7df33 100644
+--- a/docs/edges.md
++++ b/docs/edges.md
+@@ -2961,22 +2961,25 @@ month then charged, `per_gb`, or `unknown`), its bandwidth, whether it takes a n
+ the provider (Scaleway's multi-cloud flag), where the price came from (`api`: the provider's
+ own price list; `catalog`: FCP's dated table, "list price as of" its date) and when it was
+ read. A month is the provider's own monthly figure, else its hourly price times 730 (the hours
+-of an average month). A CDN account has no plans: FCP never prices one on its own.
++of an average month); an adapter whose provider caps a month at fewer hours states the month
++itself (UpCloud: 672). A CDN account has no plans: FCP never prices one on its own.
+ 
+ **Where the prices come from** (each checked against the provider's documentation on
+ 2026-10-22):
+ 
+-| adapter  | plans and prices                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+-| -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+-| gcore    | `GET /cloud/v1/lbflavors/{project_id}/{region_id}?include_prices=true`: `price_per_hour`, `price_per_month`, `currency_code`, used when `price_status` is `show` (a trial account reads every price as 0, as documented). A flavor the list does not price is asked the v2 preview, `POST /cloud/v2/pricing/{project_id}/{region_id}/loadbalancers {flavor}` (`per_hour.flavor`, `per_month.flavor`), a few at most. The flavor's own price: an address Gcore bills apart is not in it. Neither says anything about traffic: `unknown`.                                                                                                                                                                                                                                                                                          |
+-| upcloud  | `GET /1.3/load-balancer/plans` for the plans (nodes, sessions per node) and the account's price list, `GET /1.3/price`, for the location's zone (cents an hour in the account's billing currency, which the list does not name: it is read from the account's details, `GET /1.3/account` then `GET /1.3/account/details/{username}`; a list whose currency cannot be read is not used). UpCloud does not document the price list's key for a load balancer plan, so it is matched by the plan's name; a plan it does not name takes the pricing page's monthly figure (`UPCLOUD_LB_PRICES`). The plan's own price: the floating IP FCP delegates is not in it. No data transfer charge: `unlimited`.                                                                                                                            |
+-| ovh      | The region's flavors (`GET /cloud/project/{serviceName}/region/{regionName}/loadbalancing/flavor`) joined by name (`small` is `loadbalancer-s`) to the public cloud catalog, `GET /order/catalog/public/cloud?ovhSubsidiary=` (no authentication; prices in micro-cents; `octavia-loadbalancer.loadbalancer-<x>.hour.consumption` an hour, `...month.consumption` a month, `blobs.technical.bandwidth.level`), with the floating IP every balancer gets (`floatingip.floatingip.*`) added. The subsidiary is the account's (`/me`), else its endpoint's (FR, CA, US). The catalog is several megabytes: read with its own cap and kept an hour. Traffic is included, except in the Asia-Pacific regions, where a project gets 1 TB a month and pays past it. A gateway FCP creates when the location names none is billed apart. |
+-| scaleway | The public product catalog, `GET https://api.scaleway.com/product-catalog/v2alpha1/public-catalog/products?product_types=load_balancer&zone=` (no authentication; an alpha API): `price.retail_price` per node an hour, `properties.load_balancer.node.bandwidth` (bits a second) and `multi_cloud_provider`, with the IPv4 each edge allocates added (the catalog's "Load Balancer IP", billed per IP an hour). When it does not answer, the zone's size list (`ListLbTypes`, which carries no price) priced from the pricing page (`SCALEWAY_LB_PRICES`: LB-S 0.023, LB-GP-M 0.054, LB-GP-L 0.094, LB-GP-XL 0.941 EUR an hour, plus 0.005 for the IPv4; 200 Mbps, 500 Mbps, 1 Gbps, 4 Gbps). Traffic is not charged.                                                                                                           |
++| adapter  | plans and prices                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
++| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
++| gcore    | `GET /cloud/v1/lbflavors/{project_id}/{region_id}?include_prices=true`: `price_per_hour`, `price_per_month`, `currency_code`, used when `price_status` is `show` (a trial account reads every price as 0, as documented). A flavor the list does not price is asked the v2 preview, `POST /cloud/v2/pricing/{project_id}/{region_id}/loadbalancers {flavor}` (`per_hour.flavor`, `per_month.flavor`), a few at most. The flavor's own price: an address Gcore bills apart is not in it. Neither says anything about traffic: `unknown`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
++| upcloud  | `GET /1.3/load-balancer/plans` for the plans (nodes, sessions per node): a bare JSON array, paged with `limit` and `offset` and read whole; an answer that is not a list of named plans fails the read (`plan_list_unreadable`). The prices: the account's price list, `GET /1.3/price`, for the location's zone (`prices.zone[]`, one object per zone named by `name`, each item `{amount, price}` with `price` in cents an hour for `amount` units) in the account's billing currency, which the list does not name: it is read from the account's details, `GET /1.3/account` then `GET /1.3/account/details/{username}`; a list whose currency cannot be read is not used. A month of a listed price is 672 hours: UpCloud bills an hourly price for at most 28 days a month, as its own CLI prices a month. UpCloud does not document the price list's key for a load balancer plan, so it is matched by the plan's name after the product (`managed_load_balancer_<plan>`, `load_balancer_<plan>` or `loadbalancer_<plan>`, with or without `plan_`, case and `-` or `_` aside); a read whose zone names a plan under none of them logs the zone's other item keys (`[upcloud plans]`, names only). A plan the list does not name takes the pricing page's monthly figure (`UPCLOUD_LB_PRICES`); one in neither has no known price, and the read still succeeds. The plan's own price: the floating IP FCP delegates is not in it. No data transfer charge: `unlimited`. |
++| ovh      | The region's flavors (`GET /cloud/project/{serviceName}/region/{regionName}/loadbalancing/flavor`) joined by name (`small` is `loadbalancer-s`) to the public cloud catalog, `GET /order/catalog/public/cloud?ovhSubsidiary=` (no authentication; prices in micro-cents; `octavia-loadbalancer.loadbalancer-<x>.hour.consumption` an hour, `...month.consumption` a month, `blobs.technical.bandwidth.level`), with the floating IP every balancer gets (`floatingip.floatingip.*`) added. The subsidiary is the account's (`/me`), else its endpoint's (FR, CA, US). The catalog is several megabytes: read with its own cap and kept an hour. Traffic is included, except in the Asia-Pacific regions, where a project gets 1 TB a month and pays past it. A gateway FCP creates when the location names none is billed apart.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
++| scaleway | The public product catalog, `GET https://api.scaleway.com/product-catalog/v2alpha1/public-catalog/products?product_types=load_balancer&zone=` (no authentication; an alpha API): `price.retail_price` per node an hour, `properties.load_balancer.node.bandwidth` (bits a second) and `multi_cloud_provider`, with the IPv4 each edge allocates added (the catalog's "Load Balancer IP", billed per IP an hour). When it does not answer, the zone's size list (`ListLbTypes`, which carries no price) priced from the pricing page (`SCALEWAY_LB_PRICES`: LB-S 0.023, LB-GP-M 0.054, LB-GP-L 0.094, LB-GP-XL 0.941 EUR an hour, plus 0.005 for the IPv4; 200 Mbps, 500 Mbps, 1 Gbps, 4 Gbps). Traffic is not charged.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+ 
+ Sources: https://gcore.com/docs/api-reference/cloud/load-balancers/list-load-balancer-flavors.md,
+ https://gcore.com/docs/api-reference/cloud/load-balancers/preview-load-balancer-price.md,
+ https://developers.upcloud.com/1.3/4-pricing/, https://developers.upcloud.com/1.3/17-managed-loadbalancer/,
+-https://upcloud.com/pricing/, https://eu.api.ovh.com/1.0/order.json,
++https://upcloud.com/pricing/, https://github.com/UpCloudLtd/upcloud-go-api (`upcloud/price.go`, the
++recorded `upcloud/service/fixtures/getloadbalancerplans.yaml` and `getpricezones.yaml`),
++https://github.com/UpCloudLtd/upcloud-cli (`internal/commands/server/plan_list.go`, read 2026-10-22), https://eu.api.ovh.com/1.0/order.json,
+ https://www.ovhcloud.com/en/public-cloud/prices/,
+ https://www.scaleway.com/en/developers/api/product-catalog/public-catalog/v2alpha1/,
+ https://www.scaleway.com/en/pricing/network/.
+@@ -4041,17 +4044,19 @@ lifecycle runs in that test and its rows appear here.
+ | gcore      | GET    | `^/cloud/v1/regions$`                                                              | location form: the regions the key can see                                                                                                                                  | https://api.gcore.com/docs/cloud (Cloud API v1), 2026-09-16                                                                                                                                                                                                                                                                                                                                                                                                     |
+ | gcore      | GET    | `^/cloud/v1/networks/[^/]+/[^/]+$`                                                 | location form: private networks for a private VIP                                                                                                                           | https://api.gcore.com/docs/cloud (Cloud API v1), 2026-09-16                                                                                                                                                                                                                                                                                                                                                                                                     |
+ | gcore      | GET    | `^/cloud/v1/subnets/[^/]+/[^/]+$`                                                  | location form: the subnets of those networks                                                                                                                                | https://api.gcore.com/docs/cloud (Cloud API v1), 2026-09-16                                                                                                                                                                                                                                                                                                                                                                                                     |
+-| upcloud    | GET    | `^/1\.3/account$`                                                                  | credential test                                                                                                                                                             | https://developers.upcloud.com/1.3/ (Managed Load Balancer), 2026-09-16                                                                                                                                                                                                                                                                                                                                                                                         |
+-| upcloud    | GET    | `^/1\.3/zone$`                                                                     | location form: the zones                                                                                                                                                    | https://developers.upcloud.com/1.3/ (Managed Load Balancer), 2026-09-16                                                                                                                                                                                                                                                                                                                                                                                         |
+-| upcloud    | POST   | `^/1\.3/load-balancer$`                                                            | create the service with its TCP frontend and backend inline                                                                                                                 | https://developers.upcloud.com/1.3/ (Managed Load Balancer), 2026-09-16                                                                                                                                                                                                                                                                                                                                                                                         |
+-| upcloud    | GET    | `^/1\.3/load-balancer$ ?limit&offset`                                              | list services, page by page: discovery by name and inventory                                                                                                                | https://developers.upcloud.com/1.3/ (Managed Load Balancer), 2026-09-16                                                                                                                                                                                                                                                                                                                                                                                         |
+-| upcloud    | GET    | `^/1\.3/load-balancer/plans$`                                                      | list the service plans (inventory)                                                                                                                                          | https://developers.upcloud.com/1.3/ (Managed Load Balancer), 2026-09-16                                                                                                                                                                                                                                                                                                                                                                                         |
+-| upcloud    | GET    | `^/1\.3/load-balancer/(?!plans$)[^/]+$`                                            | read one service: describe, inspect, attachment check                                                                                                                       | https://developers.upcloud.com/1.3/ (Managed Load Balancer), 2026-09-16                                                                                                                                                                                                                                                                                                                                                                                         |
+-| upcloud    | DELETE | `^/1\.3/load-balancer/(?!plans$)[^/]+$`                                            | delete the service (idempotent; re-issued until it answers 404)                                                                                                             | https://developers.upcloud.com/1.3/ (Managed Load Balancer), 2026-09-16                                                                                                                                                                                                                                                                                                                                                                                         |
+-| upcloud    | POST   | `^/1\.3/load-balancer/[^/]+/ip-addresses$`                                         | delegate the floating IP to the service                                                                                                                                     | https://developers.upcloud.com/1.3/ (Managed Load Balancer), 2026-09-16                                                                                                                                                                                                                                                                                                                                                                                         |
+-| upcloud    | POST   | `^/1\.3/ip_address$`                                                               | allocate the floating IPv4 that is published                                                                                                                                | https://developers.upcloud.com/1.3/ (Managed Load Balancer), 2026-09-16                                                                                                                                                                                                                                                                                                                                                                                         |
+-| upcloud    | GET    | `^/1\.3/ip_address$`                                                               | list IP addresses: unknown-outcome discovery and inventory                                                                                                                  | https://developers.upcloud.com/1.3/ (Managed Load Balancer), 2026-09-16                                                                                                                                                                                                                                                                                                                                                                                         |
+-| upcloud    | DELETE | `^/1\.3/ip_address/[^/]+$`                                                         | release the floating IP                                                                                                                                                     | https://developers.upcloud.com/1.3/ (Managed Load Balancer), 2026-09-16                                                                                                                                                                                                                                                                                                                                                                                         |
++| upcloud    | GET    | `^/1\.3/account$`                                                                  | credential test; the key's own username (price read)                                                                                                                        | https://developers.upcloud.com/1.3/ (Managed Load Balancer, Pricing, Accounts), 2026-10-22                                                                                                                                                                                                                                                                                                                                                                      |
++| upcloud    | GET    | `^/1\.3/account/details/[^/]+$`                                                    | the account's billing currency, the price list's (price read)                                                                                                               | https://developers.upcloud.com/1.3/ (Managed Load Balancer, Pricing, Accounts), 2026-10-22                                                                                                                                                                                                                                                                                                                                                                      |
++| upcloud    | GET    | `^/1\.3/price$`                                                                    | the price list, per zone, in cents an hour (price read)                                                                                                                     | https://developers.upcloud.com/1.3/ (Managed Load Balancer, Pricing, Accounts), 2026-10-22                                                                                                                                                                                                                                                                                                                                                                      |
++| upcloud    | GET    | `^/1\.3/zone$`                                                                     | location form: the zones                                                                                                                                                    | https://developers.upcloud.com/1.3/ (Managed Load Balancer, Pricing, Accounts), 2026-10-22                                                                                                                                                                                                                                                                                                                                                                      |
++| upcloud    | POST   | `^/1\.3/load-balancer$`                                                            | create the service with its TCP frontend and backend inline                                                                                                                 | https://developers.upcloud.com/1.3/ (Managed Load Balancer, Pricing, Accounts), 2026-10-22                                                                                                                                                                                                                                                                                                                                                                      |
++| upcloud    | GET    | `^/1\.3/load-balancer$ ?limit&offset`                                              | list services, page by page: discovery by name and inventory                                                                                                                | https://developers.upcloud.com/1.3/ (Managed Load Balancer, Pricing, Accounts), 2026-10-22                                                                                                                                                                                                                                                                                                                                                                      |
++| upcloud    | GET    | `^/1\.3/load-balancer/plans$ ?limit&offset`                                        | list the service plans, page by page (inventory and price read)                                                                                                             | https://developers.upcloud.com/1.3/ (Managed Load Balancer, Pricing, Accounts), 2026-10-22                                                                                                                                                                                                                                                                                                                                                                      |
++| upcloud    | GET    | `^/1\.3/load-balancer/(?!plans$)[^/]+$`                                            | read one service: describe, inspect, attachment check                                                                                                                       | https://developers.upcloud.com/1.3/ (Managed Load Balancer, Pricing, Accounts), 2026-10-22                                                                                                                                                                                                                                                                                                                                                                      |
++| upcloud    | DELETE | `^/1\.3/load-balancer/(?!plans$)[^/]+$`                                            | delete the service (idempotent; re-issued until it answers 404)                                                                                                             | https://developers.upcloud.com/1.3/ (Managed Load Balancer, Pricing, Accounts), 2026-10-22                                                                                                                                                                                                                                                                                                                                                                      |
++| upcloud    | POST   | `^/1\.3/load-balancer/[^/]+/ip-addresses$`                                         | delegate the floating IP to the service                                                                                                                                     | https://developers.upcloud.com/1.3/ (Managed Load Balancer, Pricing, Accounts), 2026-10-22                                                                                                                                                                                                                                                                                                                                                                      |
++| upcloud    | POST   | `^/1\.3/ip_address$`                                                               | allocate the floating IPv4 that is published                                                                                                                                | https://developers.upcloud.com/1.3/ (Managed Load Balancer, Pricing, Accounts), 2026-10-22                                                                                                                                                                                                                                                                                                                                                                      |
++| upcloud    | GET    | `^/1\.3/ip_address$`                                                               | list IP addresses: unknown-outcome discovery and inventory                                                                                                                  | https://developers.upcloud.com/1.3/ (Managed Load Balancer, Pricing, Accounts), 2026-10-22                                                                                                                                                                                                                                                                                                                                                                      |
++| upcloud    | DELETE | `^/1\.3/ip_address/[^/]+$`                                                         | release the floating IP                                                                                                                                                     | https://developers.upcloud.com/1.3/ (Managed Load Balancer, Pricing, Accounts), 2026-10-22                                                                                                                                                                                                                                                                                                                                                                      |
+ | scaleway   | GET    | `^/iam/v1alpha1/api-keys/[^/]+$`                                                   | credential test: the API key's default project (a location with no Project id creates there)                                                                                | https://www.scaleway.com/en/developers/api/load-balancer/zoned-api/ via @scaleway/sdk-lb v1, 2026-09-16; https://www.scaleway.com/en/developers/api/iam/ (api-keys), 2026-10-22                                                                                                                                                                                                                                                                                 |
+ | scaleway   | GET    | `^/lb/v1/zones/[^/]+/lbs$`                                                         | list load balancers: credential test, discovery by name, inventory                                                                                                          | https://www.scaleway.com/en/developers/api/load-balancer/zoned-api/ via @scaleway/sdk-lb v1, 2026-09-16; https://www.scaleway.com/en/developers/api/iam/ (api-keys), 2026-10-22                                                                                                                                                                                                                                                                                 |
+ | scaleway   | POST   | `^/lb/v1/zones/[^/]+/lbs$`                                                         | create the load balancer over the already allocated IPs                                                                                                                     | https://www.scaleway.com/en/developers/api/load-balancer/zoned-api/ via @scaleway/sdk-lb v1, 2026-09-16; https://www.scaleway.com/en/developers/api/iam/ (api-keys), 2026-10-22                                                                                                                                                                                                                                                                                 |
+diff --git a/src/client/lib/edgeCodes.ts b/src/client/lib/edgeCodes.ts
+index 9ea7a6cf..d329e2d2 100644
+--- a/src/client/lib/edgeCodes.ts
++++ b/src/client/lib/edgeCodes.ts
+@@ -1309,6 +1309,17 @@ const COPY = {
+     explain: 'A new edge here would take the account past the monthly spend cap set on it.',
+     fix: 'Raise the cap on the account, pick another account, or remove an edge.',
+   },
++  // a price read (`plansError` on a location)
++  plan_list_unreadable: {
++    label: 'Plan list unreadable',
++    explain:
++      "The provider's list of load balancer plans was not a list of named plans, so no size or price could be read.",
++    fix: 'Refresh prices again later; until then the location keeps the plans and prices it read before.',
++  },
++  schema_mismatch: {
++    label: 'Answer not understood',
++    explain: "The provider's answer was not in the shape FCP reads, so nothing was taken from it.",
++  },
+   account_budget_unlimited: {
+     label: 'No daily spending limit',
+     explain:
+diff --git a/src/client/routes/admin/edges/providers/LocationsCard.svelte b/src/client/routes/admin/edges/providers/LocationsCard.svelte
+index 5b516fc2..abec7152 100644
+--- a/src/client/routes/admin/edges/providers/LocationsCard.svelte
++++ b/src/client/routes/admin/edges/providers/LocationsCard.svelte
+@@ -45,6 +45,7 @@
+   } from '../../../../lib/edgesApi';
+   import PlanDialog from './PlanDialog.svelte';
+   import { costWords, sourceWords, trafficWords } from '../lib/planWords';
++  import { codeLabel } from '../../../../lib/edgeCodes';
+   import { EDGE_PROVIDER_META } from '../../../../lib/edgeProviderMeta';
+   import ConfirmDialog from '../components/ConfirmDialog.svelte';
+   import { edgeErrorMessage } from '../lib/edgeErrors';
+@@ -258,8 +259,8 @@
+               </p>
+               {#if pr.plansError}
+                 <p class="text-muted-foreground text-xs">
+-                  The last price read failed ({pr.plansError}); the prices shown are the ones read
+-                  before.
++                  The last price read failed ({codeLabel(pr.plansError)}); the prices shown are the
++                  ones read before.
+                 </p>
+               {/if}
+             {:else if zones && l.pricing}
+diff --git a/tests/edge-connection/providers.ts b/tests/edge-connection/providers.ts
+index 180909d4..f69c989e 100644
+--- a/tests/edge-connection/providers.ts
++++ b/tests/edge-connection/providers.ts
+@@ -131,8 +131,8 @@ export function installProviderFakes(opts: {
+     calls.upcloud.push({ method, path, body });
+     const p = path.replace(/^\/1\.3/, '');
+     if (p === '/account' && method === 'GET') return json({ account: { username: 'ec-test' } });
+-    if (p === '/load-balancer/plans' && method === 'GET')
+-      return json({ plans: [{ name: 'development' }] });
++    // UpCloud answers the plan list as a bare array.
++    if (p === '/load-balancer/plans' && method === 'GET') return json([{ name: 'development' }]);
+     if (p === '/load-balancer' && method === 'GET') return json([...lbs.values()]);
+     if (p === '/load-balancer' && method === 'POST') {
+       const uuid = `0a000000-0000-4000-8000-${String(++seq).padStart(12, '0')}`;

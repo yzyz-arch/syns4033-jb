@@ -1,0 +1,1349 @@
+From e4b14be0df07ced9d60de54c0d55361a4020ed93 Mon Sep 17 00:00:00 2001
+From: Thomas Solbjor <thomas.solbjor@fortedigital.com>
+Date: Sat, 22 Aug 2026 17:56:59 +0200
+Subject: [PATCH] Ask for a deployment prefix; tag resources with the deployer
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The prefix was a hardcoded literal in every root module, yet it seeds
+names that are globally unique across each provider (S3/GCS/object
+buckets, the Cognito hosted-UI domain, Azure storage accounts and Key
+Vaults) — two deployments on the defaults collided, and the only fix was
+editing committed main.tf files.
+
+- prefix is now a root-module variable set via terraform.tfvars, with
+  validation (3-16 lowercase [a-z0-9-], no trailing dash; AWS also
+  rejects aws/amazon/cognito, which Cognito bans in domains)
+- Azure resource group derives as "<prefix>-rg"; AWS
+  cognito_domain_prefix derives from the prefix — both TODOs gone
+- prod default moves devhub -> devhub-prod for symmetry with dev
+- new deployed_by variable, recorded on every resource as a
+  DeployedBy tag (deployed-by label on GCP/UpCloud, sanitized to each
+  provider's charset) alongside Deployment = prefix
+- setup-env.sh asks for both: prefix with a per-tier default and the
+  uniqueness explanation, deployer auto-detected from the cloud CLI
+  (aws sts / az account / gcloud auth / UPCLOUD_USERNAME, falling back
+  to user@host); new --prefix/--deployed-by flags, and --force re-runs
+  prefill from the existing tfvars so a live deployment cannot be
+  renamed by accident
+
+terraform.tfvars is committed in generated environment repos, so both
+values survive the GitOps handover.
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
+---
+ CLAUDE.md                                     |  2 +-
+ k8s/docs/AWS_SETUP.md                         |  4 +-
+ k8s/docs/AZURE_SETUP.md                       |  6 +-
+ k8s/docs/GCP_SETUP.md                         |  2 +
+ k8s/docs/UPCLOUD_SETUP.md                     |  2 +
+ k8s/scripts/setup-env.sh                      | 55 +++++++++++++++++
+ tofu/aws/dev/main.tf                          |  9 ++-
+ tofu/aws/dev/terraform.tfvars.example         |  7 +++
+ tofu/aws/dev/variables-deployment.tf          | 32 ++++++++++
+ tofu/aws/prod/main.tf                         |  9 ++-
+ tofu/aws/prod/terraform.tfvars.example        |  7 +++
+ tofu/aws/prod/variables-deployment.tf         | 32 ++++++++++
+ tofu/aws/workload/main.tf                     | 61 +++++++++++++------
+ tofu/aws/workload/terraform.tfvars.example    |  6 ++
+ tofu/azure/dev/main.tf                        |  6 +-
+ tofu/azure/dev/terraform.tfvars.example       |  7 +++
+ tofu/azure/dev/variables-deployment.tf        | 27 ++++++++
+ tofu/azure/prod/main.tf                       |  6 +-
+ tofu/azure/prod/terraform.tfvars.example      |  7 +++
+ tofu/azure/prod/variables-deployment.tf       | 27 ++++++++
+ tofu/azure/workload/main.tf                   | 33 ++++++++--
+ tofu/azure/workload/terraform.tfvars.example  |  6 ++
+ tofu/gcp/dev/main.tf                          |  4 +-
+ tofu/gcp/dev/terraform.tfvars.example         |  7 +++
+ tofu/gcp/dev/variables-deployment.tf          | 32 ++++++++++
+ tofu/gcp/prod/main.tf                         |  4 +-
+ tofu/gcp/prod/terraform.tfvars.example        |  7 +++
+ tofu/gcp/prod/variables-deployment.tf         | 32 ++++++++++
+ tofu/gcp/workload/main.tf                     | 29 ++++++++-
+ tofu/gcp/workload/terraform.tfvars.example    |  6 ++
+ tofu/upcloud/dev/main.tf                      |  4 +-
+ tofu/upcloud/dev/terraform.tfvars.example     |  7 +++
+ tofu/upcloud/dev/variables-deployment.tf      | 31 ++++++++++
+ tofu/upcloud/prod/main.tf                     |  4 +-
+ tofu/upcloud/prod/terraform.tfvars.example    |  7 +++
+ tofu/upcloud/prod/variables-deployment.tf     | 31 ++++++++++
+ tofu/upcloud/workload/main.tf                 | 31 ++++++++--
+ .../upcloud/workload/terraform.tfvars.example |  6 ++
+ 38 files changed, 543 insertions(+), 52 deletions(-)
+ create mode 100644 tofu/aws/dev/variables-deployment.tf
+ create mode 100644 tofu/aws/prod/variables-deployment.tf
+ create mode 100644 tofu/azure/dev/variables-deployment.tf
+ create mode 100644 tofu/azure/prod/variables-deployment.tf
+ create mode 100644 tofu/gcp/dev/variables-deployment.tf
+ create mode 100644 tofu/gcp/prod/variables-deployment.tf
+ create mode 100644 tofu/upcloud/dev/variables-deployment.tf
+ create mode 100644 tofu/upcloud/prod/variables-deployment.tf
+
+diff --git a/CLAUDE.md b/CLAUDE.md
+index 1601846..312793a 100644
+--- a/CLAUDE.md
++++ b/CLAUDE.md
+@@ -420,7 +420,7 @@ devhub/
+   cannot override it. Elsewhere the two are equal
+ - Keycloak is the **operator** (`k8s.keycloak.org/v2beta1`), pod `keycloak-0`, service `keycloak-service:8080`
+ - GCP OAuth client must be created manually (no Terraform resource) → `manual-secrets.env`
+-- AWS Cognito domain prefix and all bucket names are globally unique; prefix with the account/project
++- The deployment `prefix` (tfvars, asked by `setup-env.sh`) names every resource and the globally-unique namespaces (buckets, Cognito domain, Azure storage account); one per deployment. `deployed_by` rides along as a tag
+ - Grafana requires `initChownData: enabled: false` for local k3s/Rancher Desktop
+ - Keycloak `setup-keycloak.sh` uses `kcadm.sh` via `kubectl exec` — avoid `!` `@` `$` in passwords
+ - `.localhost` DNS gotcha: glibc resolves `*.localhost` to 127.0.0.1 before DNS, so server-side OIDC endpoints must use internal service URLs (`http://keycloak-service.keycloak.svc.cluster.local:8080`) while browser-facing URLs stay external
+diff --git a/k8s/docs/AWS_SETUP.md b/k8s/docs/AWS_SETUP.md
+index b73ead2..f9dae29 100644
+--- a/k8s/docs/AWS_SETUP.md
++++ b/k8s/docs/AWS_SETUP.md
+@@ -72,6 +72,8 @@ Re-check DNS alone at any time with `./devhub preflight --env aws-dev --dns`.
+ 
+ Asks for:
+   - your domain and the ACME contact address
++  - a deployment prefix — names every resource and the globally-unique
++    namespaces; the wizard also records who is deploying, as a resource tag
+   - which CIDRs may reach the Kubernetes API (offers your current public IP,
+     specific CIDRs, or no public endpoint at all)
+   - where tofu state lives
+@@ -298,7 +300,7 @@ tofu output cognito_issuer_url
+ # Configure in Keycloak UI or via setup-keycloak.sh
+ ```
+ 
+-**Note:** The `cognito_domain_prefix` in the tofu configuration must be globally unique across all AWS accounts. Update it in `tofu/aws/dev/main.tf` or `tofu/aws/prod/main.tf` before applying.
++**Note:** The Cognito hosted-UI domain must be globally unique across all AWS accounts. It derives from the deployment `prefix` in `terraform.tfvars` (set by `./devhub setup`), so a unique prefix is what keeps it collision-free.
+ 
+ ## Troubleshooting
+ 
+diff --git a/k8s/docs/AZURE_SETUP.md b/k8s/docs/AZURE_SETUP.md
+index 39b000e..8e062d4 100644
+--- a/k8s/docs/AZURE_SETUP.md
++++ b/k8s/docs/AZURE_SETUP.md
+@@ -72,6 +72,8 @@ Re-check DNS alone at any time with `./devhub preflight --env azure-dev --dns`.
+ 
+ Asks for:
+   - your domain and the ACME contact address
++  - a deployment prefix — names every resource and the globally-unique
++    namespaces; the wizard also records who is deploying, as a resource tag
+   - which CIDRs may reach the Kubernetes API (offers your current public IP,
+     specific CIDRs, or no public endpoint at all)
+ #   - Entra group object ids for cluster-admin (optional)
+@@ -234,9 +236,9 @@ open https://grafana.dev.yourdomain.com
+ 
+ | Setting | Dev (`tofu/azure/dev`) | Prod (`tofu/azure/prod`) |
+ |---------|--------------------------|----------------------------|
+-| Prefix | `devhub-dev` | `devhub` |
++| Prefix (default) | `devhub-dev` | `devhub-prod` |
+ | Location | `norwayeast` | `westeurope` |
+-| Resource Group | `devhub-dev-rg` | `devhub-prod-rg` |
++| Resource Group | `<prefix>-rg` | `<prefix>-rg` |
+ | AKS Node Size | `Standard_B2s` | `Standard_D4s_v3` |
+ | AKS Node Count | 2 | 3 |
+ | PostgreSQL SKU | `B_Standard_B1ms` | `GP_Standard_D2s_v3` |
+diff --git a/k8s/docs/GCP_SETUP.md b/k8s/docs/GCP_SETUP.md
+index a05e78a..5a01652 100644
+--- a/k8s/docs/GCP_SETUP.md
++++ b/k8s/docs/GCP_SETUP.md
+@@ -72,6 +72,8 @@ Re-check DNS alone at any time with `./devhub preflight --env gcp-dev --dns`.
+ 
+ Asks for:
+   - your domain and the ACME contact address
++  - a deployment prefix — names every resource and the globally-unique
++    namespaces; the wizard also records who is deploying, as a resource tag
+   - which CIDRs may reach the Kubernetes API (offers your current public IP,
+     specific CIDRs, or no public endpoint at all)
+ #   - the GCP project id
+diff --git a/k8s/docs/UPCLOUD_SETUP.md b/k8s/docs/UPCLOUD_SETUP.md
+index 398610f..d32e395 100644
+--- a/k8s/docs/UPCLOUD_SETUP.md
++++ b/k8s/docs/UPCLOUD_SETUP.md
+@@ -72,6 +72,8 @@ Re-check DNS alone at any time with `./devhub preflight --env upcloud-dev --dns`
+ 
+ Asks for:
+   - your domain and the ACME contact address
++  - a deployment prefix — names every resource and the globally-unique
++    namespaces; the wizard also records who is deploying, as a resource tag
+   - which CIDRs may reach the Kubernetes API (offers your current public IP,
+     specific CIDRs, or no public endpoint at all)
+   - the Managed Object Storage S3 endpoint for tofu state
+diff --git a/k8s/scripts/setup-env.sh b/k8s/scripts/setup-env.sh
+index ec869e6..90afd24 100755
+--- a/k8s/scripts/setup-env.sh
++++ b/k8s/scripts/setup-env.sh
+@@ -34,6 +34,8 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+ ENV=""
+ DOMAIN_IN=""
+ ACME_EMAIL_IN=""
++PREFIX_IN=""
++DEPLOYED_BY_IN=""
+ API_CIDRS_IN=""
+ STATE_BUCKET=""
+ STATE_KEY_PREFIX=""
+@@ -58,6 +60,11 @@ Usage: $0 --env <environment> [options]
+ Options:
+   --domain <fqdn>              platform domain (e.g. dev.example.org)
+   --acme-email <address>       Let's Encrypt contact address
++  --prefix <name>              deployment prefix: names every resource and the
++                               globally-unique namespaces (buckets, SSO domain);
++                               3-16 lowercase chars, one per deployment
++  --deployed-by <identity>     who configured this deployment (tags only;
++                               detected from the cloud CLI when omitted)
+   --api-cidrs <a,b,...>        CIDRs allowed to reach the Kubernetes API
+                                ("none" = private endpoint only)
+   --state-bucket <name>        state bucket / storage account / container host
+@@ -84,6 +91,8 @@ while [[ $# -gt 0 ]]; do
+         --env)                   ENV="${2:-}"; shift 2 ;;
+         --domain)                DOMAIN_IN="${2:-}"; shift 2 ;;
+         --acme-email)            ACME_EMAIL_IN="${2:-}"; shift 2 ;;
++        --prefix)                PREFIX_IN="${2:-}"; shift 2 ;;
++        --deployed-by)           DEPLOYED_BY_IN="${2:-}"; shift 2 ;;
+         --api-cidrs)             API_CIDRS_IN="${2:-}"; shift 2 ;;
+         --state-bucket)          STATE_BUCKET="${2:-}"; shift 2 ;;
+         --state-key-prefix)      STATE_KEY_PREFIX="${2:-}"; shift 2 ;;
+@@ -183,6 +192,19 @@ detect_public_ip() {
+     curl -fsS --max-time 5 https://checkip.amazonaws.com 2>/dev/null | tr -d '[:space:]' || true
+ }
+ 
++# The identity behind the cloud CLI — the best answer to "who set this
++# environment up". Best-effort; falls back to user@host.
++detect_deployer() {
++    local who=""
++    case "$CLOUD" in
++        aws)     who="$(aws sts get-caller-identity --query 'Arn' --output text 2>/dev/null || true)" ;;
++        azure)   who="$(az account show --query 'user.name' -o tsv 2>/dev/null || true)" ;;
++        gcp)     who="$(gcloud auth list --filter=status:ACTIVE --format='value(account)' 2>/dev/null | head -1 || true)" ;;
++        upcloud) who="${UPCLOUD_USERNAME:-}" ;;
++    esac
++    [[ -n "$who" ]] && echo "$who" || echo "${USER:-unknown}@$(hostname 2>/dev/null || echo unknown)"
++}
++
+ # ─── Read back an existing configuration ──────────────────────────────
+ #
+ # Re-running with --force must prefill what is already configured, otherwise
+@@ -238,6 +260,9 @@ load_existing() {
+         groups="$(sed -n 's/^[[:space:]]*aad_admin_group_object_ids[[:space:]]*=[[:space:]]*\[\(.*\)\].*/\1/p' "$TFVARS_FILE" | head -1)"
+         [[ -n "$groups" ]] && AAD_GROUPS_IN="$(echo "$groups" | tr -d '" ')"
+     fi
++
++    PREFIX_IN="${PREFIX_IN:-$(hcl_value "$TFVARS_FILE" prefix)}"
++    DEPLOYED_BY_IN="${DEPLOYED_BY_IN:-$(hcl_value "$TFVARS_FILE" deployed_by)}"
+ }
+ 
+ # ─── Gather values ────────────────────────────────────────────────────
+@@ -339,6 +364,31 @@ else
+     fi
+ fi
+ 
++# ── Deployment identity ───────────────────────────────────────────────
++#
++# The prefix names every resource tofu creates, including names that are
++# globally unique across the provider (buckets, the Cognito domain, Azure
++# storage accounts). Two deployments must never share one, so the default
++# only suits the first deployment in an organization.
++echo ""
++echo "Deployment identity"
++echo "  The prefix names every cloud resource, including globally-unique ones"
++echo "  (buckets, SSO domain). Use one per deployment, e.g. <org>-${TIER}."
++ask PREFIX_IN "Deployment prefix" "devhub-${TIER}"
++if ! [[ "$PREFIX_IN" =~ ^[a-z][a-z0-9-]{1,14}[a-z0-9]$ ]]; then
++    log_error "Prefix must be 3-16 lowercase letters, digits or dashes,"
++    log_error "starting with a letter and not ending in a dash: ${PREFIX_IN}"
++    exit 1
++fi
++if [[ "$CLOUD" == "aws" && "$PREFIX_IN" =~ (aws|amazon|cognito) ]]; then
++    log_error "Prefix must not contain 'aws', 'amazon' or 'cognito' —"
++    log_error "Cognito rejects hosted-UI domains containing them: ${PREFIX_IN}"
++    exit 1
++fi
++
++# Recorded as a tag on every resource; the cloud CLI knows who is running this.
++ask DEPLOYED_BY_IN "Deployed by (identity written to resource tags)" "$(detect_deployer)"
++
+ # ── Per-cloud values ──────────────────────────────────────────────────
+ echo ""
+ echo "State storage and cloud settings"
+@@ -441,6 +491,11 @@ EOF
+ render_tfvars() {
+     echo "# Generated by setup-env.sh for ${ENV}. Not committed (gitignored)."
+     echo ""
++    echo "# Deployment identity — names every resource; unique per deployment."
++    echo "prefix      = \"${PREFIX_IN}\""
++    echo "# Who configured this deployment (resource tags only)."
++    echo "deployed_by = \"${DEPLOYED_BY_IN}\""
++    echo ""
+     echo "# CIDRs allowed to reach the Kubernetes API server ([] = private endpoint only)."
+     echo "api_allowed_cidrs = ${API_CIDRS_HCL}"
+ 
+diff --git a/tofu/aws/dev/main.tf b/tofu/aws/dev/main.tf
+index 123689b..59cd46c 100644
+--- a/tofu/aws/dev/main.tf
++++ b/tofu/aws/dev/main.tf
+@@ -2,7 +2,7 @@ module "cluster" {
+   source = "../modules/cluster"
+ 
+   region = var.region
+-  prefix = "devhub-dev"
++  prefix = var.prefix
+ 
+   # VPC
+   availability_zones = ["${var.region}a", "${var.region}b"]
+@@ -44,13 +44,16 @@ module "cluster" {
+   # DNS — must match an existing Route53 hosted zone
+   domain = "dev.example.com" # TODO: set to your actual domain
+ 
+-  # Cognito — domain prefix must be globally unique
+-  cognito_domain_prefix = "devhub-dev-devhub" # TODO: customize to avoid conflicts
++  # Cognito — the hosted-UI domain derives from the deployment prefix,
++  # which is what keeps it globally unique
++  cognito_domain_prefix = var.prefix
+ 
+   enable_deletion_protection = false
+ 
+   tags = {
+     Environment = "dev"
+     ManagedBy   = "tofu"
++    Deployment  = var.prefix
++    DeployedBy  = var.deployed_by
+   }
+ }
+diff --git a/tofu/aws/dev/terraform.tfvars.example b/tofu/aws/dev/terraform.tfvars.example
+index 0bb5108..4701453 100644
+--- a/tofu/aws/dev/terraform.tfvars.example
++++ b/tofu/aws/dev/terraform.tfvars.example
+@@ -1,3 +1,10 @@
+ # Copy to terraform.tfvars (gitignored) and adjust.
+ # [] means the API server has no public endpoint — reach it over VPN/bastion.
+ api_allowed_cidrs = ["203.0.113.4/32"]
++
++# Deployment identity: names every resource and the globally-unique namespaces
++# (buckets, Cognito domain / storage account). One per deployment, e.g. "acme-dev".
++prefix = "devhub-dev"
++
++# Who configured this deployment — used only in tags. setup-env.sh fills it in.
++deployed_by = "you@example.org"
+diff --git a/tofu/aws/dev/variables-deployment.tf b/tofu/aws/dev/variables-deployment.tf
+new file mode 100644
+index 0000000..7ca406e
+--- /dev/null
++++ b/tofu/aws/dev/variables-deployment.tf
+@@ -0,0 +1,32 @@
++# ─── Deployment identity ──────────────────────────────────────────────
++#
++# `prefix` names every resource this environment creates and seeds the
++# globally-unique namespaces (S3 buckets, the Cognito hosted-UI domain).
++# Two deployments sharing a prefix collide — within one account, and across
++# accounts for the global namespaces — so pick one per deployment,
++# e.g. "acme-dev".
++
++variable "prefix" {
++  description = "Deployment identifier — prefixes every resource name, S3 bucket and the Cognito domain"
++  type        = string
++  default     = "devhub-dev"
++
++  validation {
++    condition = (
++      length(var.prefix) >= 3 && length(var.prefix) <= 16 &&
++      can(regex("^[a-z][a-z0-9-]*[a-z0-9]$", var.prefix))
++    )
++    error_message = "prefix must be 3-16 lowercase letters, digits or dashes, starting with a letter and not ending in a dash."
++  }
++
++  validation {
++    condition     = !can(regex("aws|amazon|cognito", var.prefix))
++    error_message = "prefix must not contain \"aws\", \"amazon\" or \"cognito\" — Cognito rejects hosted-UI domains containing them."
++  }
++}
++
++variable "deployed_by" {
++  description = "Identity of the operator who configured this deployment (written by setup-env.sh; used only in tags)"
++  type        = string
++  default     = "unknown"
++}
+diff --git a/tofu/aws/prod/main.tf b/tofu/aws/prod/main.tf
+index 06cfb13..9c29882 100644
+--- a/tofu/aws/prod/main.tf
++++ b/tofu/aws/prod/main.tf
+@@ -2,7 +2,7 @@ module "cluster" {
+   source = "../modules/cluster"
+ 
+   region = var.region
+-  prefix = "devhub"
++  prefix = var.prefix
+ 
+   # VPC
+   availability_zones = ["${var.region}a", "${var.region}b", "${var.region}c"]
+@@ -44,13 +44,16 @@ module "cluster" {
+   # DNS — must match an existing Route53 hosted zone
+   domain = "example.com" # TODO: set to your actual domain
+ 
+-  # Cognito — domain prefix must be globally unique
+-  cognito_domain_prefix = "devhub-prod-devhub" # TODO: customize to avoid conflicts
++  # Cognito — the hosted-UI domain derives from the deployment prefix,
++  # which is what keeps it globally unique
++  cognito_domain_prefix = var.prefix
+ 
+   enable_deletion_protection = true
+ 
+   tags = {
+     Environment = "prod"
+     ManagedBy   = "tofu"
++    Deployment  = var.prefix
++    DeployedBy  = var.deployed_by
+   }
+ }
+diff --git a/tofu/aws/prod/terraform.tfvars.example b/tofu/aws/prod/terraform.tfvars.example
+index 0bb5108..3be8bc7 100644
+--- a/tofu/aws/prod/terraform.tfvars.example
++++ b/tofu/aws/prod/terraform.tfvars.example
+@@ -1,3 +1,10 @@
+ # Copy to terraform.tfvars (gitignored) and adjust.
+ # [] means the API server has no public endpoint — reach it over VPN/bastion.
+ api_allowed_cidrs = ["203.0.113.4/32"]
++
++# Deployment identity: names every resource and the globally-unique namespaces
++# (buckets, Cognito domain / storage account). One per deployment, e.g. "acme-prod".
++prefix = "devhub-prod"
++
++# Who configured this deployment — used only in tags. setup-env.sh fills it in.
++deployed_by = "you@example.org"
+diff --git a/tofu/aws/prod/variables-deployment.tf b/tofu/aws/prod/variables-deployment.tf
+new file mode 100644
+index 0000000..3c3bfab
+--- /dev/null
++++ b/tofu/aws/prod/variables-deployment.tf
+@@ -0,0 +1,32 @@
++# ─── Deployment identity ──────────────────────────────────────────────
++#
++# `prefix` names every resource this environment creates and seeds the
++# globally-unique namespaces (S3 buckets, the Cognito hosted-UI domain).
++# Two deployments sharing a prefix collide — within one account, and across
++# accounts for the global namespaces — so pick one per deployment,
++# e.g. "acme-prod".
++
++variable "prefix" {
++  description = "Deployment identifier — prefixes every resource name, S3 bucket and the Cognito domain"
++  type        = string
++  default     = "devhub-prod"
++
++  validation {
++    condition = (
++      length(var.prefix) >= 3 && length(var.prefix) <= 16 &&
++      can(regex("^[a-z][a-z0-9-]*[a-z0-9]$", var.prefix))
++    )
++    error_message = "prefix must be 3-16 lowercase letters, digits or dashes, starting with a letter and not ending in a dash."
++  }
++
++  validation {
++    condition     = !can(regex("aws|amazon|cognito", var.prefix))
++    error_message = "prefix must not contain \"aws\", \"amazon\" or \"cognito\" — Cognito rejects hosted-UI domains containing them."
++  }
++}
++
++variable "deployed_by" {
++  description = "Identity of the operator who configured this deployment (written by setup-env.sh; used only in tags)"
++  type        = string
++  default     = "unknown"
++}
+diff --git a/tofu/aws/workload/main.tf b/tofu/aws/workload/main.tf
+index cd28208..30c6fcb 100644
+--- a/tofu/aws/workload/main.tf
++++ b/tofu/aws/workload/main.tf
+@@ -15,9 +15,23 @@
+ # =============================================================================
+ 
+ variable "prefix" {
+-  description = "Prefix for resource names (e.g., devhub-workload)"
++  description = "Deployment identifier — prefixes every resource name; pick one per deployment (e.g. acme-workload)"
+   type        = string
+   default     = "devhub-workload"
++
++  validation {
++    condition = (
++      length(var.prefix) >= 3 && length(var.prefix) <= 16 &&
++      can(regex("^[a-z][a-z0-9-]*[a-z0-9]$", var.prefix))
++    )
++    error_message = "prefix must be 3-16 lowercase letters, digits or dashes, starting with a letter and not ending in a dash."
++  }
++}
++
++variable "deployed_by" {
++  description = "Identity of the operator who configured this deployment (written by setup-env.sh; used only in tags)"
++  type        = string
++  default     = "unknown"
+ }
+ 
+ variable "availability_zones" {
+@@ -76,6 +90,13 @@ variable "tags" {
+   }
+ }
+ 
++locals {
++  tags = merge(var.tags, {
++    Deployment = var.prefix
++    DeployedBy = var.deployed_by
++  })
++}
++
+ # ─── VPC ──────────────────────────────────────────────────────────────
+ 
+ resource "aws_vpc" "main" {
+@@ -83,12 +104,12 @@ resource "aws_vpc" "main" {
+   enable_dns_hostnames = true
+   enable_dns_support   = true
+ 
+-  tags = merge(var.tags, { Name = "${var.prefix}-vpc" })
++  tags = merge(local.tags, { Name = "${var.prefix}-vpc" })
+ }
+ 
+ resource "aws_internet_gateway" "main" {
+   vpc_id = aws_vpc.main.id
+-  tags   = merge(var.tags, { Name = "${var.prefix}-igw" })
++  tags   = merge(local.tags, { Name = "${var.prefix}-igw" })
+ }
+ 
+ resource "aws_subnet" "public" {
+@@ -99,7 +120,7 @@ resource "aws_subnet" "public" {
+ 
+   map_public_ip_on_launch = true
+ 
+-  tags = merge(var.tags, {
++  tags = merge(local.tags, {
+     Name                                      = "${var.prefix}-public-${count.index + 1}"
+     "kubernetes.io/cluster/${var.prefix}-eks" = "shared"
+     "kubernetes.io/role/elb"                  = "1"
+@@ -112,7 +133,7 @@ resource "aws_subnet" "private" {
+   cidr_block        = cidrsubnet(var.vpc_cidr, 4, count.index + length(var.availability_zones))
+   availability_zone = var.availability_zones[count.index]
+ 
+-  tags = merge(var.tags, {
++  tags = merge(local.tags, {
+     Name                                      = "${var.prefix}-private-${count.index + 1}"
+     "kubernetes.io/cluster/${var.prefix}-eks" = "shared"
+     "kubernetes.io/role/internal-elb"         = "1"
+@@ -121,13 +142,13 @@ resource "aws_subnet" "private" {
+ 
+ resource "aws_eip" "nat" {
+   domain = "vpc"
+-  tags   = merge(var.tags, { Name = "${var.prefix}-nat-eip" })
++  tags   = merge(local.tags, { Name = "${var.prefix}-nat-eip" })
+ }
+ 
+ resource "aws_nat_gateway" "main" {
+   allocation_id = aws_eip.nat.id
+   subnet_id     = aws_subnet.public[0].id
+-  tags          = merge(var.tags, { Name = "${var.prefix}-nat" })
++  tags          = merge(local.tags, { Name = "${var.prefix}-nat" })
+ 
+   depends_on = [aws_internet_gateway.main]
+ }
+@@ -140,7 +161,7 @@ resource "aws_route_table" "public" {
+     gateway_id = aws_internet_gateway.main.id
+   }
+ 
+-  tags = merge(var.tags, { Name = "${var.prefix}-public-rt" })
++  tags = merge(local.tags, { Name = "${var.prefix}-public-rt" })
+ }
+ 
+ resource "aws_route_table_association" "public" {
+@@ -157,7 +178,7 @@ resource "aws_route_table" "private" {
+     nat_gateway_id = aws_nat_gateway.main.id
+   }
+ 
+-  tags = merge(var.tags, { Name = "${var.prefix}-private-rt" })
++  tags = merge(local.tags, { Name = "${var.prefix}-private-rt" })
+ }
+ 
+ resource "aws_route_table_association" "private" {
+@@ -180,7 +201,7 @@ resource "aws_iam_role" "eks_cluster" {
+     }]
+   })
+ 
+-  tags = var.tags
++  tags = local.tags
+ }
+ 
+ resource "aws_iam_role_policy_attachment" "eks_cluster_policy" {
+@@ -208,7 +229,7 @@ resource "aws_eks_cluster" "main" {
+     authentication_mode = "API_AND_CONFIG_MAP"
+   }
+ 
+-  tags = var.tags
++  tags = local.tags
+ 
+   depends_on = [aws_iam_role_policy_attachment.eks_cluster_policy]
+ }
+@@ -244,7 +265,7 @@ data "aws_iam_policy_document" "ebs_csi_assume_role" {
+ resource "aws_iam_role" "ebs_csi" {
+   name_prefix        = "${var.prefix}-ebs-csi-"
+   assume_role_policy = data.aws_iam_policy_document.ebs_csi_assume_role.json
+-  tags               = var.tags
++  tags               = local.tags
+ }
+ 
+ resource "aws_iam_role_policy_attachment" "ebs_csi" {
+@@ -258,7 +279,7 @@ resource "aws_eks_addon" "ebs_csi" {
+   service_account_role_arn    = aws_iam_role.ebs_csi.arn
+   resolve_conflicts_on_create = "OVERWRITE"
+   resolve_conflicts_on_update = "OVERWRITE"
+-  tags                        = var.tags
++  tags                        = local.tags
+ 
+   depends_on = [aws_eks_node_group.main]
+ }
+@@ -268,7 +289,7 @@ resource "aws_eks_addon" "vpc_cni" {
+   addon_name                  = "vpc-cni"
+   resolve_conflicts_on_create = "OVERWRITE"
+   resolve_conflicts_on_update = "OVERWRITE"
+-  tags                        = var.tags
++  tags                        = local.tags
+ }
+ 
+ resource "aws_eks_addon" "kube_proxy" {
+@@ -276,7 +297,7 @@ resource "aws_eks_addon" "kube_proxy" {
+   addon_name                  = "kube-proxy"
+   resolve_conflicts_on_create = "OVERWRITE"
+   resolve_conflicts_on_update = "OVERWRITE"
+-  tags                        = var.tags
++  tags                        = local.tags
+ }
+ 
+ resource "aws_eks_addon" "coredns" {
+@@ -284,7 +305,7 @@ resource "aws_eks_addon" "coredns" {
+   addon_name                  = "coredns"
+   resolve_conflicts_on_create = "OVERWRITE"
+   resolve_conflicts_on_update = "OVERWRITE"
+-  tags                        = var.tags
++  tags                        = local.tags
+ 
+   depends_on = [aws_eks_node_group.main]
+ }
+@@ -299,7 +320,7 @@ resource "aws_iam_openid_connect_provider" "eks" {
+   thumbprint_list = [data.tls_certificate.eks.certificates[0].sha1_fingerprint]
+   url             = aws_eks_cluster.main.identity[0].oidc[0].issuer
+ 
+-  tags = var.tags
++  tags = local.tags
+ }
+ 
+ resource "aws_iam_role" "eks_nodes" {
+@@ -314,7 +335,7 @@ resource "aws_iam_role" "eks_nodes" {
+     }]
+   })
+ 
+-  tags = var.tags
++  tags = local.tags
+ }
+ 
+ resource "aws_iam_role_policy_attachment" "eks_worker_node_policy" {
+@@ -350,7 +371,7 @@ resource "aws_eks_node_group" "main" {
+     max_unavailable = 1
+   }
+ 
+-  tags = var.tags
++  tags = local.tags
+ 
+   depends_on = [
+     aws_iam_role_policy_attachment.eks_worker_node_policy,
+@@ -396,7 +417,7 @@ resource "aws_iam_role" "external_dns_irsa" {
+   name_prefix        = "${var.prefix}-external-dns-irsa-"
+   assume_role_policy = data.aws_iam_policy_document.external_dns_assume_role.json
+ 
+-  tags = var.tags
++  tags = local.tags
+ }
+ 
+ data "aws_iam_policy_document" "external_dns_route53" {
+diff --git a/tofu/aws/workload/terraform.tfvars.example b/tofu/aws/workload/terraform.tfvars.example
+index 0bb5108..f335f94 100644
+--- a/tofu/aws/workload/terraform.tfvars.example
++++ b/tofu/aws/workload/terraform.tfvars.example
+@@ -1,3 +1,9 @@
+ # Copy to terraform.tfvars (gitignored) and adjust.
+ # [] means the API server has no public endpoint — reach it over VPN/bastion.
+ api_allowed_cidrs = ["203.0.113.4/32"]
++
++# Deployment identity: names every resource. One per deployment, e.g. "acme-workload".
++prefix = "devhub-workload"
++
++# Who configured this deployment — used only in tags. setup-env.sh fills it in.
++deployed_by = "you@example.org"
+diff --git a/tofu/azure/dev/main.tf b/tofu/azure/dev/main.tf
+index e02b388..7fc92b5 100644
+--- a/tofu/azure/dev/main.tf
++++ b/tofu/azure/dev/main.tf
+@@ -1,9 +1,9 @@
+ module "cluster" {
+   source = "../modules/cluster"
+ 
+-  prefix              = "devhub-dev"
++  prefix              = var.prefix
+   location            = "norwayeast"
+-  resource_group_name = "devhub-dev-rg"
++  resource_group_name = "${var.prefix}-rg"
+ 
+   # Kubernetes API exposure — set in terraform.tfvars
+   api_allowed_cidrs          = var.api_allowed_cidrs
+@@ -50,5 +50,7 @@ module "cluster" {
+   tags = {
+     Environment = "dev"
+     ManagedBy   = "tofu"
++    Deployment  = var.prefix
++    DeployedBy  = var.deployed_by
+   }
+ }
+diff --git a/tofu/azure/dev/terraform.tfvars.example b/tofu/azure/dev/terraform.tfvars.example
+index 6f884b7..ab884cb 100644
+--- a/tofu/azure/dev/terraform.tfvars.example
++++ b/tofu/azure/dev/terraform.tfvars.example
+@@ -5,3 +5,10 @@ api_allowed_cidrs = ["203.0.113.4/32"]
+ # Entra ID groups that get cluster-admin. Setting this disables the AKS local
+ # admin account (a permanent, unauditable cluster-admin certificate).
+ aad_admin_group_object_ids = ["00000000-0000-0000-0000-000000000000"]
++
++# Deployment identity: names every resource and the globally-unique namespaces
++# (buckets, Cognito domain / storage account). One per deployment, e.g. "acme-dev".
++prefix = "devhub-dev"
++
++# Who configured this deployment — used only in tags. setup-env.sh fills it in.
++deployed_by = "you@example.org"
+diff --git a/tofu/azure/dev/variables-deployment.tf b/tofu/azure/dev/variables-deployment.tf
+new file mode 100644
+index 0000000..a769990
+--- /dev/null
++++ b/tofu/azure/dev/variables-deployment.tf
+@@ -0,0 +1,27 @@
++# ─── Deployment identity ──────────────────────────────────────────────
++#
++# `prefix` names every resource this environment creates, including two
++# names that are globally unique across all of Azure: the storage account
++# (the prefix minus dashes) and the Key Vault. Two deployments sharing a
++# prefix collide — within one subscription, and across subscriptions for
++# those global names — so pick one per deployment, e.g. "acme-dev".
++
++variable "prefix" {
++  description = "Deployment identifier — prefixes every resource name, the storage account and the Key Vault"
++  type        = string
++  default     = "devhub-dev"
++
++  validation {
++    condition = (
++      length(var.prefix) >= 3 && length(var.prefix) <= 16 &&
++      can(regex("^[a-z][a-z0-9-]*[a-z0-9]$", var.prefix))
++    )
++    error_message = "prefix must be 3-16 lowercase letters, digits or dashes, starting with a letter and not ending in a dash — short enough that the truncated storage-account and Key Vault names derived from it stay distinct."
++  }
++}
++
++variable "deployed_by" {
++  description = "Identity of the operator who configured this deployment (written by setup-env.sh; used only in tags)"
++  type        = string
++  default     = "unknown"
++}
+diff --git a/tofu/azure/prod/main.tf b/tofu/azure/prod/main.tf
+index d227f23..490d22a 100644
+--- a/tofu/azure/prod/main.tf
++++ b/tofu/azure/prod/main.tf
+@@ -1,9 +1,9 @@
+ module "cluster" {
+   source = "../modules/cluster"
+ 
+-  prefix              = "devhub"
++  prefix              = var.prefix
+   location            = "westeurope"
+-  resource_group_name = "devhub-prod-rg"
++  resource_group_name = "${var.prefix}-rg"
+ 
+   # Kubernetes API exposure — set in terraform.tfvars
+   api_allowed_cidrs          = var.api_allowed_cidrs
+@@ -51,5 +51,7 @@ module "cluster" {
+   tags = {
+     Environment = "prod"
+     ManagedBy   = "tofu"
++    Deployment  = var.prefix
++    DeployedBy  = var.deployed_by
+   }
+ }
+diff --git a/tofu/azure/prod/terraform.tfvars.example b/tofu/azure/prod/terraform.tfvars.example
+index 6f884b7..be69991 100644
+--- a/tofu/azure/prod/terraform.tfvars.example
++++ b/tofu/azure/prod/terraform.tfvars.example
+@@ -5,3 +5,10 @@ api_allowed_cidrs = ["203.0.113.4/32"]
+ # Entra ID groups that get cluster-admin. Setting this disables the AKS local
+ # admin account (a permanent, unauditable cluster-admin certificate).
+ aad_admin_group_object_ids = ["00000000-0000-0000-0000-000000000000"]
++
++# Deployment identity: names every resource and the globally-unique namespaces
++# (buckets, Cognito domain / storage account). One per deployment, e.g. "acme-prod".
++prefix = "devhub-prod"
++
++# Who configured this deployment — used only in tags. setup-env.sh fills it in.
++deployed_by = "you@example.org"
+diff --git a/tofu/azure/prod/variables-deployment.tf b/tofu/azure/prod/variables-deployment.tf
+new file mode 100644
+index 0000000..42530a7
+--- /dev/null
++++ b/tofu/azure/prod/variables-deployment.tf
+@@ -0,0 +1,27 @@
++# ─── Deployment identity ──────────────────────────────────────────────
++#
++# `prefix` names every resource this environment creates, including two
++# names that are globally unique across all of Azure: the storage account
++# (the prefix minus dashes) and the Key Vault. Two deployments sharing a
++# prefix collide — within one subscription, and across subscriptions for
++# those global names — so pick one per deployment, e.g. "acme-prod".
++
++variable "prefix" {
++  description = "Deployment identifier — prefixes every resource name, the storage account and the Key Vault"
++  type        = string
++  default     = "devhub-prod"
++
++  validation {
++    condition = (
++      length(var.prefix) >= 3 && length(var.prefix) <= 16 &&
++      can(regex("^[a-z][a-z0-9-]*[a-z0-9]$", var.prefix))
++    )
++    error_message = "prefix must be 3-16 lowercase letters, digits or dashes, starting with a letter and not ending in a dash — short enough that the truncated storage-account and Key Vault names derived from it stay distinct."
++  }
++}
++
++variable "deployed_by" {
++  description = "Identity of the operator who configured this deployment (written by setup-env.sh; used only in tags)"
++  type        = string
++  default     = "unknown"
++}
+diff --git a/tofu/azure/workload/main.tf b/tofu/azure/workload/main.tf
+index 2868afe..0c6b36d 100644
+--- a/tofu/azure/workload/main.tf
++++ b/tofu/azure/workload/main.tf
+@@ -15,9 +15,23 @@
+ # =============================================================================
+ 
+ variable "prefix" {
+-  description = "Prefix for resource names (e.g., devhub-workload)"
++  description = "Deployment identifier — prefixes every resource name; pick one per deployment (e.g. acme-workload)"
+   type        = string
+   default     = "devhub-workload"
++
++  validation {
++    condition = (
++      length(var.prefix) >= 3 && length(var.prefix) <= 16 &&
++      can(regex("^[a-z][a-z0-9-]*[a-z0-9]$", var.prefix))
++    )
++    error_message = "prefix must be 3-16 lowercase letters, digits or dashes, starting with a letter and not ending in a dash."
++  }
++}
++
++variable "deployed_by" {
++  description = "Identity of the operator who configured this deployment (written by setup-env.sh; used only in tags)"
++  type        = string
++  default     = "unknown"
+ }
+ 
+ variable "location" {
+@@ -82,12 +96,19 @@ variable "tags" {
+   }
+ }
+ 
++locals {
++  tags = merge(var.tags, {
++    Deployment = var.prefix
++    DeployedBy = var.deployed_by
++  })
++}
++
+ # ─── Resource Group ───────────────────────────────────────────────────
+ 
+ resource "azurerm_resource_group" "main" {
+   name     = var.resource_group_name
+   location = var.location
+-  tags     = var.tags
++  tags     = local.tags
+ }
+ 
+ # ─── Networking ───────────────────────────────────────────────────────
+@@ -97,7 +118,7 @@ resource "azurerm_virtual_network" "main" {
+   resource_group_name = azurerm_resource_group.main.name
+   location            = azurerm_resource_group.main.location
+   address_space       = [var.vnet_address_space]
+-  tags                = var.tags
++  tags                = local.tags
+ }
+ 
+ resource "azurerm_subnet" "aks" {
+@@ -115,7 +136,7 @@ resource "azurerm_kubernetes_cluster" "main" {
+   location            = azurerm_resource_group.main.location
+   dns_prefix          = replace(var.prefix, "-", "")
+   kubernetes_version  = var.aks_kubernetes_version
+-  tags                = var.tags
++  tags                = local.tags
+ 
+   default_node_pool {
+     name           = "system"
+@@ -125,7 +146,7 @@ resource "azurerm_kubernetes_cluster" "main" {
+     node_labels = {
+       prefix = var.prefix
+       role   = "worker"
+-      env    = lookup(var.tags, "Environment", "workload")
++      env    = lookup(local.tags, "Environment", "workload")
+     }
+   }
+ 
+@@ -180,7 +201,7 @@ resource "azurerm_user_assigned_identity" "external_dns" {
+   name                = "${var.prefix}-external-dns-identity"
+   resource_group_name = azurerm_resource_group.main.name
+   location            = azurerm_resource_group.main.location
+-  tags                = var.tags
++  tags                = local.tags
+ }
+ 
+ resource "azurerm_role_assignment" "external_dns_dns_contributor" {
+diff --git a/tofu/azure/workload/terraform.tfvars.example b/tofu/azure/workload/terraform.tfvars.example
+index 0bb5108..f335f94 100644
+--- a/tofu/azure/workload/terraform.tfvars.example
++++ b/tofu/azure/workload/terraform.tfvars.example
+@@ -1,3 +1,9 @@
+ # Copy to terraform.tfvars (gitignored) and adjust.
+ # [] means the API server has no public endpoint — reach it over VPN/bastion.
+ api_allowed_cidrs = ["203.0.113.4/32"]
++
++# Deployment identity: names every resource. One per deployment, e.g. "acme-workload".
++prefix = "devhub-workload"
++
++# Who configured this deployment — used only in tags. setup-env.sh fills it in.
++deployed_by = "you@example.org"
+diff --git a/tofu/gcp/dev/main.tf b/tofu/gcp/dev/main.tf
+index b87331c..ef0042a 100644
+--- a/tofu/gcp/dev/main.tf
++++ b/tofu/gcp/dev/main.tf
+@@ -3,7 +3,7 @@ module "cluster" {
+ 
+   project_id = var.project_id
+   region     = var.region
+-  prefix     = "devhub-dev"
++  prefix     = var.prefix
+ 
+   # Kubernetes API exposure — set in terraform.tfvars
+   api_allowed_cidrs = var.api_allowed_cidrs
+@@ -42,5 +42,7 @@ module "cluster" {
+   labels = {
+     environment = "dev"
+     managed-by  = "tofu"
++    deployment  = var.prefix
++    deployed-by = local.deployed_by_label
+   }
+ }
+diff --git a/tofu/gcp/dev/terraform.tfvars.example b/tofu/gcp/dev/terraform.tfvars.example
+index 0bb5108..58d3fd2 100644
+--- a/tofu/gcp/dev/terraform.tfvars.example
++++ b/tofu/gcp/dev/terraform.tfvars.example
+@@ -1,3 +1,10 @@
+ # Copy to terraform.tfvars (gitignored) and adjust.
+ # [] means the API server has no public endpoint — reach it over VPN/bastion.
+ api_allowed_cidrs = ["203.0.113.4/32"]
++
++# Deployment identity: names every resource and the globally-unique namespaces
++# (buckets, Cognito domain / storage account). One per deployment, e.g. "acme-dev".
++prefix = "devhub-dev"
++
++# Who configured this deployment — used only in labels. setup-env.sh fills it in.
++deployed_by = "you@example.org"
+diff --git a/tofu/gcp/dev/variables-deployment.tf b/tofu/gcp/dev/variables-deployment.tf
+new file mode 100644
+index 0000000..e420c83
+--- /dev/null
++++ b/tofu/gcp/dev/variables-deployment.tf
+@@ -0,0 +1,32 @@
++# ─── Deployment identity ──────────────────────────────────────────────
++#
++# `prefix` names every resource this environment creates and seeds the
++# globally-unique GCS bucket names. Two deployments sharing a prefix
++# collide — within one project, and across projects for the buckets — so
++# pick one per deployment, e.g. "acme-dev".
++
++variable "prefix" {
++  description = "Deployment identifier — prefixes every resource name and GCS bucket"
++  type        = string
++  default     = "devhub-dev"
++
++  validation {
++    condition = (
++      length(var.prefix) >= 3 && length(var.prefix) <= 16 &&
++      can(regex("^[a-z][a-z0-9-]*[a-z0-9]$", var.prefix))
++    )
++    error_message = "prefix must be 3-16 lowercase letters, digits or dashes, starting with a letter and not ending in a dash."
++  }
++}
++
++variable "deployed_by" {
++  description = "Identity of the operator who configured this deployment (written by setup-env.sh; used only in labels)"
++  type        = string
++  default     = "unknown"
++}
++
++locals {
++  # GCP label values allow only lowercase letters, digits, "_" and "-";
++  # operator identities are usually emails, so squash everything else.
++  deployed_by_label = substr(replace(lower(var.deployed_by), "/[^a-z0-9_-]/", "_"), 0, 63)
++}
+diff --git a/tofu/gcp/prod/main.tf b/tofu/gcp/prod/main.tf
+index cdf9d75..9970909 100644
+--- a/tofu/gcp/prod/main.tf
++++ b/tofu/gcp/prod/main.tf
+@@ -3,7 +3,7 @@ module "cluster" {
+ 
+   project_id = var.project_id
+   region     = var.region
+-  prefix     = "devhub"
++  prefix     = var.prefix
+ 
+   # Kubernetes API exposure — set in terraform.tfvars
+   api_allowed_cidrs = var.api_allowed_cidrs
+@@ -42,5 +42,7 @@ module "cluster" {
+   labels = {
+     environment = "prod"
+     managed-by  = "tofu"
++    deployment  = var.prefix
++    deployed-by = local.deployed_by_label
+   }
+ }
+diff --git a/tofu/gcp/prod/terraform.tfvars.example b/tofu/gcp/prod/terraform.tfvars.example
+index 0bb5108..6812d69 100644
+--- a/tofu/gcp/prod/terraform.tfvars.example
++++ b/tofu/gcp/prod/terraform.tfvars.example
+@@ -1,3 +1,10 @@
+ # Copy to terraform.tfvars (gitignored) and adjust.
+ # [] means the API server has no public endpoint — reach it over VPN/bastion.
+ api_allowed_cidrs = ["203.0.113.4/32"]
++
++# Deployment identity: names every resource and the globally-unique namespaces
++# (buckets, Cognito domain / storage account). One per deployment, e.g. "acme-prod".
++prefix = "devhub-prod"
++
++# Who configured this deployment — used only in labels. setup-env.sh fills it in.
++deployed_by = "you@example.org"
+diff --git a/tofu/gcp/prod/variables-deployment.tf b/tofu/gcp/prod/variables-deployment.tf
+new file mode 100644
+index 0000000..bd01535
+--- /dev/null
++++ b/tofu/gcp/prod/variables-deployment.tf
+@@ -0,0 +1,32 @@
++# ─── Deployment identity ──────────────────────────────────────────────
++#
++# `prefix` names every resource this environment creates and seeds the
++# globally-unique GCS bucket names. Two deployments sharing a prefix
++# collide — within one project, and across projects for the buckets — so
++# pick one per deployment, e.g. "acme-prod".
++
++variable "prefix" {
++  description = "Deployment identifier — prefixes every resource name and GCS bucket"
++  type        = string
++  default     = "devhub-prod"
++
++  validation {
++    condition = (
++      length(var.prefix) >= 3 && length(var.prefix) <= 16 &&
++      can(regex("^[a-z][a-z0-9-]*[a-z0-9]$", var.prefix))
++    )
++    error_message = "prefix must be 3-16 lowercase letters, digits or dashes, starting with a letter and not ending in a dash."
++  }
++}
++
++variable "deployed_by" {
++  description = "Identity of the operator who configured this deployment (written by setup-env.sh; used only in labels)"
++  type        = string
++  default     = "unknown"
++}
++
++locals {
++  # GCP label values allow only lowercase letters, digits, "_" and "-";
++  # operator identities are usually emails, so squash everything else.
++  deployed_by_label = substr(replace(lower(var.deployed_by), "/[^a-z0-9_-]/", "_"), 0, 63)
++}
+diff --git a/tofu/gcp/workload/main.tf b/tofu/gcp/workload/main.tf
+index 9ee9b0a..7b467b5 100644
+--- a/tofu/gcp/workload/main.tf
++++ b/tofu/gcp/workload/main.tf
+@@ -15,9 +15,23 @@
+ # =============================================================================
+ 
+ variable "prefix" {
+-  description = "Prefix for resource names (e.g., devhub-workload)"
++  description = "Deployment identifier — prefixes every resource name; pick one per deployment (e.g. acme-workload)"
+   type        = string
+   default     = "devhub-workload"
++
++  validation {
++    condition = (
++      length(var.prefix) >= 3 && length(var.prefix) <= 16 &&
++      can(regex("^[a-z][a-z0-9-]*[a-z0-9]$", var.prefix))
++    )
++    error_message = "prefix must be 3-16 lowercase letters, digits or dashes, starting with a letter and not ending in a dash."
++  }
++}
++
++variable "deployed_by" {
++  description = "Identity of the operator who configured this deployment (written by setup-env.sh; used only in labels)"
++  type        = string
++  default     = "unknown"
+ }
+ 
+ variable "node_machine_type" {
+@@ -53,6 +67,15 @@ variable "labels" {
+   }
+ }
+ 
++locals {
++  labels = merge(var.labels, {
++    deployment = var.prefix
++    # GCP label values allow only lowercase letters, digits, "_" and "-";
++    # operator identities are usually emails, so squash everything else.
++    deployed-by = substr(replace(lower(var.deployed_by), "/[^a-z0-9_-]/", "_"), 0, 63)
++  })
++}
++
+ # ─── Required APIs ────────────────────────────────────────────────────
+ 
+ resource "google_project_service" "compute" {
+@@ -158,7 +181,7 @@ resource "google_container_cluster" "main" {
+     }
+   }
+ 
+-  resource_labels = var.labels
++  resource_labels = local.labels
+ 
+   depends_on = [google_project_service.container]
+ }
+@@ -181,7 +204,7 @@ resource "google_container_node_pool" "main" {
+       "https://www.googleapis.com/auth/cloud-platform",
+     ]
+ 
+-    labels = merge(var.labels, { role = "worker" })
++    labels = merge(local.labels, { role = "worker" })
+   }
+ 
+   management {
+diff --git a/tofu/gcp/workload/terraform.tfvars.example b/tofu/gcp/workload/terraform.tfvars.example
+index 0bb5108..d81ac10 100644
+--- a/tofu/gcp/workload/terraform.tfvars.example
++++ b/tofu/gcp/workload/terraform.tfvars.example
+@@ -1,3 +1,9 @@
+ # Copy to terraform.tfvars (gitignored) and adjust.
+ # [] means the API server has no public endpoint — reach it over VPN/bastion.
+ api_allowed_cidrs = ["203.0.113.4/32"]
++
++# Deployment identity: names every resource. One per deployment, e.g. "acme-workload".
++prefix = "devhub-workload"
++
++# Who configured this deployment — used only in labels. setup-env.sh fills it in.
++deployed_by = "you@example.org"
+diff --git a/tofu/upcloud/dev/main.tf b/tofu/upcloud/dev/main.tf
+index 145d091..d4908df 100644
+--- a/tofu/upcloud/dev/main.tf
++++ b/tofu/upcloud/dev/main.tf
+@@ -1,7 +1,7 @@
+ module "cluster" {
+   source = "../modules/cluster"
+ 
+-  prefix       = "devhub-dev"
++  prefix       = var.prefix
+   zone         = "no-svg1"
+   node_plan    = "DEV-1xCPU-2GB"
+   node_count   = 2
+@@ -25,5 +25,7 @@ module "cluster" {
+   tags = {
+     Environment = "dev"
+     ManagedBy   = "tofu"
++    Deployment  = var.prefix
++    DeployedBy  = local.deployed_by_label
+   }
+ }
+diff --git a/tofu/upcloud/dev/terraform.tfvars.example b/tofu/upcloud/dev/terraform.tfvars.example
+index ee11975..db491c5 100644
+--- a/tofu/upcloud/dev/terraform.tfvars.example
++++ b/tofu/upcloud/dev/terraform.tfvars.example
+@@ -1,3 +1,10 @@
+ # Copy to terraform.tfvars (gitignored) and adjust.
+ # UpCloud has no private-endpoint option, so at least one CIDR is required.
+ api_allowed_cidrs = ["203.0.113.4/32"]
++
++# Deployment identity: names every resource and the object-storage buckets.
++# One per deployment, e.g. "acme-dev".
++prefix = "devhub-dev"
++
++# Who configured this deployment — used only in labels. setup-env.sh fills it in.
++deployed_by = "you@example.org"
+diff --git a/tofu/upcloud/dev/variables-deployment.tf b/tofu/upcloud/dev/variables-deployment.tf
+new file mode 100644
+index 0000000..921a664
+--- /dev/null
++++ b/tofu/upcloud/dev/variables-deployment.tf
+@@ -0,0 +1,31 @@
++# ─── Deployment identity ──────────────────────────────────────────────
++#
++# `prefix` names every resource this environment creates and seeds the
++# object-storage bucket names. Two deployments sharing a prefix collide,
++# so pick one per deployment, e.g. "acme-dev".
++
++variable "prefix" {
++  description = "Deployment identifier — prefixes every resource name and object-storage bucket"
++  type        = string
++  default     = "devhub-dev"
++
++  validation {
++    condition = (
++      length(var.prefix) >= 3 && length(var.prefix) <= 16 &&
++      can(regex("^[a-z][a-z0-9-]*[a-z0-9]$", var.prefix))
++    )
++    error_message = "prefix must be 3-16 lowercase letters, digits or dashes, starting with a letter and not ending in a dash."
++  }
++}
++
++variable "deployed_by" {
++  description = "Identity of the operator who configured this deployment (written by setup-env.sh; used only in labels)"
++  type        = string
++  default     = "unknown"
++}
++
++locals {
++  # UpCloud label values reject most punctuation; operator identities are
++  # usually emails, so squash anything outside the safe set.
++  deployed_by_label = substr(replace(lower(var.deployed_by), "/[^a-z0-9_.-]/", "_"), 0, 63)
++}
+diff --git a/tofu/upcloud/prod/main.tf b/tofu/upcloud/prod/main.tf
+index 73886d5..6e64b98 100644
+--- a/tofu/upcloud/prod/main.tf
++++ b/tofu/upcloud/prod/main.tf
+@@ -1,7 +1,7 @@
+ module "cluster" {
+   source = "../modules/cluster"
+ 
+-  prefix       = "devhub"
++  prefix       = var.prefix
+   zone         = "de-fra1"
+   node_plan    = "4xCPU-8GB"
+   node_count   = 3
+@@ -25,5 +25,7 @@ module "cluster" {
+   tags = {
+     Environment = "prod"
+     ManagedBy   = "tofu"
++    Deployment  = var.prefix
++    DeployedBy  = local.deployed_by_label
+   }
+ }
+diff --git a/tofu/upcloud/prod/terraform.tfvars.example b/tofu/upcloud/prod/terraform.tfvars.example
+index ee11975..38fced8 100644
+--- a/tofu/upcloud/prod/terraform.tfvars.example
++++ b/tofu/upcloud/prod/terraform.tfvars.example
+@@ -1,3 +1,10 @@
+ # Copy to terraform.tfvars (gitignored) and adjust.
+ # UpCloud has no private-endpoint option, so at least one CIDR is required.
+ api_allowed_cidrs = ["203.0.113.4/32"]
++
++# Deployment identity: names every resource and the object-storage buckets.
++# One per deployment, e.g. "acme-prod".
++prefix = "devhub-prod"
++
++# Who configured this deployment — used only in labels. setup-env.sh fills it in.
++deployed_by = "you@example.org"
+diff --git a/tofu/upcloud/prod/variables-deployment.tf b/tofu/upcloud/prod/variables-deployment.tf
+new file mode 100644
+index 0000000..0a48265
+--- /dev/null
++++ b/tofu/upcloud/prod/variables-deployment.tf
+@@ -0,0 +1,31 @@
++# ─── Deployment identity ──────────────────────────────────────────────
++#
++# `prefix` names every resource this environment creates and seeds the
++# object-storage bucket names. Two deployments sharing a prefix collide,
++# so pick one per deployment, e.g. "acme-prod".
++
++variable "prefix" {
++  description = "Deployment identifier — prefixes every resource name and object-storage bucket"
++  type        = string
++  default     = "devhub-prod"
++
++  validation {
++    condition = (
++      length(var.prefix) >= 3 && length(var.prefix) <= 16 &&
++      can(regex("^[a-z][a-z0-9-]*[a-z0-9]$", var.prefix))
++    )
++    error_message = "prefix must be 3-16 lowercase letters, digits or dashes, starting with a letter and not ending in a dash."
++  }
++}
++
++variable "deployed_by" {
++  description = "Identity of the operator who configured this deployment (written by setup-env.sh; used only in labels)"
++  type        = string
++  default     = "unknown"
++}
++
++locals {
++  # UpCloud label values reject most punctuation; operator identities are
++  # usually emails, so squash anything outside the safe set.
++  deployed_by_label = substr(replace(lower(var.deployed_by), "/[^a-z0-9_.-]/", "_"), 0, 63)
++}
+diff --git a/tofu/upcloud/workload/main.tf b/tofu/upcloud/workload/main.tf
+index c941e89..5b0de85 100644
+--- a/tofu/upcloud/workload/main.tf
++++ b/tofu/upcloud/workload/main.tf
+@@ -15,9 +15,29 @@
+ # =============================================================================
+ 
+ variable "prefix" {
+-  description = "Prefix for resource names"
++  description = "Deployment identifier — prefixes every resource name; pick one per deployment (e.g. acme-workload)"
+   type        = string
+   default     = "devhub-workload"
++
++  validation {
++    condition = (
++      length(var.prefix) >= 3 && length(var.prefix) <= 16 &&
++      can(regex("^[a-z][a-z0-9-]*[a-z0-9]$", var.prefix))
++    )
++    error_message = "prefix must be 3-16 lowercase letters, digits or dashes, starting with a letter and not ending in a dash."
++  }
++}
++
++variable "deployed_by" {
++  description = "Identity of the operator who configured this deployment (written by setup-env.sh; used only in labels)"
++  type        = string
++  default     = "unknown"
++}
++
++locals {
++  # UpCloud label values reject most punctuation; operator identities are
++  # usually emails, so squash anything outside the safe set.
++  deployed_by_label = substr(replace(lower(var.deployed_by), "/[^a-z0-9_.-]/", "_"), 0, 63)
+ }
+ 
+ variable "zone" {
+@@ -102,9 +122,10 @@ resource "upcloud_kubernetes_node_group" "workers" {
+   plan          = var.node_plan
+   anti_affinity = var.node_count > 1
+   labels = {
+-    prefix  = var.prefix
+-    cluster = "workload"
+-    role    = "worker"
+-    env     = lookup(var.tags, "Environment", "workload")
++    prefix      = var.prefix
++    cluster     = "workload"
++    role        = "worker"
++    env         = lookup(var.tags, "Environment", "workload")
++    deployed_by = local.deployed_by_label
+   }
+ }
+diff --git a/tofu/upcloud/workload/terraform.tfvars.example b/tofu/upcloud/workload/terraform.tfvars.example
+index ee11975..cbee329 100644
+--- a/tofu/upcloud/workload/terraform.tfvars.example
++++ b/tofu/upcloud/workload/terraform.tfvars.example
+@@ -1,3 +1,9 @@
+ # Copy to terraform.tfvars (gitignored) and adjust.
+ # UpCloud has no private-endpoint option, so at least one CIDR is required.
+ api_allowed_cidrs = ["203.0.113.4/32"]
++
++# Deployment identity: names every resource. One per deployment, e.g. "acme-workload".
++prefix = "devhub-workload"
++
++# Who configured this deployment — used only in labels. setup-env.sh fills it in.
++deployed_by = "you@example.org"

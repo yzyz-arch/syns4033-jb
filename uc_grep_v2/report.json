@@ -1,0 +1,345 @@
+{
+ "generated": "2026-11-02T08:51:55Z",
+ "hits": [
+  {
+   "query": "ucat_",
+   "repo": "opencv/opencv",
+   "path": "modules/dnn/src/tokenizer/unicode.cpp",
+   "branch": "5.x",
+   "snippet": "// representation of the text (see collapse_codepoint() below) and of the regex patterns.static const std::map<std::string, int> & k_ucat_enum() { static const std::map<std::string, int> m = {static const std::map<int, int> & k_ucat_cpt() { static const std::map<int, int> m = {static const std::map<int, std::string> & k_ucat_map() { static const std::map<int, std::string> m = {",
+   "placeholder": false,
+   "strong_format": false,
+   "values": [],
+   "verdict": "no_value"
+  },
+  {
+   "query": "ucat_",
+   "repo": "ggml-org/llama.cpp",
+   "path": "src/unicode.cpp",
+   "branch": "master",
+   "snippet": "// unicode categories static const std::map<std::string, int> k_ucat_enum = { { \"\\\\p{N}\", unicode_cpt_flags::NUMBER }, static const std::map<int, int> k_ucat_cpt = { { unicode_cpt_flags::NUMBER, 0xD1 }, static const std::map<int, std::string> k_ucat_map = { { unicode_cpt_flags::NUMBER, \"\\x30-\\x39\" }, // 0-9",
+   "placeholder": false,
+   "strong_format": false,
+   "values": [],
+   "verdict": "no_value"
+  },
+  {
+   "query": "ucat_",
+   "repo": "openeducat/openeducat_erp",
+   "path": "openeducat_core/models/res_config_setting.py",
+   "branch": "19.0",
+   "snippet": "module_openeducat_activity = fields.Boolean(string=\"Activity\") module_openeducat_facility = fields.Boolean(string=\"Facility\") module_openeducat_parent = fields.Boolean(string=\"Parent\") module_openeducat_assignment = fields.Boolean(string=\"Assignment\") module_openeducat_classroom = fields.Boolean(string=\"Classroom\") module_openeducat_fees = fields.Boolean(string=\"Fees\") module_openeducat_admission ",
+   "placeholder": false,
+   "strong_format": false,
+   "values": [
+    "fields.Boolean",
+    "fields.Boolean",
+    "fields.Boolean",
+    "fields.Boolean"
+   ],
+   "verdict": "literal_value_review"
+  },
+  {
+   "query": "ucat_",
+   "repo": "blender/blender",
+   "path": "source/blender/python/intern/bpy_utils_units.cc",
+   "branch": "main",
+   "snippet": "static bool bpyunits_validate(const char *usys_str, const char *ucat_str, int *r_usys, int *r_ucat) *r_ucat = BLI_str_index_in_array(ucat_str, bpyunits_ucategories_items); if (*r_ucat < 0) { PyErr_Format(PyExc_ValueError, \"Unknown unit category specified: %.200s.\", ucat_str); return false; usys_str, ucat_str); return false;",
+   "placeholder": false,
+   "strong_format": false,
+   "values": [
+    "BLI_str_index_in_array"
+   ],
+   "verdict": "literal_value_review"
+  },
+  {
+   "query": "ucat_",
+   "repo": "Tiiny-AI/PowerInfer",
+   "path": "smallthinker/src/unicode.cpp",
+   "branch": "main",
+   "snippet": "// unicode categories static const std::map<std::string, int> k_ucat_enum = { { \"\\\\p{N}\", unicode_cpt_flags::NUMBER }, static const std::map<int, int> k_ucat_cpt = { { unicode_cpt_flags::NUMBER, 0xD1 }, static const std::map<int, std::string> k_ucat_map = { { unicode_cpt_flags::NUMBER, \"\\x30-\\x39\" }, // 0-9",
+   "placeholder": false,
+   "strong_format": false,
+   "values": [],
+   "verdict": "no_value"
+  },
+  {
+   "query": "ucat_",
+   "repo": "tinygrad/tinygrad",
+   "path": "tinygrad/llm/cli.py",
+   "branch": "master",
+   "snippet": "# compact adjacent codepoints into ranges: listing them all makes re spend seconds on large prompts def ucat_range(pre:str|tuple[str, ...]) -> str: limits = {\"Z\": 0x3001, \"N\": 0x1fbfa, \"L\": 0x323b0, \"M\": 0xe01f0} r_ws, r_p_N, r_p_L = r\" \\n\\x0b\\x0c\\r\\x85\" + ucat_range(\"Z\"), ucat_range(\"N\"), ucat_range(\"L\") if preset in (\"tekken\", \"gpt-4o\"): r_up, r_lo = ucat_range((\"Lu\",\"Lt\",\"Lm\",\"Lo\",\"M\")), ucat_r",
+   "placeholder": true,
+   "strong_format": false,
+   "values": [
+    "ucat_range"
+   ],
+   "verdict": "placeholder/doc"
+  },
+  {
+   "query": "ucat_",
+   "repo": "ikawrakow/ik_llama.cpp",
+   "path": "src/unicode.cpp",
+   "branch": "main",
+   "snippet": "// unicode categories static const std::map<std::string, int> k_ucat_enum = { { \"\\\\p{N}\", unicode_cpt_flags::NUMBER }, static const std::map<int, int> k_ucat_cpt = { { unicode_cpt_flags::NUMBER, 0xD1 }, static const std::map<int, std::string> k_ucat_map = { { unicode_cpt_flags::NUMBER, \"\\x30-\\x39\" }, // 0-9",
+   "placeholder": false,
+   "strong_format": false,
+   "values": [],
+   "verdict": "no_value"
+  },
+  {
+   "query": "ucat_",
+   "repo": "openeducat/openeducat_erp",
+   "path": "openeducat_core/__manifest__.py",
+   "branch": "19.0",
+   "snippet": "'data/sequence_student_bonafide.xml', 'menu/openeducat_core_menu.xml', 'menu/student_menu.xml', 'static/description/openeducat_core_banner.jpg', ], 'installable': True, 'auto_install': False, 'application': True, 'post_init_hook': '_openeducat_post_init',",
+   "placeholder": false,
+   "strong_format": false,
+   "values": [
+    "_openeducat_post_init"
+   ],
+   "verdict": "literal_value_review"
+  },
+  {
+   "query": "ucat_",
+   "repo": "UbiquitousLearning/mllm",
+   "path": "mllm/preprocessor/tokenizers/llama_cpp_unicode/unicode.cpp",
+   "branch": "main",
+   "snippet": "// unicode categories static const std::map<std::string, int> k_ucat_enum = { {\"\\\\p{N}\", codepoint_flags::NUMBER}, {\"\\\\p{L}\", codepoint_flags::LETTER}, {\"\\\\p{P}\", codepoint_flags::PUNCTUATION}, }; static const std::map<int, int> k_ucat_cpt = { {codepoint_flags::NUMBER, 0xD1},",
+   "placeholder": false,
+   "strong_format": false,
+   "values": [
+    "PUNCTUATION"
+   ],
+   "verdict": "literal_value_review"
+  },
+  {
+   "query": "ucat_",
+   "repo": "steineggerlab/foldseek",
+   "path": "lib/prostt5/src/unicode.cpp",
+   "branch": "master",
+   "snippet": "// unicode categories static const std::map<std::string, int> k_ucat_enum = { { \"\\\\p{N}\", unicode_cpt_flags::NUMBER }, { \"\\\\p{L}\", unicode_cpt_flags::LETTER }, { \"\\\\p{P}\", unicode_cpt_flags::PUNCTUATION }, }; static const std::map<int, int> k_ucat_cpt = { { unicode_cpt_flags::NUMBER, 0xD1 },",
+   "placeholder": false,
+   "strong_format": false,
+   "values": [
+    "PUNCTUATION"
+   ],
+   "verdict": "literal_value_review"
+  },
+  {
+   "query": "ucat_01",
+   "repo": "betterleaks/betterleaks",
+   "path": "cmd/generate/config/rules/upcloud.go",
+   "branch": "main",
+   "snippet": "// Too short `upcloud_token = ucat_01DQE3`, // Wrong prefix",
+   "placeholder": false,
+   "strong_format": false,
+   "values": [
+    "ucat_01DQE3"
+   ],
+   "verdict": "literal_value_review"
+  },
+  {
+   "query": "UPCLOUD_TOKEN",
+   "repo": "betterleaks/betterleaks",
+   "path": "cmd/generate/config/rules/upcloud.go",
+   "branch": "main",
+   "snippet": "// Too short `upcloud_token = ucat_01DQE3`, // Wrong prefix `upcloud_token = uca_01DQE3AJDEBFEKECFM558TGH2F`,",
+   "placeholder": false,
+   "strong_format": false,
+   "values": [
+    "ucat_01DQE3",
+    "uca_01DQE3AJDEBFEKECFM558TGH2F"
+   ],
+   "verdict": "literal_value_review"
+  },
+  {
+   "query": "UPCLOUD_TOKEN",
+   "repo": "UpCloudLtd/upcloud-python-api",
+   "path": "upcloud_api/credentials.py",
+   "branch": "main",
+   "snippet": "ENV_KEY_PASSWORD = \"UPCLOUD_PASSWORD\" # noqa: S105ENV_KEY_TOKEN = \"UPCLOUD_TOKEN\" # noqa: S105",
+   "placeholder": false,
+   "strong_format": false,
+   "values": [
+    "UPCLOUD_PASSWORD",
+    "S105ENV_KEY_TOKEN",
+    "UPCLOUD_TOKEN"
+   ],
+   "verdict": "literal_value_review"
+  },
+  {
+   "query": "UPCLOUD_TOKEN",
+   "repo": "UpCloudLtd/upcloud-python-api",
+   "path": "test/test_credentials.py",
+   "branch": "main",
+   "snippet": "monkeypatch.setenv(\"UPCLOUD_TOKEN\", 'env_token') credentials = Credentials.parse(username='param_user', password='param_pass')",
+   "placeholder": false,
+   "strong_format": false,
+   "values": [
+    "Credentials.parse",
+    "param_user",
+    "param_pass"
+   ],
+   "verdict": "literal_value_review"
+  },
+  {
+   "query": "UPCLOUD_TOKEN",
+   "repo": "eurosky-social/eurosky-social",
+   "path": "terraform/envs/upcloud/.env.example",
+   "branch": "main",
+   "snippet": "# UpCloud Provider Credentialsexport UPCLOUD_TOKEN=\"your-token\"",
+   "placeholder": true,
+   "strong_format": false,
+   "values": [
+    "your-token"
+   ],
+   "verdict": "placeholder/doc"
+  },
+  {
+   "query": "upcloud",
+   "repo": "kubernetes-sigs/kubespray",
+   "path": "contrib/terraform/upcloud/modules/kubernetes-cluster/main.tf",
+   "branch": "master",
+   "snippet": "for connection_name, connection in gateway.connections : { \"gateway_id\" = upcloud_gateway.gateway[gateway_name].id \"gateway_name\" = gateway_name \"gateway_id\" = upcloud_gateway.gateway[gateway_name].id \"gateway_name\" = gateway_name \"connection_id\" = upcloud_gateway_connection.gateway_connection[\"${gateway_name}-${connection_name}\"].id \"connection_name\" = connection_name \"tunnel_name\" = tunnel_name ",
+   "placeholder": true,
+   "strong_format": false,
+   "values": [
+    "upcloud_gateway.gateway",
+    "gateway_name",
+    "upcloud_gateway.gateway",
+    "gateway_name"
+   ],
+   "verdict": "placeholder/doc"
+  },
+  {
+   "query": "upcloud",
+   "repo": "home-assistant/core",
+   "path": "homeassistant/components/upcloud/entity.py",
+   "branch": "dev",
+   "snippet": "\"\"\"Support for UpCloud.\"\"\"from typing import Any, overrideimport upcloud_apifrom .const import DOMAINfrom .coordinator import UpCloudConfigEntry, UpCloudDataUpdateCoordinatorDEFAULT_COMPONENT_NAME = \"UpCloud {}\"",
+   "placeholder": false,
+   "strong_format": false,
+   "values": [],
+   "verdict": "no_value"
+  },
+  {
+   "query": "upcloud",
+   "repo": "home-assistant/core",
+   "path": "homeassistant/components/upcloud/__init__.py",
+   "branch": "dev",
+   "snippet": "\"\"\"Support for UpCloud.\"\"\"import requests.exceptionsimport upcloud_apifrom .const import DOMAINfrom .coordinator import UpCloudConfigEntry, UpCloudDataUpdateCoordinatorasync def async_setup_entry(hass: HomeAssistant, entry: UpCloudConfigEntry) -> bool: \"\"\"Set up the UpCloud config entry.\"\"\"",
+   "placeholder": false,
+   "strong_format": false,
+   "values": [
+    "HomeAssistant",
+    "UpCloudConfigEntry"
+   ],
+   "verdict": "literal_value_review"
+  },
+  {
+   "query": "upcloud",
+   "repo": "home-assistant/core",
+   "path": "homeassistant/components/upcloud/switch.py",
+   "branch": "dev",
+   "snippet": "\"\"\"Support for interacting with UpCloud servers.\"\"\"from .coordinator import UpCloudConfigEntryfrom .entity import UpCloudServerEntitySIGNAL_UPDATE_UPCLOUD = \"upcloud_update\" hass: HomeAssistant, config_entry: UpCloudConfigEntry, async_add_entities: AddConfigEntryEntitiesCallback,",
+   "placeholder": false,
+   "strong_format": false,
+   "values": [
+    "upcloud_update",
+    "HomeAssistant",
+    "UpCloudConfigEntry",
+    "AddConfigEntryEntitiesCallback"
+   ],
+   "verdict": "literal_value_review"
+  },
+  {
+   "query": "upcloud",
+   "repo": "home-assistant/core",
+   "path": "homeassistant/components/upcloud/coordinator.py",
+   "branch": "dev",
+   "snippet": "\"\"\"Coordinator for UpCloud.\"\"\"import loggingfrom typing import overrideimport upcloud_apitype UpCloudConfigEntry = ConfigEntry[UpCloudDataUpdateCoordinator]class UpCloudDataUpdateCoordinator(",
+   "placeholder": false,
+   "strong_format": false,
+   "values": [
+    "ConfigEntry"
+   ],
+   "verdict": "literal_value_review"
+  },
+  {
+   "query": "upcloud",
+   "repo": "home-assistant/core",
+   "path": "homeassistant/components/upcloud/binary_sensor.py",
+   "branch": "dev",
+   "snippet": "\"\"\"Support for monitoring the state of UpCloud servers.\"\"\"from .coordinator import UpCloudConfigEntryfrom .entity import UpCloudServerEntityasync def async_setup_entry( hass: HomeAssistant, config_entry: UpCloudConfigEntry, async_add_entities: AddConfigEntryEntitiesCallback,",
+   "placeholder": false,
+   "strong_format": false,
+   "values": [
+    "HomeAssistant",
+    "UpCloudConfigEntry",
+    "AddConfigEntryEntitiesCallback"
+   ],
+   "verdict": "literal_value_review"
+  },
+  {
+   "query": "upcloud",
+   "repo": "NixOS/nixpkgs",
+   "path": "pkgs/by-name/up/upcloud-cli/package.nix",
+   "branch": "master",
+   "snippet": "buildGoModule (finalAttrs: { pname = \"upcloud-cli\"; version = \"3.36.0\"; src = fetchFromGitHub { owner = \"UpCloudLtd\"; repo = \"upcloud-cli\"; tag = \"v${finalAttrs.version}\"; \"-s -w -X github.com/UpCloudLtd/upcloud-cli/v3/internal/config.Version=${finalAttrs.version}\"",
+   "placeholder": true,
+   "strong_format": false,
+   "values": [
+    "upcloud-cli",
+    "fetchFromGitHub",
+    "UpCloudLtd",
+    "upcloud-cli"
+   ],
+   "verdict": "placeholder/doc"
+  },
+  {
+   "query": "upcloud",
+   "repo": "home-assistant/core",
+   "path": "homeassistant/components/upcloud/config_flow.py",
+   "branch": "dev",
+   "snippet": "\"\"\"Config flow for UpCloud.\"\"\"import requests.exceptionsimport upcloud_apiclass UpCloudConfigFlow(ConfigFlow, domain=DOMAIN): \"\"\"UpCloud config flow.\"\"\" manager = upcloud_api.CloudManager( user_input[CONF_USERNAME], user_input[CONF_PASSWORD]",
+   "placeholder": false,
+   "strong_format": false,
+   "values": [
+    "upcloud_api.CloudManager"
+   ],
+   "verdict": "literal_value_review"
+  },
+  {
+   "query": "upcloud",
+   "repo": "NixOS/nixpkgs",
+   "path": "pkgs/development/python-modules/upcloud-api/default.nix",
+   "branch": "master",
+   "snippet": "buildPythonPackage rec { pname = \"upcloud-api\"; version = \"2.9.0\"; pyproject = true; src = fetchFromGitHub { owner = \"UpCloudLtd\"; repo = \"upcloud-python-api\"; tag = \"v${version}\";",
+   "placeholder": true,
+   "strong_format": false,
+   "values": [
+    "upcloud-api",
+    "fetchFromGitHub",
+    "UpCloudLtd",
+    "upcloud-python-api"
+   ],
+   "verdict": "placeholder/doc"
+  },
+  {
+   "query": "upcloud",
+   "repo": "codigoencasa/builderbot",
+   "path": "packages/provider-gupshup/src/types.ts",
+   "branch": "builderbot",
+   "snippet": "export type GupshupCloudMessageType = | 'text'export interface GupshupCloudContact { wa_id?: stringexport interface GupshupCloudMetadata { display_phone_number?: stringexport interface GupshupCloudMedia {",
+   "placeholder": false,
+   "strong_format": false,
+   "values": [
+    "stringexport",
+    "stringexport"
+   ],
+   "verdict": "literal_value_review"
+  }
+ ],
+ "commits": []
+}

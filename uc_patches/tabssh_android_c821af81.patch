@@ -1,0 +1,459 @@
+From c821af81cb74fe01bb5673e81a2235820ad0c27e Mon Sep 17 00:00:00 2001
+From: casjay <git-admin@casjaysdev.pro>
+Date: Thu, 24 Sep 2026 20:12:53 -0400
+Subject: [PATCH] =?UTF-8?q?=E2=9C=A8=20Add=20Scaleway=20and=20UpCloud=20cl?=
+ =?UTF-8?q?oud=20providers?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Expand Infra > Cloud providers with two more single-credential
+REST providers, following the existing client pattern (shared
+OkHttp client, org.json parsing, Dispatchers.IO, CloudAuthException
+only on 401/403).
+
+- ScalewayClient: X-Auth-Token auth against the zoned Instance API.
+  Iterates all public zones, paginates until a short page, and
+  treats a 404 zone as empty rather than an error. Power actions
+  probe zones until one accepts. powercycle maps to force restart.
+- UpCloudClient: HTTP Basic auth with the credential packed as
+  api_username:api_password (same convention as AWS's
+  AKID:SECRET:REGION). GET /1.3/server returns every server with
+  inline ip_addresses, so no per-server detail call is needed.
+  Start/stop/restart use the documented stop_server / restart_server
+  bodies; force restart is a hard restart with timeout_action destroy.
+- CloudProviderType: adds SCALEWAY and UPCLOUD entries with token
+  help, and wires both into newClient(). The add-account provider
+  spinner and registry resolve providers from the enum, so the
+  new entries appear with the correct credential hint and no
+  other call site needed changes.
+---
+ .../io/github/tabssh/cloud/CloudProvider.kt   |   6 +-
+ .../io/github/tabssh/cloud/ScalewayClient.kt  | 195 ++++++++++++++++++
+ .../io/github/tabssh/cloud/UpCloudClient.kt   | 191 +++++++++++++++++
+ 3 files changed, 391 insertions(+), 1 deletion(-)
+ create mode 100644 app/src/main/java/io/github/tabssh/cloud/ScalewayClient.kt
+ create mode 100644 app/src/main/java/io/github/tabssh/cloud/UpCloudClient.kt
+
+diff --git a/app/src/main/java/io/github/tabssh/cloud/CloudProvider.kt b/app/src/main/java/io/github/tabssh/cloud/CloudProvider.kt
+index 87f82a41..25c1b042 100644
+--- a/app/src/main/java/io/github/tabssh/cloud/CloudProvider.kt
++++ b/app/src/main/java/io/github/tabssh/cloud/CloudProvider.kt
+@@ -55,7 +55,9 @@ enum class CloudProviderType(val tag: String, val displayName: String, val token
+     AWS("aws", "AWS EC2", "AKID:SECRET:REGION (e.g. AKIA…:wJal…:us-east-1)"),
+     GCP("gcp", "GCP Compute Engine", "Paste full service-account JSON"),
+     AZURE("azure", "Azure VMs", "TENANT:CLIENT_ID:CLIENT_SECRET:SUBSCRIPTION_ID"),
+-    OCI("oci", "Oracle Cloud (OCI)", "Multi-field — tap 'Configure OCI…' after choosing this provider");
++    OCI("oci", "Oracle Cloud (OCI)", "Multi-field — tap 'Configure OCI…' after choosing this provider"),
++    SCALEWAY("scaleway", "Scaleway", "API secret key (X-Auth-Token)"),
++    UPCLOUD("upcloud", "UpCloud", "api_username:api_password");
+ 
+     companion object {
+         fun fromTag(tag: String): CloudProviderType? = entries.firstOrNull { it.tag == tag }
+@@ -88,6 +90,8 @@ fun CloudProviderType.newClient(): CloudProvider = when (this) {
+     CloudProviderType.GCP -> GcpComputeClient()
+     CloudProviderType.AZURE -> AzureVmClient()
+     CloudProviderType.OCI -> OciCloudClient()
++    CloudProviderType.SCALEWAY -> ScalewayClient()
++    CloudProviderType.UPCLOUD -> UpCloudClient()
+ }
+ 
+ /**
+diff --git a/app/src/main/java/io/github/tabssh/cloud/ScalewayClient.kt b/app/src/main/java/io/github/tabssh/cloud/ScalewayClient.kt
+new file mode 100644
+index 00000000..63457292
+--- /dev/null
++++ b/app/src/main/java/io/github/tabssh/cloud/ScalewayClient.kt
+@@ -0,0 +1,195 @@
++package io.github.tabssh.cloud
++
++import io.github.tabssh.storage.database.entities.ConnectionProfile
++import io.github.tabssh.utils.logging.Logger
++import kotlinx.coroutines.Dispatchers
++import kotlinx.coroutines.withContext
++import okhttp3.MediaType.Companion.toMediaTypeOrNull
++import okhttp3.OkHttpClient
++import okhttp3.Request
++import okhttp3.RequestBody.Companion.toRequestBody
++import org.json.JSONObject
++import java.util.UUID
++import java.util.concurrent.TimeUnit
++
++/**
++ * Scaleway Instances inventory.
++ *
++ * Endpoint: https://api.scaleway.com/instance/v1/zones/{zone}/servers
++ * Auth:     X-Auth-Token: <secret-key>   (NOT Authorization: Bearer)
++ *
++ * Scaleway is zoned — a token only sees the zone you query — so we iterate
++ * every public zone and merge the results. A 404/empty zone just yields no
++ * servers for that zone and is not an error.
++ *
++ * `public_ip.address` is the canonical public IPv4 (dynamic or flexible).
++ * Pagination is plain `?page=N&per_page=100`; the response has no `next`
++ * cursor, so we stop when a page returns fewer than `per_page` entries.
++ */
++class ScalewayClient : CloudProvider {
++
++    override val type = CloudProviderType.SCALEWAY
++
++    private val http: OkHttpClient = io.github.tabssh.network.SharedHttpClient.client.newBuilder()
++        .connectTimeout(15, TimeUnit.SECONDS)
++        .readTimeout(20, TimeUnit.SECONDS)
++        .writeTimeout(20, TimeUnit.SECONDS)
++        .callTimeout(45, TimeUnit.SECONDS)
++        .build()
++
++    override suspend fun fetchInventory(
++        bearerToken: String,
++        accountName: String
++    ): List<ImportCandidate> = withContext(Dispatchers.IO) {
++        val out = mutableListOf<ImportCandidate>()
++        for (zone in ZONES) {
++            var page = 1
++            while (true) {
++                val root = doGet(
++                    "https://api.scaleway.com/instance/v1/zones/$zone/servers?per_page=100&page=$page",
++                    bearerToken
++                ) ?: break
++                val servers = root.optJSONArray("servers") ?: break
++                for (i in 0 until servers.length()) {
++                    val s = servers.optJSONObject(i) ?: continue
++                    val name = s.optString("name", "scaleway-${s.optString("id", "?")}")
++                    val ip = s.optJSONObject("public_ip")?.optString("address")
++                    if (ip.isNullOrBlank()) {
++                        Logger.d("ScalewayClient", "Server $name has no public v4 — skipping")
++                        continue
++                    }
++                    out += ImportCandidate(
++                        profile = ConnectionProfile(
++                            id = UUID.randomUUID().toString(),
++                            name = name,
++                            host = ip,
++                            port = 22,
++                            username = "root",
++                            authType = "password",
++                            advancedSettings = """{"cloud_source":"scaleway:$accountName","cloud_region":"$zone"}""",
++                            createdAt = System.currentTimeMillis()
++                        ),
++                        sourceLabel = "Scaleway / $zone"
++                    )
++                }
++                if (servers.length() < 100) break
++                page++
++            }
++        }
++        Logger.i("ScalewayClient", "Fetched ${out.size} Scaleway servers for account=$accountName")
++        out
++    }
++
++    override suspend fun fetchLiveInstances(bearerToken: String): List<CloudInstanceState> =
++        withContext(Dispatchers.IO) {
++            val out = mutableListOf<CloudInstanceState>()
++            for (zone in ZONES) {
++                var page = 1
++                while (true) {
++                    val root = doGet(
++                        "https://api.scaleway.com/instance/v1/zones/$zone/servers?per_page=100&page=$page",
++                        bearerToken
++                    ) ?: break
++                    val servers = root.optJSONArray("servers") ?: break
++                    for (i in 0 until servers.length()) {
++                        val s = servers.optJSONObject(i) ?: continue
++                        val rawStatus = s.optString("state", "unknown")
++                        val normStatus = when (rawStatus) {
++                            "running" -> "running"
++                            "stopped" -> "stopped"
++                            "starting" -> "starting"
++                            "stopping" -> "stopping"
++                            else -> CloudInstanceState.normalizeStatus(rawStatus)
++                        }
++                        out += CloudInstanceState(
++                            id = s.optString("id", ""),
++                            name = s.optString("name", "scaleway-${s.optString("id", "?")}"),
++                            ip = s.optJSONObject("public_ip")?.optString("address")?.ifBlank { null },
++                            privateIp = s.optJSONObject("private_ip")?.optString("address")?.ifBlank { null },
++                            status = normStatus,
++                            rawStatus = rawStatus,
++                            region = zone
++                        )
++                    }
++                    if (servers.length() < 100) break
++                    page++
++                }
++            }
++            out
++        }
++
++    override suspend fun startInstance(bearerToken: String, instanceId: String): Boolean =
++        postAction(bearerToken, instanceId, "poweron")
++
++    override suspend fun stopInstance(bearerToken: String, instanceId: String): Boolean =
++        postAction(bearerToken, instanceId, "poweroff")
++
++    override suspend fun restartInstance(bearerToken: String, instanceId: String): Boolean =
++        postAction(bearerToken, instanceId, "reboot")
++
++    /** Scaleway powercycle = hard power cycle, equivalent to force restart. */
++    override suspend fun forceRestartInstance(bearerToken: String, instanceId: String): Boolean =
++        postAction(bearerToken, instanceId, "powercycle")
++
++    /**
++     * Returns null when the zone is simply empty/unavailable (404), which is
++     * normal — a token rarely has servers in every zone. Throws on auth and
++     * hard failures so the caller can surface them.
++     */
++    private fun doGet(url: String, bearerToken: String): JSONObject? {
++        val req = Request.Builder()
++            .url(url)
++            .header("X-Auth-Token", bearerToken)
++            .header("Accept", "application/json")
++            .get()
++            .build()
++        val body = http.newCall(req).execute().use { resp ->
++            if (resp.code == 404) return null
++            if (!resp.isSuccessful) {
++                if (resp.code == 401 || resp.code == 403) {
++                    throw CloudAuthException("Scaleway token rejected (HTTP ${resp.code})")
++                }
++                throw IllegalStateException("Scaleway API HTTP ${resp.code}: ${resp.message}")
++            }
++            resp.body?.string().orEmpty()
++        }
++        return JSONObject(body)
++    }
++
++    private suspend fun postAction(
++        bearerToken: String,
++        instanceId: String,
++        action: String
++    ): Boolean = withContext(Dispatchers.IO) {
++        // The action endpoint is zoned; the instance id carries no zone, so we
++        // try each zone until one accepts the action (200). A 404 means the
++        // instance isn't in that zone — keep looking.
++        val body = """{"action":"$action"}""".toRequestBody("application/json".toMediaTypeOrNull())
++        for (zone in ZONES) {
++            val req = Request.Builder()
++                .url("https://api.scaleway.com/instance/v1/zones/$zone/servers/$instanceId/action")
++                .header("X-Auth-Token", bearerToken)
++                .header("Accept", "application/json")
++                .post(body)
++                .build()
++            http.newCall(req).execute().use { resp ->
++                if (resp.code == 401 || resp.code == 403) {
++                    throw CloudAuthException("Scaleway token rejected (HTTP ${resp.code})")
++                }
++                if (resp.code == 404) return@use
++                if (resp.isSuccessful) return@withContext true
++            }
++        }
++        false
++    }
++
++    companion object {
++        // All public Scaleway Instance zones as of writing; empty zones are
++        // skipped at runtime so a stale entry here is harmless.
++        private val ZONES = listOf(
++            "fr-par-1", "fr-par-2", "fr-par-3",
++            "nl-ams-1", "nl-ams-2", "nl-ams-3",
++            "pl-waw-1", "pl-waw-2", "pl-waw-3"
++        )
++    }
++}
+diff --git a/app/src/main/java/io/github/tabssh/cloud/UpCloudClient.kt b/app/src/main/java/io/github/tabssh/cloud/UpCloudClient.kt
+new file mode 100644
+index 00000000..4ac60492
+--- /dev/null
++++ b/app/src/main/java/io/github/tabssh/cloud/UpCloudClient.kt
+@@ -0,0 +1,191 @@
++package io.github.tabssh.cloud
++
++import io.github.tabssh.storage.database.entities.ConnectionProfile
++import io.github.tabssh.utils.logging.Logger
++import kotlinx.coroutines.Dispatchers
++import kotlinx.coroutines.withContext
++import okhttp3.Credentials
++import okhttp3.MediaType.Companion.toMediaTypeOrNull
++import okhttp3.OkHttpClient
++import okhttp3.Request
++import okhttp3.RequestBody.Companion.toRequestBody
++import org.json.JSONObject
++import java.util.UUID
++import java.util.concurrent.TimeUnit
++
++/**
++ * UpCloud server inventory.
++ *
++ * Endpoint: https://api.upcloud.com/1.3/server
++ * Auth:     HTTP Basic — an API username + password created in the UpCloud
++ *           Hub. We take the credential as "user:password" in the single
++ *           token field (same convention as AWS's AKID:SECRET:REGION) and
++ *           let OkHttp build the Basic header.
++ *
++ * `GET /1.3/server` returns every server with its `ip_addresses` inline, so
++ * no per-server detail call is needed. The public IPv4 is the entry whose
++ * `access` is "public" and `family` is "IPv4".
++ */
++class UpCloudClient : CloudProvider {
++
++    override val type = CloudProviderType.UPCLOUD
++
++    private val http: OkHttpClient = io.github.tabssh.network.SharedHttpClient.client.newBuilder()
++        .connectTimeout(15, TimeUnit.SECONDS)
++        .readTimeout(20, TimeUnit.SECONDS)
++        .writeTimeout(20, TimeUnit.SECONDS)
++        .callTimeout(45, TimeUnit.SECONDS)
++        .build()
++
++    override suspend fun fetchInventory(
++        bearerToken: String,
++        accountName: String
++    ): List<ImportCandidate> = withContext(Dispatchers.IO) {
++        val auth = basicAuth(bearerToken)
++        val root = doGet("https://api.upcloud.com/1.3/server", auth)
++        val servers = root.optJSONObject("servers")?.optJSONArray("server")
++            ?: return@withContext emptyList()
++        val out = mutableListOf<ImportCandidate>()
++        for (i in 0 until servers.length()) {
++            val s = servers.optJSONObject(i) ?: continue
++            val title = s.optString("title", "upcloud-${s.optString("uuid", "?")}")
++            val zone = s.optString("zone", "")
++            val ip = pickPublicV4(s)
++            if (ip.isNullOrBlank()) {
++                Logger.d("UpCloudClient", "Server $title has no public v4 — skipping")
++                continue
++            }
++            out += ImportCandidate(
++                profile = ConnectionProfile(
++                    id = UUID.randomUUID().toString(),
++                    name = title,
++                    host = ip,
++                    port = 22,
++                    username = "root",
++                    authType = "password",
++                    advancedSettings = """{"cloud_source":"upcloud:$accountName","cloud_region":"$zone"}""",
++                    createdAt = System.currentTimeMillis()
++                ),
++                sourceLabel = "UpCloud / ${zone.ifBlank { "?" }}"
++            )
++        }
++        Logger.i("UpCloudClient", "Fetched ${out.size} UpCloud servers for account=$accountName")
++        out
++    }
++
++    override suspend fun fetchLiveInstances(bearerToken: String): List<CloudInstanceState> =
++        withContext(Dispatchers.IO) {
++            val auth = basicAuth(bearerToken)
++            val root = doGet("https://api.upcloud.com/1.3/server", auth)
++            val servers = root.optJSONObject("servers")?.optJSONArray("server")
++                ?: return@withContext emptyList()
++            val out = mutableListOf<CloudInstanceState>()
++            for (i in 0 until servers.length()) {
++                val s = servers.optJSONObject(i) ?: continue
++                val rawStatus = s.optString("state", "unknown")
++                val normStatus = when (rawStatus) {
++                    "started" -> "running"
++                    "stopped" -> "stopped"
++                    else -> CloudInstanceState.normalizeStatus(rawStatus)
++                }
++                out += CloudInstanceState(
++                    id = s.optString("uuid", ""),
++                    name = s.optString("title", "upcloud-${s.optString("uuid", "?")}"),
++                    ip = pickPublicV4(s),
++                    privateIp = pickPrivateV4(s),
++                    status = normStatus,
++                    rawStatus = rawStatus,
++                    region = s.optString("zone", "").ifBlank { null }
++                )
++            }
++            out
++        }
++
++    override suspend fun startInstance(bearerToken: String, instanceId: String): Boolean =
++        postAction(bearerToken, "/1.3/server/$instanceId/start", "{}")
++
++    override suspend fun stopInstance(bearerToken: String, instanceId: String): Boolean =
++        postAction(
++            bearerToken,
++            "/1.3/server/$instanceId/stop",
++            """{"stop_server":{"stop_type":"soft","timeout":"60"}}"""
++        )
++
++    override suspend fun restartInstance(bearerToken: String, instanceId: String): Boolean =
++        postAction(
++            bearerToken,
++            "/1.3/server/$instanceId/restart",
++            """{"restart_server":{"stop_type":"soft","timeout":"60"}}"""
++        )
++
++    /** UpCloud hard stop = immediate power cut, used as the force restart. */
++    override suspend fun forceRestartInstance(bearerToken: String, instanceId: String): Boolean =
++        postAction(
++            bearerToken,
++            "/1.3/server/$instanceId/restart",
++            """{"restart_server":{"stop_type":"hard","timeout":"30","timeout_action":"destroy"}}"""
++        )
++
++    private fun basicAuth(bearerToken: String): String {
++        val parts = bearerToken.split(':', limit = 2)
++        require(parts.size == 2 && parts[0].isNotBlank()) {
++            "UpCloud credential must be api_username:api_password"
++        }
++        return Credentials.basic(parts[0].trim(), parts[1].trim())
++    }
++
++    private fun doGet(url: String, auth: String): JSONObject {
++        val req = Request.Builder()
++            .url(url)
++            .header("Authorization", auth)
++            .header("Accept", "application/json")
++            .get()
++            .build()
++        val body = http.newCall(req).execute().use { resp ->
++            if (!resp.isSuccessful) {
++                if (resp.code == 401 || resp.code == 403) {
++                    throw CloudAuthException("UpCloud credentials rejected (HTTP ${resp.code})")
++                }
++                throw IllegalStateException("UpCloud API HTTP ${resp.code}: ${resp.message}")
++            }
++            resp.body?.string().orEmpty()
++        }
++        return JSONObject(body)
++    }
++
++    private suspend fun postAction(
++        bearerToken: String,
++        path: String,
++        jsonBody: String
++    ): Boolean = withContext(Dispatchers.IO) {
++        val auth = basicAuth(bearerToken)
++        val body = jsonBody.toRequestBody("application/json".toMediaTypeOrNull())
++        val req = Request.Builder()
++            .url("https://api.upcloud.com$path")
++            .header("Authorization", auth)
++            .header("Accept", "application/json")
++            .post(body)
++            .build()
++        http.newCall(req).execute().use { resp ->
++            if (resp.code == 401 || resp.code == 403) {
++                throw CloudAuthException("UpCloud credentials rejected (HTTP ${resp.code})")
++            }
++            resp.isSuccessful
++        }
++    }
++
++    private fun pickPublicV4(server: JSONObject): String? = pickIp(server, "public", "IPv4")
++
++    private fun pickPrivateV4(server: JSONObject): String? = pickIp(server, "private", "IPv4")
++
++    private fun pickIp(server: JSONObject, access: String, family: String): String? {
++        val arr = server.optJSONObject("ip_addresses")?.optJSONArray("ip_address") ?: return null
++        for (i in 0 until arr.length()) {
++            val ip = arr.optJSONObject(i) ?: continue
++            if (ip.optString("access") == access && ip.optString("family") == family) {
++                return ip.optString("address").ifBlank { null }
++            }
++        }
++        return null
++    }
++}

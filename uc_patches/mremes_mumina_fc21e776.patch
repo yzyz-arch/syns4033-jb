@@ -1,0 +1,39 @@
+From fc21e7764a9d2ea6d23dd3eec3da62eb27e274a7 Mon Sep 17 00:00:00 2001
+From: Matti Remes <remes@iki.fi>
+Date: Fri, 27 Mar 2026 03:04:34 +0200
+Subject: [PATCH] UpCloud install: ask for API token instead of
+ username/password
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+---
+ install.ps1 | 9 +++------
+ 1 file changed, 3 insertions(+), 6 deletions(-)
+
+diff --git a/install.ps1 b/install.ps1
+index 618557b..3be4ed7 100644
+--- a/install.ps1
++++ b/install.ps1
+@@ -109,11 +109,9 @@ if ($provider -eq "gcp") {
+     gcloud services enable compute.googleapis.com --project=$projectId
+ 
+ } elseif ($provider -eq "upcloud") {
+-    Write-Host "  UpCloud uses API credentials." -ForegroundColor White
+-    Write-Host "  Create an API user at: https://hub.upcloud.com/people" -ForegroundColor White
++    Write-Host "  Get your API token at: https://hub.upcloud.com/people" -ForegroundColor White
+     Write-Host ""
+-    $ucUser = Read-Host "  UpCloud API username"
+-    $ucPassword = Read-Host "  UpCloud API password"
++    $ucToken = Read-Host "  UpCloud API token"
+ }
+ 
+ # --- Step 4: Pulumi stack ---
+@@ -152,8 +150,7 @@ if ($provider -eq "gcp") {
+     pulumi config set mumina:machineType $machineType
+ 
+ } elseif ($provider -eq "upcloud") {
+-    pulumi config set upcloud:username $ucUser
+-    pulumi config set --secret upcloud:password $ucPassword
++    pulumi config set --secret upcloud:token $ucToken
+ 
+     $zone = Read-Host "  UpCloud zone (press Enter for fi-hel1 / Helsinki)"
+     if ([string]::IsNullOrWhiteSpace($zone)) { $zone = "fi-hel1" }

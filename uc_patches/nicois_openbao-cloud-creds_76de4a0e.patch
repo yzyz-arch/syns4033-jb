@@ -1,0 +1,97 @@
+From 76de4a0e44e759642677e772cad1d21f8fdcd7d4 Mon Sep 17 00:00:00 2001
+From: Nick Farrell <nick.farrell@aiven.io>
+Date: Sat, 30 May 2026 21:47:43 +1000
+Subject: [PATCH] fix(credential-upcloud): decode bare-array token list
+ response
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+UpCloud's GET /1.3/account/tokens returns a bare JSON array, not an object
+with a "tokens" key. ListTokens decoded into a wrapper struct
+(listTokensResponse{Tokens}), so it failed with "cannot unmarshal array into
+Go value" against the real API — breaking the reconciler entirely on UpCloud
+(it could never list tokens to find orphans). The fake server (and its test)
+encoded the same wrong shape, so unit tests passed while the real path was
+broken.
+
+Decode directly into []tokenInfo; correct the fake to emit a bare array; drop
+the now-unused listTokensResponse. Found via live reconciler assessment on a
+multi-cloud OpenBao cluster.
+---
+ pkg/credenvelope/fakes/upcloud.go            |  4 +++-
+ pkg/credenvelope/fakes/upcloud_test.go       | 10 ++++------
+ plugins/credential-upcloud/upcloud_client.go | 10 ++++------
+ 3 files changed, 11 insertions(+), 13 deletions(-)
+
+diff --git a/pkg/credenvelope/fakes/upcloud.go b/pkg/credenvelope/fakes/upcloud.go
+index a19757c..b240a7f 100644
+--- a/pkg/credenvelope/fakes/upcloud.go
++++ b/pkg/credenvelope/fakes/upcloud.go
+@@ -161,7 +161,9 @@ func (s *UpCloudServer) listTokens(w http.ResponseWriter, r *http.Request) {
+ 	}
+ 	s.mu.Unlock()
+ 
+-	writeJSON(w, map[string]interface{}{"tokens": tokens})
++	// UpCloud's GET /1.3/account/tokens returns a bare JSON array (verified
++	// against the live API), not an object with a "tokens" key.
++	writeJSON(w, tokens)
+ }
+ 
+ func (s *UpCloudServer) getAccount(w http.ResponseWriter, r *http.Request) {
+diff --git a/pkg/credenvelope/fakes/upcloud_test.go b/pkg/credenvelope/fakes/upcloud_test.go
+index 6bca3c0..afb1cce 100644
+--- a/pkg/credenvelope/fakes/upcloud_test.go
++++ b/pkg/credenvelope/fakes/upcloud_test.go
+@@ -104,16 +104,14 @@ func TestUpCloudFake_ListTokens(t *testing.T) {
+ 		t.Fatalf("expected 200, got %d", resp2.StatusCode)
+ 	}
+ 
+-	var result map[string]interface{}
++	// UpCloud returns a bare JSON array of tokens (verified against the live
++	// API), not an object with a "tokens" key.
++	var tokens []interface{}
+ 	data, _ := io.ReadAll(resp2.Body)
+-	if err := json.Unmarshal(data, &result); err != nil {
++	if err := json.Unmarshal(data, &tokens); err != nil {
+ 		t.Fatalf("unmarshal failed: %v", err)
+ 	}
+ 
+-	tokens, ok := result["tokens"].([]interface{})
+-	if !ok {
+-		t.Fatalf("expected tokens array, got %T", result["tokens"])
+-	}
+ 	if len(tokens) != 1 {
+ 		t.Fatalf("expected 1 token, got %d", len(tokens))
+ 	}
+diff --git a/plugins/credential-upcloud/upcloud_client.go b/plugins/credential-upcloud/upcloud_client.go
+index 1dc3745..caff93e 100644
+--- a/plugins/credential-upcloud/upcloud_client.go
++++ b/plugins/credential-upcloud/upcloud_client.go
+@@ -35,10 +35,6 @@ type tokenInfo struct {
+ 	Name string `json:"name"`
+ }
+ 
+-type listTokensResponse struct {
+-	Tokens []tokenInfo `json:"tokens"`
+-}
+-
+ func newUpCloudClient(baseURL, username, password string) *upcloudClient {
+ 	return &upcloudClient{
+ 		baseURL:  baseURL,
+@@ -116,11 +112,13 @@ func (c *upcloudClient) ListTokens(ctx context.Context) ([]tokenInfo, error) {
+ 		return nil, fmt.Errorf("UpCloud API list tokens returned %d: %s", resp.StatusCode, string(bodyBytes))
+ 	}
+ 
+-	var result listTokensResponse
++	// UpCloud's GET /1.3/account/tokens returns a bare JSON array of tokens,
++	// not an object with a "tokens" key, so decode directly into a slice.
++	var result []tokenInfo
+ 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+ 		return nil, err
+ 	}
+-	return result.Tokens, nil
++	return result, nil
+ }
+ 
+ func (c *upcloudClient) DeleteToken(ctx context.Context, tokenID string) (int, error) {

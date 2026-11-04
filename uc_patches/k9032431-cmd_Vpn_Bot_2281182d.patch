@@ -1,0 +1,169 @@
+From 2281182d50b80bb92565e71a8b5118a23365245a Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sat, 5 Sep 2026 15:26:45 +0000
+Subject: [PATCH] Make UpCloud connect screen look like a plain site login
+
+Drop the upfront "Permit API connections" / 2FA warning from the
+connect flow so it reads exactly like logging into upcloud.com: just
+username and password, no extra steps mentioned. The technical
+requirement still exists on UpCloud's side, so it's surfaced only when
+a login actually fails with wrong credentials, as an extra hint under
+the normal error message.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01NFMuHFMb7r1xEwqxGw4pZn
+---
+ README.md                 | 21 +++++++++-------
+ bot/handlers/cloud.py     |  6 +++--
+ bot/texts/cloud.py        |  7 ++++--
+ bot/texts/translations.py | 52 ++++++++++++++++++++++++---------------
+ 4 files changed, 53 insertions(+), 33 deletions(-)
+
+diff --git a/README.md b/README.md
+index e696422..571f128 100644
+--- a/README.md
++++ b/README.md
+@@ -230,15 +230,18 @@ URL API. Если панель развёрнута под собственны
+ пока полноценно реализован **UpCloud**, остальные показаны как "скоро" и
+ не мешают выбору активного провайдера.
+ 
+-Подключение аккаунта UpCloud происходит так же, как подключение панели:
+-бот просит **логин и пароль** — можно вводить данные основного аккаунта
+-UpCloud (тот же username, которым вы входите на upcloud.com), отдельный
+-суб-аккаунт не обязателен. Единственное жёсткое требование самого API
+-UpCloud (не бота): у аккаунта должна быть включена опция *«Permit API
+-connections»* (Account → Account settings) и выключена двухфакторная
+-аутентификация — если на аккаунте есть 2FA, нужно завести отдельного
+-пользователя без неё в разделе *People*. Один пользователь бота может
+-подключить несколько аккаунтов UpCloud.
++Подключение аккаунта UpCloud выглядит как обычный вход на сайт: бот
++просто просит **логин и пароль** от аккаунта upcloud.com, никаких
++отдельных суб-аккаунтов создавать не нужно, и никаких предупреждений
++на этом экране бот не показывает. Единственное жёсткое требование
++самого API UpCloud (не бота) — на аккаунте должна быть включена опция
++*«Permit API connections»* (Account → Account settings), а двухфакторная
++аутентификация выключена: без этого UpCloud отклоняет вход по API даже с
++верным паролем. Бот не заставляет включать это заранее — если вход не
++получился, он покажет обычную ошибку "неверный логин или пароль" и
++только тогда, отдельной строкой, подскажет про эту настройку и 2FA как
++вероятную причину. Один пользователь бота может подключить несколько
++аккаунтов UpCloud.
+ 
+ После подключения аккаунта доступно управление сервером почти один в
+ один как на самом сайте UpCloud:
+diff --git a/bot/handlers/cloud.py b/bot/handlers/cloud.py
+index f4375a0..92355bf 100644
+--- a/bot/handlers/cloud.py
++++ b/bot/handlers/cloud.py
+@@ -204,12 +204,14 @@ async def process_password(message: Message, state: FSMContext, lang: str) -> No
+         await _login(data["provider"], data["username"], password)
+     except UpCloudAPIError as exc:
+         await state.clear()
+-        await status_message.edit_text(texts.login_error_text(lang, str(exc)), reply_markup=cloud_error_keyboard(lang))
++        await status_message.edit_text(
++            texts.login_error_text(lang, str(exc), data["provider"]), reply_markup=cloud_error_keyboard(lang)
++        )
+         return
+     except Exception:  # noqa: BLE001 - surface unexpected errors to the user
+         await state.clear()
+         await status_message.edit_text(
+-            texts.login_error_text(lang, "bad_response"), reply_markup=cloud_error_keyboard(lang)
++            texts.login_error_text(lang, "bad_response", data["provider"]), reply_markup=cloud_error_keyboard(lang)
+         )
+         return
+ 
+diff --git a/bot/texts/cloud.py b/bot/texts/cloud.py
+index 4596b47..ffd0676 100644
+--- a/bot/texts/cloud.py
++++ b/bot/texts/cloud.py
+@@ -76,8 +76,11 @@ def _error_reason(lang: str, reason: str) -> str:
+     return t(lang, key)
+ 
+ 
+-def login_error_text(lang: str, reason: str) -> str:
+-    return t(lang, "cloud_login_error", icon=e("error", "❌"), reason=_error_reason(lang, reason))
++def login_error_text(lang: str, reason: str, provider: str | None = None) -> str:
++    error_text = _error_reason(lang, reason)
++    if reason == "wrong_credentials" and provider == "upcloud":
++        error_text += t(lang, "cloud_err_wrong_credentials_hint_upcloud")
++    return t(lang, "cloud_login_error", icon=e("error", "❌"), reason=error_text)
+ 
+ 
+ def action_error_text(lang: str, reason: str) -> str:
+diff --git a/bot/texts/translations.py b/bot/texts/translations.py
+index 6f20f52..7179090 100644
+--- a/bot/texts/translations.py
++++ b/bot/texts/translations.py
+@@ -1696,30 +1696,18 @@ def resolve_language(code: str | None) -> str:
+     "cloud_step_username_upcloud": {
+         "ru": (
+             "🔑 <b>Подключение UpCloud</b>\n\n"
+-            "Введите <b>логин</b> вашего аккаунта UpCloud — тот же username, "
+-            "которым вы входите на upcloud.com (не email).\n\n"
+-            "⚠️ У аккаунта должна быть включена опция <b>«Permit API connections»</b> "
+-            "(Account → Account settings) и <b>выключена двухфакторная аутентификация</b> "
+-            "— так требует сам API UpCloud, без исключений. Если у вас включена 2FA, "
+-            "создайте отдельного пользователя без неё в разделе People."
++            "Введите <b>логин</b> от вашего аккаунта UpCloud — тот же, которым "
++            "вы входите на upcloud.com."
+         ),
+         "en": (
+             "🔑 <b>Connect UpCloud</b>\n\n"
+-            "Enter your UpCloud account <b>username</b> — the same one you use to "
+-            "log in at upcloud.com (not your email).\n\n"
+-            "⚠️ That account needs <b>\"Permit API connections\"</b> enabled "
+-            "(Account → Account settings) and <b>two-factor authentication turned off</b> "
+-            "— that's a hard requirement of UpCloud's own API, not this bot. If your "
+-            "account has 2FA on, create a separate user without it under People."
++            "Enter your UpCloud account's <b>username</b> — the same one you use "
++            "to log in at upcloud.com."
+         ),
+         "tk": (
+             "🔑 <b>UpCloud birikdirmek</b>\n\n"
+             "UpCloud hasabyňyzyň <b>username</b>-ini giriziň — upcloud.com-a "
+-            "girýän ulanyjy adyňyz (e-poçta däl).\n\n"
+-            "⚠️ Şol hasapda <b>«Permit API connections»</b> açyk bolmaly "
+-            "(Account → Account settings) we <b>iki faktorly tassyklama öçürilen</b> "
+-            "bolmaly — bu UpCloud API-siniň öz talaby. 2FA açyk bolsa, People "
+-            "bölüminde ony öçürilen aýratyn ulanyjy dörediň."
++            "girýän ulanyjy adyňyz."
+         ),
+     },
+     "cloud_step_password": {
+@@ -1760,9 +1748,33 @@ def resolve_language(code: str | None) -> str:
+         "tk": "{icon} <b>Amal ýerine ýetirilmedi</b>\n\n{reason}",
+     },
+     "cloud_err_wrong_credentials": {
+-        "ru": "Неверный API-логин или пароль.",
+-        "en": "Wrong API username or password.",
+-        "tk": "API-login ýa-da parol nädogry.",
++        "ru": "Неверный логин или пароль.",
++        "en": "Wrong username or password.",
++        "tk": "Login ýa-da parol nädogry.",
++    },
++    "cloud_err_wrong_credentials_hint_upcloud": {
++        "ru": (
++            "\n\n<i>Если логин и пароль точно верные — на сайте UpCloud "
++            "(Account → Account settings) должна быть включена опция «Permit API "
++            "connections», а для этого аккаунта выключена двухфакторная "
++            "аутентификация (2FA). Без этого UpCloud не пускает по API даже с "
++            "правильным паролем — это ограничение самого UpCloud, не бота.</i>"
++        ),
++        "en": (
++            "\n\n<i>If the username and password are definitely correct — on "
++            "upcloud.com (Account → Account settings), this account needs "
++            "\"Permit API connections\" enabled and two-factor authentication "
++            "(2FA) turned off. Without that UpCloud rejects API access even with "
++            "the right password — that's UpCloud's own limitation, not this "
++            "bot's.</i>"
++        ),
++        "tk": (
++            "\n\n<i>Login we parol dogry bolsa — upcloud.com sahypasynda "
++            "(Account → Account settings) bu hasapda «Permit API connections» "
++            "açyk bolmaly we iki faktorly tassyklama (2FA) öçürilen bolmaly. "
++            "Bolmasa UpCloud dogry parol bilenem API arkaly girmäge rugsat "
++            "bermeýär — bu UpCloud-yň öz çäklendirmesi, botyň däl.</i>"
++        ),
+     },
+     "cloud_err_connect_failed": {
+         "ru": "Не удалось связаться с провайдером — проверьте подключение к интернету и повторите попытку.",

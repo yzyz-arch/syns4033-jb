@@ -1,0 +1,37 @@
+From 3cee1e2fb6981ffff27dab48618e143eadf3167a Mon Sep 17 00:00:00 2001
+From: thatbush <bentley@spiritbulb.org>
+Date: Fri, 23 Oct 2026 20:30:37 +0300
+Subject: [PATCH] fix(docs): update cleanup and roadmap for bill-servers token
+ handling and UpCloud key retrieval
+
+---
+ docs/CLEANUP.md | 2 +-
+ docs/ROADMAP.md | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/docs/CLEANUP.md b/docs/CLEANUP.md
+index efd4e1a..b031192 100644
+--- a/docs/CLEANUP.md
++++ b/docs/CLEANUP.md
+@@ -430,7 +430,7 @@ holding the public key could read and write users (including `role`), stores, or
+ The admin pages and the settings screens (products, services, orders, blog, appearance) were querying Supabase from the
+ browser and depended on those policies.
+ 
+-**State checked against production on 2026-10-14:** the lockdown is in effect. Every public table has RLS on; `anon` and `authenticated` hold **zero** table grants; neither can execute any SECURITY DEFINER function; only 8 policies remain. The `20261012*` migrations are not in `supabase_migrations` (they were applied some other way), so do not re-run them blindly; the migration files document intent, the database is the truth. Since then: the `bill-servers-every-10-min` cron job reads its bearer token from Vault (`bill_servers_cron_token`) instead of carrying it in the command (2026-10-23). **Still open, and currently broken:** the `bill-servers` function compares the token to its own `CRON_SECRET` and has returned 401 to every run since at least the morning of 2026-10-23 (before and after the Vault move), so hourly server billing is not running. No servers exist yet (`servers` and `server_billing` are empty), so nothing has gone unbilled. Fix: set the function's `CRON_SECRET` to the value in Vault (`select decrypted_secret from vault.decrypted_secrets where name = 'bill_servers_cron_token'`), or generate a new one and set both together. Then confirm a 200 in `net._http_response`. Rotate that token, which means setting a new value as the function's own secret and in Vault at the same time (any run in between gets a 401), and the legacy Supabase-Auth password forms in `apps/web`.
++**State checked against production on 2026-10-14:** the lockdown is in effect. Every public table has RLS on; `anon` and `authenticated` hold **zero** table grants; neither can execute any SECURITY DEFINER function; only 8 policies remain. The `20261012*` migrations are not in `supabase_migrations` (they were applied some other way), so do not re-run them blindly; the migration files document intent, the database is the truth. Since then: the `bill-servers-every-10-min` cron job reads its bearer token from Vault (`bill_servers_cron_token`) instead of carrying it in the command (2026-10-23). **Fixed 2026-10-23:** the `bill-servers` function used to compare the token to its own `CRON_SECRET` edge secret, which no longer matched, so every run since at least that morning returned 401 and hourly billing did not run (no servers exist yet, so nothing went unbilled). The function also accepted `Bearer undefined` once the secret was deleted. Vault is now the only copy: `check_bill_servers_token(text)` (migration `20261023c_bill_servers_token_check.sql`) compares the caller's token to `bill_servers_cron_token` inside Postgres and fails closed, and the function reads the UpCloud key through `get_upcloud_api_key()` (Vault secret `UPCLOUD_API_KEY`). Both are `SECURITY DEFINER`, executable by `service_role` only. The function has no edge secrets of its own for this (deployed as version 6; its source is not in the repo). Verified: a real token gets 200, `Bearer undefined` gets 401. To rotate the cron token, update the one Vault secret; there is no second copy and no 401 window. **Still open:** the UpCloud suspend path is untested because no servers exist; `apps/web/lib/upcloud.ts` still reads `UPCLOUD_API_TOKEN` from the Vercel env, so the key lives in two places until web moves too; and the legacy Supabase-Auth password forms in `apps/web`.
+ 
+ Code done: admin pages and the docs page use the server client; the five settings screens call server actions in
+ `apps/storefront/lib/admin/*` (authorized per store, scoped by `store_id`, plan limits and blog gating now enforced; appearance
+diff --git a/docs/ROADMAP.md b/docs/ROADMAP.md
+index ac40b0f..3f63b13 100644
+--- a/docs/ROADMAP.md
++++ b/docs/ROADMAP.md
+@@ -24,7 +24,7 @@ Size: **S** under a day, **M** a few days, **L** a week or more. Area tags: `SF`
+ | N5 | Nuru note editor silently loses edits | NUR | `app/note/[id].tsx` is editable but `services/notes.ts` has no update or delete. Add the API and a save button, or make the screen read-only. | M |
+ | N6 | Reach double-charge on retry | RCH, WEB | A timed-out poll keeps the cart; resubmitting creates a second order and STK push. Add an idempotency key or resume the pending order. Plan: the app generates a key per checkout attempt and keeps it until success, failure or a cart change; `POST /api/mobile/reach/orders` returns the existing order for the same key; a unique index on the key stops a simultaneous double submit (needs a migration). Confirmed still open 2026-10-23 (SPI-10). | M |
+ | N7 | Fix spiritbulb env and tests | SB | The tests now use `MCLOUD_BASE` (the code appends `/auth/handoff`, so the value is `https://www.mcloud.co.ke/api/partner`). Left: check `.env.example` says the same, rerun the suite, and make the waitlist route fail clearly when env is missing. | S |
+-| N8 | Close out the DB lockdown: move the `bill-servers` cron token to Vault and rotate it | WEB | Tables and functions are already locked in production (verified 2026-10-14). The cron job now reads the token from Vault (2026-10-23); only the rotation is left. See CLEANUP §9.2. | S |
++| N8 | Close out the DB lockdown: `bill-servers` secrets | WEB | Tables and functions are already locked in production (verified 2026-10-14). The cron token and the UpCloud key are now both read from Vault (2026-10-23), and the function fails closed. Left: decide where web's `UPCLOUD_API_TOKEN` should live, and test the suspend path once a server exists. See CLEANUP §9.2. | S |
+ | N9 | Live-test the Daraja STK Query path; add a rate limit on the order-status endpoint | WEB | The code fix is done on a local branch (CLEANUP §1.5). Needs one real payment and a Cloudflare rule. | S |
+ | N10 | Login form accessibility and flow (spiritbulb) | SB | No labels, no `autocomplete="one-time-code"`, no `role="alert"` on errors, no resend or change-email. This is the front door for every partner-site user. | S |
+ 

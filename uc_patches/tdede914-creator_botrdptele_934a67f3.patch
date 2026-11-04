@@ -1,0 +1,313 @@
+From 934a67f3b0498c16fcfe113915a2610ab8216a80 Mon Sep 17 00:00:00 2001
+From: Kiro Agent <244629292+kiro-agent@users.noreply.github.com>
+Date: Wed, 16 Sep 2026 19:59:26 +0000
+Subject: [PATCH] feat(4a,4c): re-apply on real source (UpCloud-aware)
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+4a: power ON/OFF menu now picks API/account first (+ separate renter group),
+then lists that API's servers (paginated), mirroring the Delete-VPS flow.
+
+4c: Install RDP offers a source choice — (1) manual VPS credentials or
+(2) own cloud API token (DO/Linode/AWS/UpCloud) auto-create+install, reusing
+the non-gated renter_rdp_* chain via startOpenApiRdp/promptOpenApiAdd.
+---
+ src/handlers/dedicatedRdpHandler.js | 44 +++++++++++++++++---
+ src/handlers/renterHandler.js       | 54 ++++++++++++++++++++++++-
+ src/handlers/vpsAdminHandler.js     | 63 +++++++++++++++++++++++++++--
+ src/index.js                        | 20 +++++++--
+ 4 files changed, 168 insertions(+), 13 deletions(-)
+
+diff --git a/src/handlers/dedicatedRdpHandler.js b/src/handlers/dedicatedRdpHandler.js
+index a4d929e..bbd068f 100644
+--- a/src/handlers/dedicatedRdpHandler.js
++++ b/src/handlers/dedicatedRdpHandler.js
+@@ -38,15 +38,48 @@ async function handleInstallDedicatedRDP(bot, chatId, messageId, sessionManager,
+   session.chargePending = !isFreeRenter && !isAdmin(chatId);
+   session.freeForRenter = isFreeRenter;
+ 
+-  const msg = await bot.editMessageText(
+-    '🖥️ Instalasi RDP Dedicated\n\n' +
++  // Simpan konteks biaya/flag; STEP dipilih setelah user memilih sumber instalasi.
++  session.messageId = messageId;
++  delete session.step;
++  sessionManager.setUserSession(chatId, session);
++
++  // BARU (4c): tawarkan pilihan sumber VPS untuk RDP.
++  return bot.editMessageText(
++    '🖥️ *Instalasi RDP Dedicated*\n\n' +
+     `💰 Harga: ${isFreeRenter ? 'GRATIS (Penyewa)' : 'Rp ' + installCost.toLocaleString('id-ID')}\n` +
+-    '🔒 Port: 4443 (custom untuk keamanan)\n\n' +
++    '🔒 Port RDP: 4443 (UpCloud: 8443)\n\n' +
++    'Pilih sumber VPS untuk RDP:\n\n' +
++    '1️⃣ *Kredensial VPS manual* — kamu sudah punya VPS, tinggal masukkan IP + user + password.\n' +
++    '2️⃣ *API cloud sendiri* — bot otomatis membuat VPS di akun cloud milikmu (DigitalOcean/Linode/AWS/UpCloud) lalu install RDP, seperti menu renter.',
++    {
++      chat_id: chatId,
++      message_id: messageId,
++      parse_mode: 'Markdown',
++      reply_markup: {
++        inline_keyboard: [
++          [{ text: '1️⃣ Pakai kredensial VPS manual', callback_data: 'install_src_manual' }],
++          [{ text: '2️⃣ Pakai API cloud sendiri', callback_data: 'install_src_api' }],
++          [{ text: '❌ Batal', callback_data: 'cancel_installation' }]
++        ]
++      }
++    }
++  );
++}
++
++// Prompt input kredensial VPS manual (langkah pertama: IP). Dipisah agar bisa
++// dipanggil setelah user memilih "kredensial VPS manual".
++async function showManualCredsPrompt(bot, chatId, messageId, sessionManager) {
++  const session = sessionManager.getUserSession(chatId) || {};
++  session.installType = 'dedicated';
++
++  const msg = await bot.editMessageText(
++    '🖥️ Instalasi RDP Dedicated (Kredensial VPS Manual)\n\n' +
++    '🔒 Port RDP: 4443 (UpCloud: 8443)\n\n' +
+     '📋 Spesifikasi Minimal:\n' +
+     '• ⚡ CPU: 1 Core\n' +
+     '• 💾 RAM: 1 GB\n' +
+     '• 💽 Storage: 20 GB\n\n' +
+-    '🌐 IP VPS:\n' +
++    '🌐 Masukkan IP VPS:\n' +
+     'IP akan dihapus otomatis setelah dikirim\n\n' +
+     '⚠️ PENTING: VPS Wajib Fresh Install Ubuntu 24.04 LTS',
+     {
+@@ -55,7 +88,7 @@ async function handleInstallDedicatedRDP(bot, chatId, messageId, sessionManager,
+       parse_mode: 'Markdown',
+       reply_markup: {
+         inline_keyboard: [
+-          [{ text: '❌ Batal', callback_data: 'cancel_installation' }]
++          [{ text: '« Kembali', callback_data: 'install_dedicated_rdp' }, { text: '❌ Batal', callback_data: 'cancel_installation' }]
+         ]
+       }
+     }
+@@ -719,6 +752,7 @@ async function handleRDPCallbacks(bot, query, userSessions) {
+ 
+ module.exports = {
+   handleInstallDedicatedRDP,
++  showManualCredsPrompt,
+   handleDedicatedVPSCredentials,
+   showDedicatedOSSelection,
+   handleDedicatedOSSelection,
+diff --git a/src/handlers/renterHandler.js b/src/handlers/renterHandler.js
+index e281a19..beeb2ce 100644
+--- a/src/handlers/renterHandler.js
++++ b/src/handlers/renterHandler.js
+@@ -761,8 +761,16 @@ async function processAddApi(bot, msg, sessionManager) {
+   await bot.sendMessage(chatId, `⏳ Mengecek dan menyimpan API ${label} renter...`);
+   try {
+     const res = await renterManager.addApi(chatId, msg.text, provider);
++    const returnTo = sess.returnTo;
+     sessionManager.clearAdminSession(chatId);
+-    await bot.sendMessage(chatId, `✅ API ${res.provider || label} berhasil ${res.exists ? 'diaktifkan kembali' : 'ditambahkan'}.\nEmail/ID: ${res.email || '-'}\n\nKetik /start untuk kembali.`);
++    if (returnTo === 'open_api_rdp') {
++      await bot.sendMessage(chatId,
++        `✅ API ${res.provider || label} berhasil ${res.exists ? 'diaktifkan kembali' : 'ditambahkan'}.\nEmail/ID: ${res.email || '-'}`,
++        { reply_markup: { inline_keyboard: [[{ text: '🚀 Lanjut Pilih Server & Install RDP', callback_data: 'install_src_api' }], [{ text: '🏠 Menu Utama', callback_data: 'back_to_menu' }]] } }
++      );
++    } else {
++      await bot.sendMessage(chatId, `✅ API ${res.provider || label} berhasil ${res.exists ? 'diaktifkan kembali' : 'ditambahkan'}.\nEmail/ID: ${res.email || '-'}\n\nKetik /start untuk kembali.`);
++    }
+   } catch (e) {
+     let hint = e.message || '';
+     if (e.message === 'INVALID_AWS_FORMAT') hint = 'Format AWS harus ACCESS_KEY_ID|SECRET_ACCESS_KEY|REGION';
+@@ -1509,9 +1517,53 @@ async function processAdminRemove(bot, msg, sessionManager) {
+   await bot.sendMessage(chatId, `✅ Penyewa ${uid} berhasil dihapus.`);
+ }
+ 
++// ============================================================
++// "Install RDP pakai API cloud sendiri" — entry TERBUKA (tanpa gate renter).
++// Dipakai menu Install RDP (4c). Mid-chain (pickApi/pickRegionFirst/pickSize/createRdp)
++// tidak ter-gate, jadi callback renter_rdp_api/regionpick/sizepick/win yang ada bisa dipakai.
++// ============================================================
++async function startOpenApiRdp(bot, chatId, messageId, sessionManager) {
++  const apis = await renterManager.listApis(chatId, true);
++  if (!apis.length) {
++    return safeMessageEditor.editMessage(bot, chatId, messageId,
++      '🔑 *Install RDP via API Cloud Sendiri*\n\nKamu belum punya API cloud tersimpan. Tambahkan token API provider kamu ' +
++      '(VPS dibuat & RDP diinstall otomatis di akun cloud milikmu):',
++      { parse_mode: 'Markdown', reply_markup: { inline_keyboard: [
++        [{ text: '➕ API DigitalOcean', callback_data: 'open_api_add:digitalocean' }],
++        [{ text: '➕ API Linode', callback_data: 'open_api_add:linode' }],
++        [{ text: '➕ API AWS', callback_data: 'open_api_add:aws' }],
++        [{ text: '➕ API UpCloud', callback_data: 'open_api_add:upcloud' }],
++        [{ text: '« Kembali', callback_data: 'install_dedicated_rdp' }]
++      ] } }
++    );
++  }
++  const kb = apis.map(a => ([{ text: apiLabel(a), callback_data: `renter_rdp_api:${a.id}` }]));
++  kb.push([{ text: '➕ Tambah API lain', callback_data: 'open_api_add:digitalocean' }]);
++  kb.push([{ text: '« Kembali', callback_data: 'install_dedicated_rdp' }]);
++  return safeMessageEditor.editMessage(bot, chatId, messageId,
++    '🔑 *Install RDP via API Cloud Sendiri*\n\nPilih API cloud untuk membuat VPS + install RDP:',
++    { parse_mode: 'Markdown', reply_markup: { inline_keyboard: kb } });
++}
++
++async function promptOpenApiAdd(bot, chatId, messageId, sessionManager, provider = 'digitalocean') {
++  const p = String(provider || 'digitalocean').toLowerCase();
++  const label = p === 'aws' ? 'AWS' : (p === 'linode' ? 'Linode' : (p === 'upcloud' ? 'UpCloud' : 'DigitalOcean'));
++  sessionManager.setAdminSession(chatId, { action: 'renter_add_api', provider: p, messageId, returnTo: 'open_api_rdp' });
++  let extra = '';
++  if (p === 'aws') extra = '\n\nFormat AWS:\n`ACCESS_KEY_ID|SECRET_ACCESS_KEY|REGION`';
++  else if (p === 'upcloud') extra = '\n\nToken UpCloud diawali `ucat_` (buat di hub.upcloud.com/account/api-tokens, allowed IPs 0.0.0.0/0).';
++  return safeMessageEditor.editMessage(bot, chatId, messageId,
++    `🔑 Masukkan token/API ${label} kamu:${extra}\n\nToken akan dihapus dari chat setelah dikirim.`, {
++    parse_mode: 'Markdown',
++    reply_markup: { inline_keyboard: [[{ text: '« Kembali', callback_data: 'install_src_api' }]] }
++  });
++}
++
+ module.exports = {
+   showRentOffer,
+   startRentPurchase,
++  startOpenApiRdp,
++  promptOpenApiAdd,
+   refreshRentPayment,
+   cancelRentPayment,
+   showStartChoice,
+diff --git a/src/handlers/vpsAdminHandler.js b/src/handlers/vpsAdminHandler.js
+index 93b5b76..bc627f3 100644
+--- a/src/handlers/vpsAdminHandler.js
++++ b/src/handlers/vpsAdminHandler.js
+@@ -674,6 +674,8 @@ function powerSourceForRow(r) {
+   return r.source === 'renter' ? 'renter' : 'normal';
+ }
+ 
++// STEP 1 (4a): pilih API/akun cloud dulu (hanya yang punya server aktif), baru daftar
++// server dari API itu — meniru pola menu Hapus VPS, tidak lagi membanjiri semua sekaligus.
+ async function showPowerServiceList(bot, chatId, messageId, page = 0) {
+   if (!isAdmin(chatId)) return;
+   const rows = (await vpsManager.listAllActiveInstances()).filter(r => r.droplet_id);
+@@ -683,6 +685,55 @@ async function showPowerServiceList(bot, chatId, messageId, page = 0) {
+       reply_markup: { inline_keyboard: [[{ text: '« Kembali', callback_data: 'vps_admin' }]] }
+     });
+   }
++
++  // Hitung server per API (admin) + total server penyewa (renter). api_id renter merujuk
++  // ke renter_do_api (ruang id berbeda) jadi dikelompokkan terpisah.
++  const adminCount = new Map();
++  let renterCount = 0;
++  for (const r of rows) {
++    if (r.source === 'renter') { renterCount++; continue; }
++    const key = Number(r.api_id || 0);
++    adminCount.set(key, (adminCount.get(key) || 0) + 1);
++  }
++
++  const apis = await vpsManager.listDoApis();
++  const kb = [];
++  for (const a of apis) {
++    const cnt = adminCount.get(Number(a.id)) || 0;
++    if (cnt <= 0) continue;
++    const base = vpsManager.formatApiLabel ? vpsManager.formatApiLabel(a) : (a.email ? `${a.email} - API#${a.id}` : `API#${a.id}`);
++    const label = (Number(a.status) === 1) ? base : `⛔ ${base} (DISABLED)`;
++    kb.push([{ text: `${label} • ${cnt} server`, callback_data: `vps_power_api:${a.id}:0` }]);
++  }
++  const knownIds = new Set(apis.map(a => Number(a.id)));
++  for (const [key, cnt] of adminCount.entries()) {
++    if (key && !knownIds.has(key) && cnt > 0) kb.push([{ text: `API#${key} • ${cnt} server`, callback_data: `vps_power_api:${key}:0` }]);
++  }
++  if (renterCount > 0) kb.push([{ text: `👥 Server Penyewa (Renter) • ${renterCount} server`, callback_data: 'vps_power_api:renter:0' }]);
++  kb.push([{ text: '« Kembali', callback_data: 'vps_admin' }]);
++
++  return safeMessageEditor.editMessage(bot, chatId, messageId,
++    '🔌 *TURN ON / TURN OFF VPS&RDP*\n\n1️⃣ Pilih API/akun cloud dulu, lalu daftar server dari API itu akan muncul:', {
++    parse_mode: 'Markdown',
++    reply_markup: { inline_keyboard: kb }
++  });
++}
++
++// STEP 2 (4a): daftar server milik satu API (atau kelompok penyewa). apiKey = id do_api atau 'renter'.
++async function showPowerServiceListForApi(bot, chatId, messageId, apiKey, page = 0) {
++  if (!isAdmin(chatId)) return;
++  const isRenter = String(apiKey) === 'renter';
++  const rows = (await vpsManager.listAllActiveInstances()).filter(r => {
++    if (!r.droplet_id) return false;
++    if (isRenter) return r.source === 'renter';
++    return r.source !== 'renter' && Number(r.api_id) === Number(apiKey);
++  });
++  if (!rows.length) {
++    return safeMessageEditor.editMessage(bot, chatId, messageId, '🔌 *TURN ON / TURN OFF VPS&RDP*\n\nTidak ada server aktif untuk pilihan ini.', {
++      parse_mode: 'Markdown',
++      reply_markup: { inline_keyboard: [[{ text: '« Kembali', callback_data: 'vps_admin_power_menu' }]] }
++    });
++  }
+   const perPage = 12;
+   const totalPages = Math.max(1, Math.ceil(rows.length / perPage));
+   const safePage = Math.min(Math.max(Number(page) || 0, 0), totalPages - 1);
+@@ -694,12 +745,15 @@ async function showPowerServiceList(bot, chatId, messageId, page = 0) {
+     return [{ text: type + ' ' + ip + ' | Buyer ' + (r.user_id || '-'), callback_data: 'vps_power_pick:' + src + ':' + r.id }];
+   });
+   const nav = [];
+-  if (safePage > 0) nav.push({ text: '⬅️ Halaman sebelumnya', callback_data: 'vps_admin_power_menu:' + (safePage - 1) });
++  if (safePage > 0) nav.push({ text: '⬅️ Prev', callback_data: 'vps_power_api:' + apiKey + ':' + (safePage - 1) });
+   nav.push({ text: (safePage + 1) + '/' + totalPages, callback_data: 'noop' });
+-  if (safePage < totalPages - 1) nav.push({ text: '➡️ Halaman berikutnya', callback_data: 'vps_admin_power_menu:' + (safePage + 1) });
++  if (safePage < totalPages - 1) nav.push({ text: 'Next ➡️', callback_data: 'vps_power_api:' + apiKey + ':' + (safePage + 1) });
+   if (totalPages > 1) kb.push(nav);
+-  kb.push([{ text: '« Kembali', callback_data: 'vps_admin' }]);
+-  return safeMessageEditor.editMessage(bot, chatId, messageId, '🔌 *TURN ON / TURN OFF VPS&RDP*\n\nPilih server yang ingin dinyalakan/dimatikan:', {
++  kb.push([{ text: '« Pilih API lain', callback_data: 'vps_admin_power_menu' }]);
++
++  const header = isRenter ? '👥 Server Penyewa (Renter)' : ('API#' + apiKey);
++  return safeMessageEditor.editMessage(bot, chatId, messageId,
++    '🔌 *TURN ON / TURN OFF VPS&RDP*\n\n📂 ' + header + '\n2️⃣ Pilih server yang ingin dinyalakan/dimatikan:', {
+     parse_mode: 'Markdown',
+     reply_markup: { inline_keyboard: kb }
+   });
+@@ -770,6 +824,7 @@ module.exports = {
+   showDoStatus,
+   showAllDoStatus,
+   showPowerServiceList,
++  showPowerServiceListForApi,
+   showPowerActionMenu,
+   executePowerAction
+ };
+diff --git a/src/index.js b/src/index.js
+index 5ca30bf..fee63bb 100644
+--- a/src/index.js
++++ b/src/index.js
+@@ -2,7 +2,7 @@ require('dotenv').config();
+ 
+ const TelegramBot = require('node-telegram-bot-api');
+ const { scheduleJob } = require('node-schedule');
+-const { handleInstallDedicatedRDP, handleDedicatedVPSCredentials, showDedicatedOSSelection, handleDedicatedOSSelection, handleDedicatedAuthSelection } = require('./handlers/dedicatedRdpHandler');
++const { handleInstallDedicatedRDP, showManualCredsPrompt, handleDedicatedVPSCredentials, showDedicatedOSSelection, handleDedicatedOSSelection, handleDedicatedAuthSelection } = require('./handlers/dedicatedRdpHandler');
+ const { handleDeposit, handleDepositQris, handleDepositAmount, handlePendingPayment } = require('./handlers/depositHandler');
+ const { handleAddBalance, processAddBalance, handleBroadcast, processBroadcast, handleAtlanticAdmin } = require('./handlers/adminHandler');
+ const cryptoDepositHandler = require('./handlers/cryptoDepositHandler');
+@@ -279,6 +279,16 @@ bot.on('callback_query', async (query) => {
+         else if (data === 'install_dedicated_rdp') {
+             await handleInstallDedicatedRDP(bot, chatId, messageId, sessionManager);
+         }
++        else if (data === 'install_src_manual') {
++            await showManualCredsPrompt(bot, chatId, messageId, sessionManager);
++        }
++        else if (data === 'install_src_api') {
++            await renterHandler.startOpenApiRdp(bot, chatId, messageId, sessionManager);
++        }
++        else if (data.startsWith('open_api_add:')) {
++            const provider = data.split(':')[1] || 'digitalocean';
++            await renterHandler.promptOpenApiAdd(bot, chatId, messageId, sessionManager, provider);
++        }
+         else if (data === 'show_windows_selection') {
+             await showWindowsSelection(bot, chatId, messageId, 0);
+         }
+@@ -1058,8 +1068,12 @@ Set *allowed_ips* = \`0.0.0.0/0\` (atau IP VPS bot) supaya request bot bisa dite
+             await vpsAdmin.showAdminBackupServiceList(bot, chatId, messageId, page);
+         }
+         else if (data === 'vps_admin_power_menu' || data.startsWith('vps_admin_power_menu:')) {
+-            const page = data.includes(':') ? Number(data.split(':')[1] || 0) : 0;
+-            await vpsAdmin.showPowerServiceList(bot, chatId, messageId, page);
++            // Sekarang menampilkan pemilih API dulu (4a).
++            await vpsAdmin.showPowerServiceList(bot, chatId, messageId, 0);
++        }
++        else if (data.startsWith('vps_power_api:')) {
++            const parts = data.split(':');
++            await vpsAdmin.showPowerServiceListForApi(bot, chatId, messageId, parts[1], Number(parts[2] || 0));
+         }
+         else if (data.startsWith('vps_power_pick:')) {
+             const parts = data.split(':');

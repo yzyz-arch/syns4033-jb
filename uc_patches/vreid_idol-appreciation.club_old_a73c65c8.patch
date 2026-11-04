@@ -1,0 +1,28 @@
+From a73c65c8bb578411eac47be05e150425cb4a4438 Mon Sep 17 00:00:00 2001
+From: vreid <vreid@users.noreply.github.com>
+Date: Tue, 13 Oct 2026 03:15:50 +0200
+Subject: [PATCH] deploy: derive managed-DB app password from UpCloud API (tofu
+ state password can diverge from actual user password) (#16)
+
+---
+ .github/workflows/deploy.yml | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/.github/workflows/deploy.yml b/.github/workflows/deploy.yml
+index 127a3a9..5383112 100644
+--- a/.github/workflows/deploy.yml
++++ b/.github/workflows/deploy.yml
+@@ -276,6 +276,13 @@ jobs:
+           fi
+           db="$(tofu output -raw app_database_uri)"
+           test -n "$db" || { echo "app_database_uri missing" >&2; exit 1; }
++          # UpCloud may rotate managed-DB user passwords after the provider
++          # creates them, so trust the API, not tofu state, for the app user's
++          # password. Host/port stay from tofu output.
++          dbuuid="$(curl -sfc -H "Authorization: Bearer $UPCLOUD_API_TOKEN" https://api.upcloud.com/1.3/database | jq -r '([.database_services[]?] // .) | map(select(.name == "idol-canvas-db")) | .[0].uuid')"
++          apppw="$(curl -sfc -H "Authorization: Bearer $UPCLOUD_API_TOKEN" "https://api.upcloud.com/1.3/database/$dbuuid/users" | jq -r '(.users // .)[] | select(.username == "app") | .password')"
++          test -n "$apppw" || { echo "app user password not found via API" >&2; exit 1; }
++          db="$(printf '%s' "$db" | sed -E "s|//[^@]+@|//app:$apppw@|")"
+           # prod registration closed until an admin approves the account
+           kubectl -n idol create secret generic app-env \
+             --from-literal="DATABASE_URL=$db" \

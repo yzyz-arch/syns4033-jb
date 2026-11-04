@@ -1,0 +1,1362 @@
+From 3cf9ffff6887dc417d02d228cfc017c9c14cf60f Mon Sep 17 00:00:00 2001
+From: Kudbee <twd4lifez@gmail.com>
+Date: Tue, 29 Sep 2026 13:45:41 -0500
+Subject: [PATCH] feat(security): whole-dashboard sign-in +
+ backend-authoritative UpCloud exec policy (#286)
+
+* feat(security): whole-dashboard sign-in + backend-authoritative UpCloud exec policy
+
+Part A: sign-in now covers every /api route except health and auth, plus
+the WebSocket upgrade, which is refused before any session exists. Public
+health is trimmed to {status, ready}. The dashboard starts nothing until
+sign-in, and the kudbee CLI signs in and sends the session cookie.
+
+Part B: new thinkbox/remote_exec_policy.py (upcloud-ssh-readonly v1).
+shell:upcloud-ssh:readonly is bound to upcloud-ssh in both directions,
+with an exact-match set of six read-only commands. It is enforced at the
+route (after admission, before any job) and in
+execute_governed_job_command, below the run, resume and reclaim paths.
+
+This closes two gaps. The resume endpoint accepted a caller-supplied
+exec_command without governance. AdmissionGate never checked
+token.capabilities; it now denies with token_capability_not_granted. The
+dashboard token grants only the narrow capability, and jobs record
+non-secret execution_policy metadata.
+
+Live, on local loopback (real backend, web server, headless Chrome,
+worker-02): signed-out routes and the WebSocket got 401; forbidden
+commands got 403 with 0 SSH; the signed-in /remote hostname returned
+"kudbee-hermes-worker-02". Tests: backend security 35/35, web 155/155,
+typecheck 0, all 5 guards mutation-checked. CI not run (GitHub billing
+issue).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+* fix(security): check identity capability before token scope in AdmissionGate
+
+The governance regression (94 modules, 1755 tests) found 2 failures. The
+new token-scope check ran before the identity check, which changed the
+established capability_not_granted reason when a capability is missing
+from both. Identity is now checked first and token scope second, so
+token_capability_not_granted fires only in the case it targets: the
+identity holds the capability but the token does not. The affected set
+re-ran 39/39, and the live backend policy checks were re-run with the
+current code.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+---------
+
+Co-authored-by: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ AGENTS.md                                     | 106 ++++++++++++++-
+ STATUS.md                                     |   6 +-
+ apps/web/cli.ts                               |  85 +++++++++---
+ apps/web/governed-bridge.ts                   |   5 +-
+ apps/web/public/js/app.js                     |  52 ++++++-
+ apps/web/server.ts                            |  25 +++-
+ apps/web/tests/auth.test.ts                   |  77 +++++++++++
+ apps/web/tests/governed-bridge.test.ts        |   4 +-
+ apps/web/tests/server.test.ts                 |  18 ++-
+ backend/api/v1/router.py                      |  13 ++
+ backend/api/v1/run_governed.py                |  13 +-
+ docs/CONTINUITY.md                            |  28 ++++
+ docs/SECURITY_CHECKLIST.md                    |  20 +++
+ tests/e2e/api_run_hermetic.py                 |   4 +-
+ ...st_f141_governed_shell_upcloud_ssh_http.py |   4 +-
+ tests/e2e/test_f142_web_admission_token.py    |   3 +-
+ .../test_f143_governed_exec_policy_http.py    | 128 ++++++++++++++++++
+ tests/unit/test_remote_exec_policy.py         | 105 ++++++++++++++
+ thinkbox/admission.py                         |   6 +
+ thinkbox/governed_job_execution.py            |  10 +-
+ thinkbox/remote_exec_policy.py                |  79 +++++++++++
+ 21 files changed, 749 insertions(+), 42 deletions(-)
+ create mode 100644 tests/e2e/test_f143_governed_exec_policy_http.py
+ create mode 100644 tests/unit/test_remote_exec_policy.py
+ create mode 100644 thinkbox/remote_exec_policy.py
+
+diff --git a/AGENTS.md b/AGENTS.md
+index 4c747468..fc51da04 100644
+--- a/AGENTS.md
++++ b/AGENTS.md
+@@ -516,8 +516,22 @@ Set up UpCloud infrastructure (see skill: `upcloud-setup`):
+ - Configure the backend process with `UPCLOUD_SERVER_IP=209.50.51.174`, `UPCLOUD_SSH_USER=root`, and
+   `UPCLOUD_SSH_KEY_PATH=<path to private key>`. These are the vars `thinkbox/upcloud.py`
+   `UpCloudConfig` already reads. The key path must exist; its contents are never read by Python.
+-- Send `POST /api/v1/run` with `{"goal", "agent_id", "governance_token", "execution_substrate":
+-  "upcloud-ssh", "exec_command": "<bounded command>"}` and header `X-API-Key`.
++- Send `POST /api/v1/run` with `{"goal", "agent_id", "governance_token", "capability":
++  "shell:upcloud-ssh:readonly", "execution_substrate": "upcloud-ssh", "exec_command": "<allowed command>"}`
++  and header `X-API-Key`.
++- **The backend decides what may run** (`thinkbox/remote_exec_policy.py`, policy
++  `upcloud-ssh-readonly` v1, since PR #286).
++  - `upcloud-ssh` **requires** the capability `shell:upcloud-ssh:readonly`, and that capability
++    authorizes **only** `upcloud-ssh`.
++  - The command must exactly equal one of `hostname`, `uname -a`, `uptime`, `whoami`, `df -h /`,
++    `free -m`. Anything else is 403 `execution_policy_denied`.
++  - The same command list is enforced again inside `execute_governed_job_command`, so the
++    run/resume/reclaim paths cannot reach the worker with anything else. (Before #286 the resume
++    endpoint took a caller-supplied `exec_command` with no governance check.)
++  - `AdmissionGate` now requires the requested capability to be in the **token's** capabilities, not
++    just the identity's (`token_capability_not_granted`).
++  - Jobs record non-secret `execution_policy` metadata: id, version, capability, substrate, and a
++    command fingerprint.
+ - Poll `GET /api/v1/run/job/{engine_id}/status`. Read the receipt at
+   `GET /api/v1/run/receipt/{receipt_id}`.
+ - If the vars are missing, the job **fails** with `remote_not_configured`. There is never a local
+@@ -526,14 +540,24 @@ Set up UpCloud infrastructure (see skill: `upcloud-setup`):
+   failure.
+ - Governance tokens for out-of-process clients: `POST /api/v1/run/admission-token` (API-key
+   authenticated). It returns a 300-second token for a **fixed server-side identity**
+-  (`THINKBOX_WEB_AGENT_ID`, default `web-dashboard-agent`) with capability `goal:execute` only. A caller
++  (`THINKBOX_WEB_AGENT_ID`, default `web-dashboard-agent`) with capability `shell:upcloud-ssh:readonly`
++  only (`goal:execute` before #286). A caller
+   cannot choose the agent, capability, or TTL. (Added 2026-09-29; before that, tokens were in-process only.)
+ - The dashboard bridge (`apps/web/governed-bridge.ts`) calls that endpoint server-side. The browser never
+   sees the API key or the token. The bridge fixes `execution_substrate` to `upcloud-ssh` and forwards
+   only an exact-match read-only allow-list (`hostname`, `uname -a`, `uptime`, `whoami`, `df -h /`,
+   `free -m`). The web process needs `THINKBOX_BACKEND_URL` (default `http://127.0.0.1:8000`) and
+   `THINKBOX_API_KEY`. Dashboard usage: `/remote hostname`.
+-- **Dashboard sign-in is required for `/api/governed/run` (and its status route)** (`apps/web/auth.ts`, 2026-09-29).
++- **Dashboard sign-in is required for the whole dashboard** (`apps/web/auth.ts`; governed routes since
++  #285, everything since #286). Route boundary:
++  - **PUBLIC:** static page assets; `GET /api/health`, which returns only `{status, ready}` unless signed in;
++    and `/api/auth/login|logout|me`.
++  - **AUTHENTICATED:** every other `/api/*` route (an exact-match public list; anything else, including
++    case variants, needs a session) and the WebSocket upgrade, which is refused with 401 before any
++    session is created.
++  - **INTERNAL:** none.
++  - The `kudbee` CLI signs in too, using `KUDBEE_DASHBOARD_PASSWORD` or a hidden prompt, and sends the
++    session cookie.
+   - Configure the web process with `KUDBEE_DASHBOARD_USER` (default `admin`) and
+     `KUDBEE_DASHBOARD_PASSWORD_HASH`. Make the hash with
+     `printf '%s' "$PW" | node --experimental-strip-types scripts/hash-password.ts` (scrypt; minimum 12
+@@ -2271,6 +2295,80 @@ Dashboard CLI: `/help`, `/algo`, `/memory`, `/remember`, `/promote`, `/metrics`,
+ - **Next:** put the whole dashboard (WebSocket + all `/api/*`) behind the same sign-in, so only the
+   health endpoint stays public.
+ 
++### 2026-09-29 — PR #286: whole-dashboard sign-in + backend-authoritative UpCloud execution policy
++
++- **Findings, before this change:**
++  - Only the governed routes required sign-in. The rest of the dashboard (~38 `/api` routes and the
++    WebSocket: agent runs, files, memory, stats) was open. `/api/health` exposed session counts, memory
++    and versions.
++  - The only UpCloud command allow-list lived in `apps/web`.
++  - **`AdmissionGate` never checked `token.capabilities`**, only the identity's capabilities.
++  - **The resume endpoint accepted a caller-supplied `exec_command` with no governance check.** It could
++    have run anything on worker-02 for a queued `upcloud-ssh` job.
++- **Part A (web):**
++  - `/api` gate with an exact-match public set; WebSocket `verifyClient` (401 when signed out, 503 when
++    unconfigured); trimmed public health.
++  - The dashboard waits for sign-in before any API call or WebSocket. The required-sign-in dialog can't
++    be dismissed. Reconnects re-check the session, and logout reloads to the sign-in gate.
++  - The `kudbee` CLI signs in and sends the cookie on fetch and the WebSocket.
++  - #285's properties are unchanged.
++- **Part B (backend):**
++  - New `thinkbox/remote_exec_policy.py`: capability `shell:upcloud-ssh:readonly` ↔ substrate
++    `upcloud-ssh` in both directions, plus the exact-match six-command list.
++  - Enforced three ways:
++    - at the route, after admission and before any job
++    - at the lowest layer, `execute_governed_job_command`, covering run, resume and reclaim
++    - by `AdmissionGate` requiring the capability to be in the token
++  - The dashboard token grants only `shell:upcloud-ssh:readonly`. The bridge sends it, and keeps its
++    allow-list as defense in depth.
++  - Jobs record non-secret `execution_policy` metadata.
++- **Tests:**
++  - `tests/unit/test_remote_exec_policy.py` + `tests/e2e/test_f143_governed_exec_policy_http.py`: 15
++    (six allowed commands; 36 forbidden strings; capability↔substrate matrix; token scope/agent; resume
++    bypass closed; zero SSH calls on any denial). f141/f142 updated to the new capability; 35/35 across
++    the backend security set.
++  - `apps/web/tests/auth.test.ts`: 15 (36 protected routes → 401; WebSocket 401 with no data; public
++    surface; signed-in API/WebSocket/detailed health; logout revokes the WebSocket; unconfigured → 503).
++    `server.test.ts` now signs in (11/11).
++  - Web suite 155/155; typecheck 0 errors.
++  - Mutation checks: removing each of the 5 new guards (`/api` gate, WebSocket auth, token-capability
++    check, lowest-layer command check, route policy check) makes tests fail.
++  - Governance regression (94 modules touching admission/tokens/governed/lifecycle): **1755 tests, 2
++    failures**, both from ordering. My token check ran before the identity check, which changed the
++    established reason `capability_not_granted` when a capability is missing from both. Fixed by
++    checking the identity first and the token scope second, so `token_capability_not_granted` now fires
++    only when the identity holds the capability but the token doesn't. Both tests pass, and the
++    affected set re-ran 39/39.
++  - CI not run (GitHub billing issue).
++- **LIVE (local loopback; real uvicorn backend, real web server, real headless Chrome, real worker-02):**
++  - Signed-out HTTP: 5 dashboard routes, the governed route and the WebSocket upgrade → 401. Health →
++    `{"status":"ok","ready":true}`.
++  - Backend with a real dashboard token:
++    - `hostname; id`, `rm -rf /`, `$(id)` → 403 `command_not_allowed`
++    - the capability on `local` → `capability_substrate_mismatch`
++    - `goal:execute` + `upcloud-ssh` → `capability_not_granted` (re-run after the admission-check
++      reorder described below)
++    - 0 worker artifacts produced by these requests
++  - Browser: signed out, the page made only `GET /api/auth/me`; the dialog was open, its cancel hidden,
++    and Escape was blocked. After sign-in: WebSocket plus the dashboard APIs, all 200. `/remote hostname`
++    ran job `engine_4d534c3d` (`tb_rcpt_20260929182814_c98cce42`): completed, exit 0, verified,
++    checkpoint `chk_5cd4a709944a`, capability `shell:upcloud-ssh:readonly`, `execution_policy`
++    `upcloud-ssh-readonly` v1, fingerprint `7063dece7cccf374`. The artifact shows `209.50.51.174` →
++    `kudbee-hermes-worker-02`, 0.89s. `/logout` reloaded to the sign-in gate.
++  - 0 console errors. Backend totals: 5×403, 1×200. No secret strings in the job record.
++- **Four-state:**
++  - whole-dashboard auth: CODE COMPLETE / TEST VERIFIED / LIVE VERIFIED (local browser)
++  - backend execution policy + admission fix: CODE COMPLETE / TEST VERIFIED / LIVE VERIFIED (real backend
++    HTTP, real worker-02)
++  - PRODUCTION READY: **NO**
++- **Limits:**
++  - in-memory sessions, single user, no HTTPS, not deployed
++  - worker host key not pinned (`accept-new`)
++  - the resume endpoint still has no *capability* check, only the command check
++- **Next:** give the resume/reclaim endpoints the same governance admission as `POST /api/v1/run`,
++  including the capability↔substrate binding, so every path into execution is admitted, not only
++  command-filtered.
++
+ ### Open items / debt (be honest here)
+ 
+ - `cli.ts` has no automated tests (its paths are exercised manually and through
+diff --git a/STATUS.md b/STATUS.md
+index 883f8862..b43af56b 100644
+--- a/STATUS.md
++++ b/STATUS.md
+@@ -1,4 +1,4 @@
+-## CURRENT (2026-09-29) — UpCloud governed execution + dashboard sign-in (PRs #280–#285)
++## CURRENT (2026-09-29) — UpCloud governed execution + dashboard sign-in (PRs #280–#286)
+ 
+ The only authorized UpCloud server is worker-02: `00e300f7-4fc9-49cf-af9b-b11c79f76853`, `209.50.51.174`, account `kudbeex`.
+ 
+@@ -9,8 +9,10 @@ The only authorized UpCloud server is worker-02: `00e300f7-4fc9-49cf-af9b-b11c79
+ | `upcloud-ssh` substrate → worker-02 (#282) | yes | yes | yes | no |
+ | Dashboard bridge + backend admission-token (#284) | yes | yes | yes (browser → web → backend HTTP → worker-02) | no |
+ | Dashboard sign-in in front of `/api/governed/run` (#285) | yes | yes | yes (local browser, real worker-02) | no |
++| Whole-dashboard sign-in (all `/api/*` + WebSocket) + CLI sign-in (#286) | yes | yes | yes (local browser) | no |
++| Backend execution policy `shell:upcloud-ssh:readonly` + token-capability admission fix (#286) | yes | yes | yes (real backend HTTP, real worker-02) | no |
+ 
+-- **Not production ready:** everything was verified locally over loopback. Nothing is deployed, sessions are in-memory, there is a single dashboard user, and there has been no founder review.
++- **Not production ready:** everything was verified locally over loopback. Nothing is deployed, sessions are in-memory, there is a single dashboard user, there is no HTTPS, the worker host key is not pinned, resume/reclaim have no capability check (only the command check), and there has been no founder review.
+ - **CI:** not run (GitHub billing issue). Nothing is claimed CI-green.
+ - **Open founder decisions:** delete the orphan server `00068975`? keep or delete worker-01 (account `kudbee`)? add an SSH-only firewall on worker-02?
+ - **Detail:** `docs/CONTINUITY.md` (2026-09-29 entries) and the AGENTS.md Work Log.
+diff --git a/apps/web/cli.ts b/apps/web/cli.ts
+index 13275fee..929fa483 100644
+--- a/apps/web/cli.ts
++++ b/apps/web/cli.ts
+@@ -110,7 +110,7 @@ class Client {
+ 
+   connect(): Promise<void> {
+     return new Promise((resolve, reject) => {
+-      this.ws = new WebSocket(WS_URL);
++      this.ws = new WebSocket(WS_URL, { headers: authCookie ? { Cookie: authCookie } : {} });
+       this.ws.on('error', reject);
+       this.ws.on('message', (raw) => {
+         const msg = JSON.parse(raw.toString()) as Msg;
+@@ -162,7 +162,7 @@ class Client {
+   }
+ 
+   async files(quiet = false): Promise<void> {
+-    const res = await fetch(`${HOST}/api/sessions/${this.sessionId}/files`);
++    const res = await apiFetch(`${HOST}/api/sessions/${this.sessionId}/files`);
+     const { files } = (await res.json()) as { files: Array<{ path: string; size: number }> };
+     if (!files.length) {
+       if (!quiet) console.log(c.dim('  (workspace empty)'));
+@@ -174,7 +174,7 @@ class Client {
+   }
+ 
+   async cat(file: string): Promise<void> {
+-    const res = await fetch(`${HOST}/api/sessions/${this.sessionId}/files/content?path=${encodeURIComponent(file)}`);
++    const res = await apiFetch(`${HOST}/api/sessions/${this.sessionId}/files/content?path=${encodeURIComponent(file)}`);
+     const body = (await res.json()) as { content?: string; error?: string };
+     console.log(body.content ?? c.red(body.error ?? 'error'));
+   }
+@@ -186,7 +186,7 @@ function printApproval(req: ApprovalRequest): void {
+ }
+ 
+ async function showRuns(): Promise<void> {
+-  const { runs } = (await (await fetch(`${HOST}/api/runs?limit=15`)).json()) as { runs: any[] };
++  const { runs } = (await (await apiFetch(`${HOST}/api/runs?limit=15`)).json()) as { runs: any[] };
+   if (!runs.length) return console.log(c.dim('  (no runs yet)'));
+   for (const r of runs) {
+     const color = r.status === 'completed' ? c.green : r.status === 'running' ? c.cyan : r.status === 'stopped' ? c.yellow : c.red;
+@@ -195,10 +195,10 @@ async function showRuns(): Promise<void> {
+ }
+ 
+ async function showRun(prefix: string): Promise<void> {
+-  const { runs } = (await (await fetch(`${HOST}/api/runs?limit=500`)).json()) as { runs: any[] };
++  const { runs } = (await (await apiFetch(`${HOST}/api/runs?limit=500`)).json()) as { runs: any[] };
+   const match = prefix && runs.find((r) => r.id.startsWith(prefix));
+   if (!match) return console.log(c.red('Usage: /run ID (first characters from /runs)'));
+-  const run = (await (await fetch(`${HOST}/api/runs/${match.id}`)).json()) as any;
++  const run = (await (await apiFetch(`${HOST}/api/runs/${match.id}`)).json()) as any;
+   console.log(c.bold(run.goal));
+   console.log(c.dim(`  ${run.status} · ${run.model} · ${run.current_step} steps · ${run.tool_calls} tools · ${run.prompt_tokens + run.completion_tokens} tokens · ${usd(run.cost_usd)} · ${((run.duration_ms ?? 0) / 1000).toFixed(1)}s`));
+   for (const step of run.steps) {
+@@ -364,7 +364,7 @@ async function handleCommand(client: Client, line: string, sessionId: string): P
+       }
+       break;
+     case '/agents': {
+-      const res = await fetch(`${HOST}/api/agents`);
++      const res = await apiFetch(`${HOST}/api/agents`);
+       const { agents } = (await res.json()) as { agents: Array<{ id: string; name: string; description: string; allowedTools: string[] }> };
+       console.log(c.bold('\n  Worker agent (default)') + c.dim(' — full tool access'));
+       for (const a of agents) {
+@@ -381,7 +381,7 @@ async function handleCommand(client: Client, line: string, sessionId: string): P
+         client.agent = undefined;
+         console.log(c.green('🤖 Agent → default worker (full tools)'));
+       } else {
+-        const res = await fetch(`${HOST}/api/agents`);
++        const res = await apiFetch(`${HOST}/api/agents`);
+         const { agents } = (await res.json()) as { agents: Array<{ id: string; name: string }> };
+         const match = agents.find((a) => a.id === args[0].toLowerCase());
+         if (!match) {
+@@ -402,7 +402,7 @@ async function handleCommand(client: Client, line: string, sessionId: string): P
+       await client.cat(args.join(' '));
+       break;
+     case '/status':
+-      console.log(await (await fetch(`${HOST}/api/health`)).json());
++      console.log(await (await apiFetch(`${HOST}/api/health`)).json());
+       break;
+     case '/runs':
+       await showRuns();
+@@ -410,7 +410,7 @@ async function handleCommand(client: Client, line: string, sessionId: string): P
+     case '/memory': {
+       const query = args.join(' ').trim();
+       const params = new URLSearchParams({ limit: '10', ...(query ? { q: query } : {}) });
+-      const { items, backend } = (await (await fetch(`${HOST}/api/memory?${params}`)).json()) as { items: any[]; backend: string };
++      const { items, backend } = (await (await apiFetch(`${HOST}/api/memory?${params}`)).json()) as { items: any[]; backend: string };
+       if (!items.length) console.log(c.dim(`  (no memories${query ? ` match "${query}"` : ''})`));
+       if (query && items.length) console.log(c.dim(`  search backend: ${backend}`));
+       const color: Record<string, (s: string) => string> = { verified: c.green, org: c.yellow, task: c.cyan };
+@@ -426,7 +426,7 @@ async function handleCommand(client: Client, line: string, sessionId: string): P
+       if (layer && ['session', 'task', 'org', 'verified'].includes(layer)) {
+         params.set('layer', layer);
+       }
+-      const res = await fetch(`${HOST}/api/memory/notes?${params}`);
++      const res = await apiFetch(`${HOST}/api/memory/notes?${params}`);
+       const data = (await res.json()) as any;
+       if (!res.ok || !data.notes?.length) {
+         console.log(c.dim(`  (no notes${layer ? ` in ${layer}` : ''})`));
+@@ -448,7 +448,7 @@ async function handleCommand(client: Client, line: string, sessionId: string): P
+       }
+       const [title, ...rest] = text.split(/\s+[-—:]\s+/);
+       const layer = args.includes('--org') ? 'org' : args.includes('--task') ? 'task' : 'session';
+-      const res = await fetch(`${HOST}/api/memory/notes?sessionId=${encodeURIComponent(sessionId)}`, {
++      const res = await apiFetch(`${HOST}/api/memory/notes?sessionId=${encodeURIComponent(sessionId)}`, {
+         method: 'POST',
+         headers: { 'Content-Type': 'application/json' },
+         body: JSON.stringify({
+@@ -468,7 +468,7 @@ async function handleCommand(client: Client, line: string, sessionId: string): P
+         console.log(c.red('Usage: /forget ID|QUERY'));
+         break;
+       }
+-      const res = await fetch(`${HOST}/api/memory/notes/${encodeURIComponent(query)}?sessionId=${encodeURIComponent(sessionId)}`, { method: 'DELETE' });
++      const res = await apiFetch(`${HOST}/api/memory/notes/${encodeURIComponent(query)}?sessionId=${encodeURIComponent(sessionId)}`, { method: 'DELETE' });
+       const result = (await res.json()) as any;
+       console.log(res.ok ? c.green(`  ✓ deleted: ${result.deleted ?? 'note'}`) : c.red(`  ✗ ${result.error}`));
+       break;
+@@ -482,14 +482,14 @@ async function handleCommand(client: Client, line: string, sessionId: string): P
+       if (target && target !== network) {
+         params.set(['account', 'account_transactions'].includes(resolved) ? 'address' : resolved === 'transaction' ? 'txid' : 'id', target);
+       }
+-      const res = await fetch(`${HOST}/api/algorand?${params}`);
++      const res = await apiFetch(`${HOST}/api/algorand?${params}`);
+       const body = (await res.json()) as Record<string, unknown>;
+       console.log(res.ok ? JSON.stringify(body, null, 2) : c.red(`  ${body.error}`));
+       break;
+     }
+     case '/promote': {
+       const id = args[0]?.startsWith('org/') ? args[0] : `org/${args[0] ?? ''}`;
+-      const res = await fetch(`${HOST}/api/memory/promote`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
++      const res = await apiFetch(`${HOST}/api/memory/promote`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
+       const item = (await res.json()) as any;
+       console.log(res.ok ? c.green(`  promoted → ${item.id}`) : c.red(`  ${item.error}`));
+       break;
+@@ -498,7 +498,7 @@ async function handleCommand(client: Client, line: string, sessionId: string): P
+       await showRun(args[0] ?? '');
+       break;
+     case '/metrics': {
+-      const m = (await (await fetch(`${HOST}/api/stats`)).json()) as any;
++      const m = (await (await apiFetch(`${HOST}/api/stats`)).json()) as any;
+       console.log(`  Runs ${m.runs_today} today / ${m.runs_total} total · success ${m.success_rate ?? '—'}% · p50 ${(m.p50_ms / 1000).toFixed(1)}s · p95 ${(m.p95_ms / 1000).toFixed(1)}s`);
+       console.log(`  Tokens today ${m.tokens_today} · cost today ${usd(m.cost_today_usd)} · all-time ${usd(m.cost_total_usd)}${m.budget_usd ? ` · budget ${usd(m.budget_usd)}` : ''}`);
+       for (const [name, t] of Object.entries(m.tools as Record<string, any>)) {
+@@ -716,8 +716,61 @@ function selectModelForGoal(goal: string, client: Client): RouteTelemtry {
+   return telemetry;
+ }
+ 
++// ─── Dashboard sign-in ───
++// The server requires a signed-in session for every /api route except health/auth and for the WebSocket.
++// The CLI signs in like the browser does: the password comes from KUDBEE_DASHBOARD_PASSWORD or a hidden
++// prompt, and only the opaque session cookie is kept (in memory, for this process).
++let authCookie = '';
++
++function apiFetch(url: string, init: RequestInit = {}): Promise<globalThis.Response> {
++  return fetch(url, { ...init, headers: { ...(init.headers as Record<string, string> | undefined), ...(authCookie ? { Cookie: authCookie } : {}) } });
++}
++
++function promptHidden(question: string): Promise<string> {
++  if (!process.stdin.isTTY) return Promise.reject(new Error('no TTY for password prompt; set KUDBEE_DASHBOARD_PASSWORD'));
++  return new Promise((resolve) => {
++    const rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: true });
++    (rl as unknown as { _writeToOutput: (s: string) => void })._writeToOutput = (s: string) => {
++      if (s.startsWith(question)) process.stdout.write(s);
++    };
++    rl.question(question, (answer) => {
++      rl.close();
++      process.stdout.write('\n');
++      resolve(answer);
++    });
++  });
++}
++
++async function signIn(): Promise<void> {
++  const base = HOST;
++  const meRes = await fetch(base + '/api/auth/me');
++  if (!meRes.ok) {
++    console.error(c.red(`The server at ${base} does not support dashboard sign-in (GET /api/auth/me → ${meRes.status}); restart it on the current version.`));
++    process.exit(1);
++  }
++  const me = (await meRes.json()) as { configured: boolean };
++  if (!me.configured) {
++    console.error(c.red('Dashboard sign-in is not configured on the server: set KUDBEE_DASHBOARD_PASSWORD_HASH (see AGENTS.md).'));
++    process.exit(1);
++  }
++  const username = process.env.KUDBEE_DASHBOARD_USER || 'admin';
++  const password = process.env.KUDBEE_DASHBOARD_PASSWORD || (await promptHidden(`Password for ${username}: `));
++  const res = await fetch(base + '/api/auth/login', {
++    method: 'POST',
++    headers: { 'Content-Type': 'application/json', 'X-Kudbee-Client': 'dashboard' },
++    body: JSON.stringify({ username, password }),
++  });
++  if (!res.ok) {
++    const body = (await res.json().catch(() => ({}))) as { error?: string };
++    console.error(c.red(`Sign-in failed (${res.status}): ${body.error || 'error'}`));
++    process.exit(1);
++  }
++  authCookie = (res.headers.get('set-cookie') || '').split(';')[0];
++}
++
+ async function main(): Promise<void> {
+   await ensureServer();
++  await signIn();
+   const client = new Client();
+   await client.connect();
+ 
+diff --git a/apps/web/governed-bridge.ts b/apps/web/governed-bridge.ts
+index 0b780935..1591f385 100644
+--- a/apps/web/governed-bridge.ts
++++ b/apps/web/governed-bridge.ts
+@@ -5,10 +5,12 @@
+ import type { Request, Response } from 'express';
+ 
+ export const GOVERNED_SUBSTRATE = 'upcloud-ssh';
++export const GOVERNED_CAPABILITY = 'shell:upcloud-ssh:readonly';
+ export const CLIENT_HEADER = 'x-kudbee-client';
+ export const CLIENT_HEADER_VALUE = 'dashboard';
+ 
+-// Exact-match, read-only. Anything else is rejected before it leaves this process.
++// Defense in depth only: the backend (thinkbox/remote_exec_policy.py) is the authoritative policy and
++// enforces the same exact-match list. Anything else is rejected here before it leaves this process.
+ export const ALLOWED_REMOTE_COMMANDS: readonly string[] = ['hostname', 'uname -a', 'uptime', 'whoami', 'df -h /', 'free -m'];
+ 
+ export interface BridgeConfig {
+@@ -71,6 +73,7 @@ export function submitGovernedRun(cfg: BridgeConfig) {
+           goal: `dashboard remote exec: ${command}`,
+           agent_id: adm.json.agent_id,
+           governance_token: adm.json.governance_token,
++          capability: GOVERNED_CAPABILITY,
+           execution_substrate: GOVERNED_SUBSTRATE,
+           exec_command: command,
+         },
+diff --git a/apps/web/public/js/app.js b/apps/web/public/js/app.js
+index bcc1ec9a..6b61bf58 100644
+--- a/apps/web/public/js/app.js
++++ b/apps/web/public/js/app.js
+@@ -58,7 +58,15 @@ function connectWebSocket() {
+     document.getElementById('header-connection').innerHTML = '<span class="connection-dot offline"></span> Reconnecting';
+     setStatus('error', 'Disconnected');
+     appendTerminalMessage('system', 'Disconnected — retrying in 3s...');
+-    setTimeout(connectWebSocket, 3000);
++    setTimeout(async () => {
++      const me = await authStatus();
++      if (me.authenticated) {
++        connectWebSocket();
++      } else {
++        appendTerminalMessage('system', '🔒 Session ended — sign in again.');
++        openLoginDialog(true);
++      }
++    }, 3000);
+   };
+ }
+ 
+@@ -1012,6 +1020,7 @@ async function runSlashCommand(command) {
+     case '/logout': {
+       await fetch('/api/auth/logout', { method: 'POST', headers: { 'X-Kudbee-Client': 'dashboard' } });
+       appendTerminalMessage('system', '🔓 Signed out.');
++      window.location.reload();
+       return true;
+     }
+ 
+@@ -1704,7 +1713,35 @@ function escapeHtml(text) {
+ }
+ 
+ // ─── Event Listeners ───────────────────────────────────────────
+-document.addEventListener('DOMContentLoaded', () => {
++let dashboardStarted = false;
++
++async function authStatus() {
++  try {
++    return await (await fetch('/api/auth/me', { cache: 'no-store' })).json();
++  } catch {
++    return { configured: false, authenticated: false, user: null };
++  }
++}
++
++// Every /api route except health/auth and the WebSocket require a signed-in session, so nothing
++// starts until the user has signed in.
++document.addEventListener('DOMContentLoaded', async () => {
++  const me = await authStatus();
++  if (me.authenticated) {
++    startDashboard();
++    return;
++  }
++  if (!me.configured) {
++    appendTerminalMessage('error', 'Dashboard sign-in is not configured on this server (KUDBEE_DASHBOARD_PASSWORD_HASH). The dashboard is disabled.');
++    return;
++  }
++  appendTerminalMessage('system', '🔒 Sign in to use the dashboard.');
++  openLoginDialog(true);
++});
++
++function startDashboard() {
++  if (dashboardStarted) return;
++  dashboardStarted = true;
+   connectWebSocket();
+ 
+   document.getElementById('run-goal').addEventListener('click', runGoal);
+@@ -1937,11 +1974,13 @@ document.addEventListener('DOMContentLoaded', () => {
+   // Load models periodically
+   setInterval(loadModels, 10000);
+   setTimeout(loadModels, 1000);
+-});
++}
+ 
+ 
+-function openLoginDialog() {
++function openLoginDialog(required = false) {
+   const dialog = document.getElementById('login-dialog');
++  document.getElementById('login-cancel').hidden = required;
++  dialog.dataset.required = required ? '1' : '';
+   const form = document.getElementById('login-form');
+   const error = document.getElementById('login-error');
+   error.textContent = '';
+@@ -1950,6 +1989,9 @@ function openLoginDialog() {
+   document.getElementById('login-username').focus();
+ }
+ 
++document.getElementById('login-dialog')?.addEventListener('cancel', (event) => {
++  if (event.currentTarget.dataset.required) event.preventDefault();
++});
+ document.getElementById('login-cancel')?.addEventListener('click', () => document.getElementById('login-dialog').close());
+ document.getElementById('login-form')?.addEventListener('submit', async (event) => {
+   event.preventDefault();
+@@ -1970,6 +2012,8 @@ document.getElementById('login-form')?.addEventListener('submit', async (event)
+     }
+     document.getElementById('login-dialog').close();
+     appendTerminalMessage('system', `🔐 Signed in as ${body.user}`);
++    if (!dashboardStarted) startDashboard();
++    else if (!state.ws || state.ws.readyState !== WebSocket.OPEN) connectWebSocket();
+   } catch (err) {
+     error.textContent = err instanceof Error ? err.message : String(err);
+   }
+diff --git a/apps/web/server.ts b/apps/web/server.ts
+index f857317e..be91d4b9 100644
+--- a/apps/web/server.ts
++++ b/apps/web/server.ts
+@@ -48,7 +48,20 @@ for (const envPath of [path.join(__dirname, '.env'), path.resolve(__dirname, '..
+ 
+ const app = express();
+ const server = createServer(app);
+-const wss = new WebSocketServer({ server });
++// Dashboard sign-in (auth.ts). Route boundary (see AGENTS.md "Dashboard route boundary"):
++//   PUBLIC: static page assets, GET /api/health (trimmed unless signed in), /api/auth/{login,logout,me}
++//   AUTHENTICATED: every other /api/* route and the WebSocket upgrade. There are no INTERNAL routes.
++const dashboardAuth = new DashboardAuth(authConfigFromEnv());
++const PUBLIC_API_PATHS = new Set(['/health', '/auth/login', '/auth/logout', '/auth/me']);
++const wss = new WebSocketServer({
++  server,
++  // Reject the upgrade itself: an unauthenticated client never gets a session, init data, or a socket.
++  verifyClient: ({ req }, done) => {
++    if (!dashboardAuth.configured) return done(false, 503, 'dashboard authentication not configured');
++    if (!dashboardAuth.current(req as unknown as Request)) return done(false, 401, 'authentication required');
++    done(true);
++  },
++});
+ const ollamaBaseUrl = process.env.OLLAMA_BASE_URL || 'http://127.0.0.1:11434';
+ const janusBaseUrl = process.env.JANUS_BASE_URL || 'http://127.0.0.1:8001';
+ // Cheap local route default (Feature 5 token-aware routing). 'smollm2' is accepted
+@@ -62,6 +75,11 @@ const imageUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize
+ 
+ app.use(express.json());
+ app.use(express.static(path.join(__dirname, 'public')));
++app.use('/api', (req: Request, res: Response, next) => {
++  // Exact match on the mount-relative path; anything else (including case/trailing-slash variants) needs a session.
++  if (PUBLIC_API_PATHS.has(req.path)) return next();
++  return dashboardAuth.require(req, res, next);
++});
+ 
+ // ─── In-memory state ───────────────────────────────────────────
+ const sessions = new Map<string, AgentSession>();
+@@ -1163,7 +1181,9 @@ async function monitorEndpoint(name: string, url: string, headers: Record<string
+   }
+ }
+ 
+-app.get('/api/health', (_req: Request, res: Response) => {
++app.get('/api/health', (req: Request, res: Response) => {
++  // Public readiness probe. Operational detail (sessions, memory, versions) only for signed-in callers.
++  if (!dashboardAuth.current(req)) return res.json({ status: 'ok', ready: true });
+   const sdkConfig = loadConfigFromEnv();
+   const memory = process.memoryUsage();
+   res.json({
+@@ -1564,7 +1584,6 @@ app.post('/api/sessions/:id/run', async (req: Request, res: Response) => {
+ // Governed remote execution (dashboard → backend → upcloud-ssh). See governed-bridge.ts.
+ // Dashboard user authentication (auth.ts) is an extra boundary in front of the bridge's own controls.
+ const governedBridge = bridgeConfigFromEnv();
+-const dashboardAuth = new DashboardAuth(authConfigFromEnv());
+ app.post('/api/auth/login', dashboardAuth.login);
+ app.post('/api/auth/logout', dashboardAuth.logout);
+ app.get('/api/auth/me', dashboardAuth.me);
+diff --git a/apps/web/tests/auth.test.ts b/apps/web/tests/auth.test.ts
+index 2b25b7ff..5b4def86 100644
+--- a/apps/web/tests/auth.test.ts
++++ b/apps/web/tests/auth.test.ts
+@@ -176,3 +176,80 @@ test('missing backend API key still fails closed behind auth (503)', async () =>
+     assert.equal(r.status, 503);
+   } finally { web.proc.kill(); }
+ });
++
++// ---------- full dashboard boundary (PR #286) ----------
++import { WebSocket as WsClient } from 'ws';
++
++const PROTECTED: Array<[string, string, unknown?]> = [
++  ['GET', '/api/stats'], ['GET', '/api/stats/tokens'], ['GET', '/api/monitor'], ['GET', '/api/middleware/test'],
++  ['GET', '/api/runs'], ['GET', '/api/runs/history'], ['GET', '/api/runs/x'], ['GET', '/api/agents'], ['GET', '/api/models'],
++  ['GET', '/api/algorand?action=status'], ['GET', '/api/sdk/capabilities'], ['GET', '/api/sdk/version'], ['GET', '/api/sdk/sessions'], ['GET', '/api/sdk/tasks'],
++  ['GET', '/api/memory'], ['GET', '/api/memory/status'], ['GET', '/api/memory/item?id=x'], ['POST', '/api/memory', { title: 't', content: 'c', evidence: 'e' }],
++  ['POST', '/api/memory/promote', { id: 'x' }], ['DELETE', '/api/memory/item?id=x'], ['GET', '/api/memory/notes'], ['POST', '/api/memory/notes', { content: 'x' }], ['DELETE', '/api/memory/notes/x'],
++  ['GET', '/api/sessions/abc/files'], ['GET', '/api/sessions/abc/files/content?path=a'], ['GET', '/api/sessions/abc/files/raw?path=a'], ['POST', '/api/sessions/abc/files'], ['DELETE', '/api/sessions/abc/files'],
++  ['POST', '/api/sessions/abc/run', { goal: 'x' }], ['POST', '/api/sessions/abc/stop'], ['POST', '/api/sessions/abc/images/generate', { prompt: 'x' }],
++  ['POST', '/api/governed/run', { command: 'hostname' }], ['GET', '/api/governed/run/engine_abc'],
++  ['GET', '/API/STATS'], ['GET', '/api/health/'], ['GET', '/api/nonexistent'],
++];
++
++function wsStatus(url: string, headers: Record<string, string> = {}): Promise<{ status: number; firstMessage: string | null }> {
++  return new Promise((resolve) => {
++    const ws = new WsClient(url.replace('http', 'ws') + '/ws', { headers });
++    ws.on('unexpected-response', (_req, res) => resolve({ status: res.statusCode ?? 0, firstMessage: null }));
++    ws.on('message', (raw) => { resolve({ status: 101, firstMessage: raw.toString().slice(0, 40) }); ws.close(); });
++    ws.on('error', () => resolve({ status: -1, firstMessage: null }));
++  });
++}
++
++test('unauthenticated: every protected /api route is rejected with 401', async () => {
++  for (const [method, url, body] of PROTECTED) {
++    const r = await fetch(`${base}${url}`, { method, headers: H, body: body === undefined ? undefined : JSON.stringify(body) });
++    assert.equal(r.status, 401, `${method} ${url}`);
++  }
++});
++
++test('unauthenticated WebSocket upgrade is refused before any session or data', async () => {
++  const r = await wsStatus(base);
++  assert.equal(r.status, 401);
++  assert.equal(r.firstMessage, null);
++  assert.equal((await wsStatus(base, { Cookie: 'kudbee_sid=forged' })).status, 401);
++});
++
++test('public surface: page, health (trimmed), auth endpoints', async () => {
++  const page = await fetch(`${base}/`);
++  assert.equal(page.status, 200);
++  assert.match(await page.text(), /login-dialog/);
++  const h: any = await (await fetch(`${base}/api/health`)).json();
++  assert.deepEqual(h, { status: 'ok', ready: true }, 'no operational detail without a session');
++  assert.equal((await fetch(`${base}/api/auth/me`)).status, 200);
++});
++
++test('authenticated: API, WebSocket and detailed health work with a session', async () => {
++  // Fresh server: the lockout test above deliberately locked this client address out of the shared one.
++  const web = await startWeb({ KUDBEE_DASHBOARD_PASSWORD_HASH: HASH, KUDBEE_DASHBOARD_USER: 'operator' });
++  const base = web.url;
++  try {
++  const c = (await fetch(`${base}/api/auth/login`, { method: 'POST', headers: H, body: JSON.stringify({ username: 'operator', password: PASSWORD }) }))
++    .headers.get('set-cookie')!.split(';')[0];
++  for (const url of ['/api/stats', '/api/agents', '/api/memory/status', '/api/runs', '/api/sdk/version']) {
++    assert.equal((await fetch(`${base}${url}`, { headers: { Cookie: c } })).status, 200, url);
++  }
++  const h: any = await (await fetch(`${base}/api/health`, { headers: { Cookie: c } })).json();
++  assert.ok('sessions' in h && 'node_version' in h);
++  const ws = await wsStatus(base, { Cookie: c });
++  assert.equal(ws.status, 101);
++  assert.match(ws.firstMessage ?? '', /"type":"init"/);
++  await fetch(`${base}/api/auth/logout`, { method: 'POST', headers: { ...H, Cookie: c } });
++  assert.equal((await wsStatus(base, { Cookie: c })).status, 401, 'logout revokes WebSocket access');
++  assert.equal((await fetch(`${base}/api/stats`, { headers: { Cookie: c } })).status, 401);
++  } finally { web.proc.kill(); }
++});
++
++test('unconfigured server: whole dashboard API and WebSocket fail closed (503), health stays up', async () => {
++  const web = await startWeb({});
++  try {
++    assert.equal((await fetch(`${web.url}/api/stats`)).status, 503);
++    assert.equal((await fetch(`${web.url}/api/health`)).status, 200);
++    assert.equal((await wsStatus(web.url)).status, 503);
++  } finally { web.proc.kill(); }
++});
+diff --git a/apps/web/tests/governed-bridge.test.ts b/apps/web/tests/governed-bridge.test.ts
+index e0bd41ff..db1b1749 100644
+--- a/apps/web/tests/governed-bridge.test.ts
++++ b/apps/web/tests/governed-bridge.test.ts
+@@ -24,7 +24,7 @@ before(async () => {
+       seen.push({ method: req.method!, url: req.url!, apiKey: req.headers['x-api-key'] as string, body: raw ? JSON.parse(raw) : null });
+       res.setHeader('Content-Type', 'application/json');
+       if (req.url === '/api/v1/run/admission-token') {
+-        return res.end(JSON.stringify({ agent_id: 'web-dashboard-agent', governance_token: 'SECRET-TOKEN', capability: 'goal:execute' }));
++        return res.end(JSON.stringify({ agent_id: 'web-dashboard-agent', governance_token: 'SECRET-TOKEN', capability: 'shell:upcloud-ssh:readonly' }));
+       }
+       if (req.url === '/api/v1/run') {
+         res.statusCode = runStatus;
+@@ -77,7 +77,7 @@ test('client cannot choose substrate, agent, token or capability', async () => {
+   assert.equal(run.execution_substrate, 'upcloud-ssh');
+   assert.equal(run.agent_id, 'web-dashboard-agent');
+   assert.equal(run.governance_token, 'SECRET-TOKEN');
+-  assert.equal(run.capability, undefined);
++  assert.equal(run.capability, 'shell:upcloud-ssh:readonly', 'capability fixed server-side, not client-chosen');
+ });
+ 
+ test('rejects commands outside the allow-list without contacting the backend', async () => {
+diff --git a/apps/web/tests/server.test.ts b/apps/web/tests/server.test.ts
+index 8286ebb0..6d830a4e 100644
+--- a/apps/web/tests/server.test.ts
++++ b/apps/web/tests/server.test.ts
+@@ -9,6 +9,11 @@ import path from 'node:path';
+ import { fileURLToPath } from 'node:url';
+ import { WebSocket } from 'ws';
+ import { startMockInception, say, call, type MockInception } from './helpers/mock-inception.ts';
++import { hashPassword } from '../auth.ts';
++
++// The dashboard now requires sign-in for every /api route except health/auth and for the WebSocket.
++const TEST_PASSWORD = 'server-test-password-123';
++let cookie = '';
+ 
+ const appDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+ const DEAD = 'http://127.0.0.1:9'; // nothing listens here: Ollama, Janus and Upstash are "offline"
+@@ -49,10 +54,19 @@ before(async () => {
+       KUDBEE_DAILY_BUDGET_USD: '0',
+       KUDBEE_DATA_DIR: path.join(tmpRoot, 'data'),
+       KUDBEE_WORKSPACE_DIR: path.join(tmpRoot, 'workspaces'),
++      KUDBEE_DASHBOARD_USER: 'tester',
++      KUDBEE_DASHBOARD_PASSWORD_HASH: hashPassword(TEST_PASSWORD),
+     },
+     stdio: ['ignore', 'pipe', 'pipe'],
+   });
+   await waitForHealth(base);
++  const login = await fetch(`${base}/api/auth/login`, {
++    method: 'POST',
++    headers: { 'Content-Type': 'application/json', 'X-Kudbee-Client': 'dashboard' },
++    body: JSON.stringify({ username: 'tester', password: TEST_PASSWORD }),
++  });
++  assert.equal(login.status, 200, 'test sign-in');
++  cookie = (login.headers.get('set-cookie') || '').split(';')[0];
+ });
+ 
+ after(async () => {
+@@ -69,7 +83,7 @@ interface Client {
+ }
+ 
+ async function connect(): Promise<Client> {
+-  const ws = new WebSocket(`${base.replace('http', 'ws')}/ws`);
++  const ws = new WebSocket(`${base.replace('http', 'ws')}/ws`, { headers: { Cookie: cookie } });
+   const messages: any[] = [];
+   const waiters: Array<{ type: string; resolve: (m: any) => void }> = [];
+   ws.on('message', (raw) => {
+@@ -100,7 +114,7 @@ async function connect(): Promise<Client> {
+ }
+ 
+ const json = async (url: string, init?: RequestInit) => {
+-  const res = await fetch(`${base}${url}`, init);
++  const res = await fetch(`${base}${url}`, { ...init, headers: { ...(init?.headers as Record<string, string> | undefined), Cookie: cookie } });
+   return { status: res.status, body: (await res.json()) as any };
+ };
+ 
+diff --git a/backend/api/v1/router.py b/backend/api/v1/router.py
+index b24e9601..ac713fcb 100644
+--- a/backend/api/v1/router.py
++++ b/backend/api/v1/router.py
+@@ -158,6 +158,19 @@ async def run_goal(
+     )
+     admission_decision = require_http_admission(admission_ctx)
+ 
++    from thinkbox.remote_exec_policy import evaluate as evaluate_exec_policy
++
++    policy = evaluate_exec_policy(
++        capability=admission_ctx.capability,
++        execution_substrate=request.execution_substrate or "",
++        exec_command=request.exec_command or "",
++    )
++    if not policy.allowed:
++        raise HTTPException(
++            status_code=403,
++            detail={"error": "execution_policy_denied", "reason": policy.reason, "capability": admission_ctx.capability},
++        )
++
+     model_config = ModelConfig()
+     if request.model:
+         model_config.model = request.model
+diff --git a/backend/api/v1/run_governed.py b/backend/api/v1/run_governed.py
+index 9ad2e9f1..daf64169 100644
+--- a/backend/api/v1/run_governed.py
++++ b/backend/api/v1/run_governed.py
+@@ -128,7 +128,8 @@ def get_api_run_governance() -> ApiRunGovernance:
+ 
+ 
+ WEB_ADMISSION_TTL_SECONDS = 300.0
+-WEB_ADMISSION_CAPABILITY = DEFAULT_RUN_CAPABILITY
++# The dashboard bridge only ever needs governed read-only execution on the UpCloud worker.
++WEB_ADMISSION_CAPABILITY = "shell:upcloud-ssh:readonly"
+ 
+ 
+ def web_admission_agent_id() -> str:
+@@ -137,7 +138,7 @@ def web_admission_agent_id() -> str:
+ 
+ 
+ def issue_web_admission_token() -> dict[str, Any]:
+-    """Short-lived governance token for the fixed dashboard agent (capability ``goal:execute`` only).
++    """Short-lived governance token for the fixed dashboard agent (``shell:upcloud-ssh:readonly`` only).
+ 
+     The caller has already passed API-key authentication. The identity and
+     capability are fixed server-side, so a caller cannot choose either.
+@@ -146,6 +147,8 @@ def issue_web_admission_token() -> dict[str, Any]:
+     agent_id = web_admission_agent_id()
+     if not any(i.get("agent_id") == agent_id for i in gov.identity_ledger.list()):
+         gov.identity_ledger.register(agent_id=agent_id, capabilities=[WEB_ADMISSION_CAPABILITY])
++    elif not gov.identity_ledger.has_capability(agent_id, WEB_ADMISSION_CAPABILITY):
++        gov.identity_ledger.grant(agent_id, WEB_ADMISSION_CAPABILITY)
+     token = gov.token_service.issue(
+         TokenRequest(agent_id=agent_id, capabilities=[WEB_ADMISSION_CAPABILITY], ttl_seconds=WEB_ADMISSION_TTL_SECONDS)
+     )
+@@ -441,6 +444,12 @@ async def execute_governed_shell_background(
+         "capability": ctx.capability,
+         "agent_id": ctx.agent_id,
+     }
++    from thinkbox.remote_exec_policy import CAPABILITY_SUBSTRATES, policy_metadata
++
++    if ctx.capability in CAPABILITY_SUBSTRATES:
++        job_entry.result["execution_policy"] = policy_metadata(
++            capability=ctx.capability, execution_substrate=result.substrate, exec_command=exec_command
++        )
+     job_entry.evidence_label = "verified"
+     http_proof_path = ""
+     if binding:
+diff --git a/docs/CONTINUITY.md b/docs/CONTINUITY.md
+index b2eb19cd..872fc680 100644
+--- a/docs/CONTINUITY.md
++++ b/docs/CONTINUITY.md
+@@ -3477,3 +3477,31 @@ python3 experiments/verify_swarm_proof.py data/thinkboxmd/big_swarm_<timestamp>.
+ - **FOUR-STATE:** dashboard auth: CODE COMPLETE (branch; merge SHA recorded in the PR) / TEST VERIFIED / LIVE VERIFIED (local browser → real worker-02). **PRODUCTION READY: NO**: single user, in-memory sessions, no TLS, rest of the dashboard still unauthenticated, not deployed, no founder review.
+ - **Existing findings, not changed here:** worker-01 and the orphan server (founder decisions), no worker-02 firewall, CI billing, ruff W503, `investigate_upcloud()` semantics.
+ - **NEXT LARGER IMPROVEMENT:** extend the same sign-in to the whole dashboard (WebSocket upgrade + every `/api/*` except `/api/health`), so agent runs, files and memory are no longer open to anything that can reach `:3000`.
++
++### 2026-09-29 — SAVE POINT: PR #286 whole-dashboard sign-in + backend-authoritative UpCloud execution policy
++
++- **Starting point:** `main` `7f5dad21` (#285).
++- **Audit findings, all fixed here:**
++  - The rest of the dashboard (~38 `/api` routes and the WebSocket) was unauthenticated.
++  - The command allow-list lived only in `apps/web`.
++  - `AdmissionGate` ignored `token.capabilities`, so a scoped token could exercise any capability its identity held.
++  - `POST /api/v1/run/job/{id}/resume` accepted a caller-supplied `exec_command` with no governance check; a queued `upcloud-ssh` job could have run anything on worker-02.
++- **Design:**
++  - **Web:** an `/api` gate with an exact-match public set (`/health`, `/auth/login|logout|me`) and a WebSocket `verifyClient` (401 signed out, 503 unconfigured). Health is trimmed to `{status, ready}` unless signed in. The dashboard starts nothing until sign-in, and the CLI signs in.
++  - **Backend:** `thinkbox/remote_exec_policy.py` (`upcloud-ssh-readonly` v1) binds `shell:upcloud-ssh:readonly` ↔ `upcloud-ssh` in both directions with exact-match `{hostname, uname -a, uptime, whoami, df -h /, free -m}`. It is enforced at the route (after admission, before any job) and again in `execute_governed_job_command`, below the run, resume and reclaim paths. `AdmissionGate` now requires the capability to be in the token. The dashboard token grants only the narrow capability. Jobs record non-secret `execution_policy` metadata.
++- **Tests:** backend security 35/35 (policy, admission, f141–f143); web auth 15/15; web suite 155/155; typecheck 0. All five new guards were mutation-checked (removing any one fails tests). Governance regression over 94 modules: 1755 tests, **2 failures from check ordering**. The token-scope check ran before the identity check and changed the established `capability_not_granted` reason. Fixed by checking the identity first and the token scope second; the affected set re-ran 39/39. CI not run (GitHub billing issue).
++- **LIVE, by boundary** (local loopback; real uvicorn backend, real web server, real headless Chrome, real worker-02):
++
++  | Boundary | Evidence |
++  |---|---|
++  | Unauthenticated HTTP | `/api/stats`, `/api/agents`, `/api/memory`, `/api/runs`, `/api/sessions/x/files`, `/api/governed/run`, and the WebSocket upgrade all got 401; `/api/health` → `{"status":"ok","ready":true}` |
++  | Backend policy (real token, real HTTP) | `hostname; id`, `rm -rf /`, `$(id)` → 403 `command_not_allowed`; capability on `local` → `capability_substrate_mismatch`; `goal:execute` + `upcloud-ssh` → `capability_not_granted` (re-run after the reorder below); 0 worker artifacts |
++  | Unauthenticated browser | only `GET /api/auth/me`; required dialog open, cancel hidden, Escape blocked; no WebSocket |
++  | Authenticated browser → worker-02 | `/remote hostname` → `engine_4d534c3d` (`tb_rcpt_20260929182814_c98cce42`) completed, exit 0, verified, checkpoint `chk_5cd4a709944a`, `execution_policy` `upcloud-ssh-readonly` v1 fingerprint `7063dece7cccf374`; artifact `209.50.51.174` → `kudbee-hermes-worker-02`, 0.89s |
++  | Logout | reloads to the sign-in gate |
++  | Totals | backend 5×403 + 1×200; 0 console errors; no secrets in the job record |
++
++  Not a deployed environment.
++- **FOUR-STATE:** whole-dashboard auth and backend execution policy are both CODE COMPLETE (branch) / TEST VERIFIED / LIVE VERIFIED (local, real worker-02). **PRODUCTION READY: NO**: in-memory single-user sessions, no HTTPS, worker host key not pinned, resume/reclaim still have no *capability* admission (only the command check), not deployed, no founder review.
++- **Not in scope (recorded):** session persistence, multi-user, deploy/HTTPS, host-key pinning, SSH user, the worker-02 firewall, CI billing, ruff W503, `investigate_upcloud()` semantics, worker-01, the orphan.
++- **NEXT LARGER IMPROVEMENT:** full governance admission (token + capability↔substrate binding) on the resume/reclaim endpoints, so every path into execution is admitted, not only command-filtered.
+diff --git a/docs/SECURITY_CHECKLIST.md b/docs/SECURITY_CHECKLIST.md
+index e18f3ed0..1a32ffd3 100644
+--- a/docs/SECURITY_CHECKLIST.md
++++ b/docs/SECURITY_CHECKLIST.md
+@@ -311,6 +311,26 @@ python3 scripts/scan_doc_secrets.py docs/my_file.md
+ - `.github/workflows/test.yml` — CI/CD pipeline security gates
+ - `scripts/scan_doc_secrets.py` — Automated secret scanning
+ 
++---
++
++## Dashboard and remote-execution boundaries (PR #285/#286)
++
++Three independent layers, each fail-closed:
++
++1. **Dashboard sign-in** (`apps/web/auth.ts`). Every `/api/*` route except `/api/health` and
++   `/api/auth/*` requires a server-side session, and so does the WebSocket. Configure
++   `KUDBEE_DASHBOARD_PASSWORD_HASH` (scrypt, from `apps/web/scripts/hash-password.ts`). Without it the
++   dashboard API returns 503.
++2. **Governance admission** (`thinkbox/admission.py`). The token must be valid, belong to the claimed
++   agent, and **contain** the requested capability, and the identity must hold it too. The dashboard
++   token carries only `shell:upcloud-ssh:readonly` and lasts 300s.
++3. **Execution policy** (`thinkbox/remote_exec_policy.py`). `upcloud-ssh` requires that capability, the
++   capability allows only `upcloud-ssh`, and the command must exactly match the six read-only commands.
++   This is enforced at the route and again below every execution path.
++
++Never expose to the browser: `THINKBOX_API_KEY`, governance tokens, the dashboard password or its hash,
++the session id (it's an HttpOnly cookie), or SSH/UpCloud credentials.
++
+ ## External References
+ 
+ - **UpCloud CLI (upctl):** https://upcloudltd.github.io/upcloud-cli/latest/ (getting started: install + credentials)
+diff --git a/tests/e2e/api_run_hermetic.py b/tests/e2e/api_run_hermetic.py
+index 6c089cf3..28de44d0 100644
+--- a/tests/e2e/api_run_hermetic.py
++++ b/tests/e2e/api_run_hermetic.py
+@@ -82,7 +82,7 @@ def hermetic_run_client(
+     reset_http_run_persistence_for_tests()
+     _HERMETIC_TOKEN = gov.register_agent(
+         _HERMETIC_AGENT_ID,
+-        ["goal:execute", "goal:execute:verified"],
++        ["goal:execute", "goal:execute:verified", "shell:upcloud-ssh:readonly"],
+     )
+ 
+     app = FastAPI(title="hermetic-run-pr132")
+@@ -134,7 +134,7 @@ def hermetic_run_client_real_engine() -> Iterator[tuple[TestClient, Any]]:
+     reset_http_run_persistence_for_tests()
+     _HERMETIC_TOKEN = gov.register_agent(
+         _HERMETIC_AGENT_ID,
+-        ["goal:execute", "goal:execute:verified"],
++        ["goal:execute", "goal:execute:verified", "shell:upcloud-ssh:readonly"],
+     )
+ 
+     app = FastAPI(title="hermetic-run-real-engine")
+diff --git a/tests/e2e/test_f141_governed_shell_upcloud_ssh_http.py b/tests/e2e/test_f141_governed_shell_upcloud_ssh_http.py
+index 3ea8a7f8..d69d5852 100644
+--- a/tests/e2e/test_f141_governed_shell_upcloud_ssh_http.py
++++ b/tests/e2e/test_f141_governed_shell_upcloud_ssh_http.py
+@@ -56,7 +56,7 @@ def tearDown(self) -> None:
+     def _run(self, client, command="hostname"):
+         r = client.post(
+             "/api/v1/run",
+-            json=run_payload("governed shell upcloud-ssh e2e",
++            json=run_payload("governed shell upcloud-ssh e2e", capability="shell:upcloud-ssh:readonly",
+                              execution_substrate=SUBSTRATE_UPCLOUD_SSH, exec_command=command),
+             headers=auth_headers(),
+         )
+@@ -98,7 +98,7 @@ def test_upcloud_ssh_admitted_executes_with_receipt_evidence(self) -> None:
+ 
+     def test_upcloud_ssh_without_config_fails_and_never_runs_locally(self) -> None:
+         with mock.patch.dict(os.environ, {}, clear=True), hermetic_run_client() as (client, _):
+-            _, status = self._run(client, command="echo must-not-run-locally")
++            _, status = self._run(client, command="hostname")
+             self.assertEqual(status["status"], "failed")
+             self.assertEqual((status.get("result") or {}).get("error"), "remote_not_configured")
+ 
+diff --git a/tests/e2e/test_f142_web_admission_token.py b/tests/e2e/test_f142_web_admission_token.py
+index 36b34de2..f8f0b1ea 100644
+--- a/tests/e2e/test_f142_web_admission_token.py
++++ b/tests/e2e/test_f142_web_admission_token.py
+@@ -51,7 +51,7 @@ def test_identity_and_capability_are_server_fixed(self) -> None:
+             self.assertEqual(r.status_code, 200)
+             body = r.json()
+             self.assertEqual(body["agent_id"], "web-dashboard-agent")
+-            self.assertEqual(body["capability"], "goal:execute")
++            self.assertEqual(body["capability"], "shell:upcloud-ssh:readonly")
+             self.assertEqual(body["expires_in_seconds"], 300.0)
+             self.assertTrue(body["governance_token"])
+ 
+@@ -72,6 +72,7 @@ def test_token_admits_upcloud_ssh_run_end_to_end(self) -> None:
+                     "goal": "dashboard remote exec: hostname",
+                     "agent_id": adm["agent_id"],
+                     "governance_token": adm["governance_token"],
++                    "capability": adm["capability"],
+                     "execution_substrate": SUBSTRATE_UPCLOUD_SSH,
+                     "exec_command": "hostname",
+                 },
+diff --git a/tests/e2e/test_f143_governed_exec_policy_http.py b/tests/e2e/test_f143_governed_exec_policy_http.py
+new file mode 100644
+index 00000000..b759ff8c
+--- /dev/null
++++ b/tests/e2e/test_f143_governed_exec_policy_http.py
+@@ -0,0 +1,128 @@
++"""Hermetic HTTP e2e: backend-authoritative capability + command policy for upcloud-ssh.
++
++The SSH provider is faked and counts calls; every denial must happen with zero SSH calls.
++"""
++
++from __future__ import annotations
++
++import os
++import tempfile
++import unittest
++from pathlib import Path
++from unittest import mock
++
++from tests.e2e.api_run_hermetic import (
++    auth_headers,
++    drain_background_tasks,
++    hermetic_run_client,
++    run_payload,
++)
++from thinkbox.cloud_execution.provider import ProviderRunResult
++from thinkbox.remote_exec_policy import ALLOWED_READONLY_COMMANDS, command_fingerprint
++
++CAP = "shell:upcloud-ssh:readonly"
++SSH_CALLS: list[str] = []
++
++
++class _FakeSSH:
++    def __init__(self, cfg):
++        self.cfg = cfg
++
++    def run(self, job, limits, workspace):
++        SSH_CALLS.append(job.metadata["command"])
++        return ProviderRunResult(success=True, exit_code=0, summary="ok",
++                                 metadata={"stdout": "kudbee-hermes-worker-02", "stderr": "", "elapsed_s": 0.1})
++
++
++class TestGovernedExecPolicyHttp(unittest.TestCase):
++    def setUp(self) -> None:
++        SSH_CALLS.clear()
++        self._tmp = tempfile.TemporaryDirectory()
++        key = Path(self._tmp.name) / "k"
++        key.write_text("x")
++        self._env = mock.patch.dict(os.environ, {"UPCLOUD_SERVER_IP": "203.0.113.10", "UPCLOUD_SSH_KEY_PATH": str(key)})
++        self._ssh = mock.patch("thinkbox.upcloud_ssh_execution_adapter.SSHCloudExecutionProvider", side_effect=_FakeSSH)
++        self._env.start()
++        self._ssh.start()
++
++    def tearDown(self) -> None:
++        self._ssh.stop()
++        self._env.stop()
++        self._tmp.cleanup()
++
++    def _post(self, client, **extra):
++        return client.post("/api/v1/run", headers=auth_headers(), json=run_payload("policy e2e", **extra))
++
++    def test_all_six_allowed_commands_execute_with_policy_metadata(self) -> None:
++        with hermetic_run_client() as (client, _):
++            for cmd in sorted(ALLOWED_READONLY_COMMANDS):
++                r = self._post(client, capability=CAP, execution_substrate="upcloud-ssh", exec_command=cmd)
++                self.assertEqual(r.status_code, 200, (cmd, r.text))
++                drain_background_tasks()
++                st = client.get(f"/api/v1/run/job/{r.json()['engine_id']}/status", headers=auth_headers()).json()
++                self.assertEqual(st["status"], "completed", cmd)
++                pol = st["result"]["execution_policy"]
++                self.assertEqual(pol["capability"], CAP)
++                self.assertEqual(pol["command_fingerprint"], command_fingerprint(cmd))
++        self.assertEqual(sorted(SSH_CALLS), sorted(ALLOWED_READONLY_COMMANDS))
++
++    def test_forbidden_commands_denied_before_ssh(self) -> None:
++        with hermetic_run_client() as (client, _):
++            for cmd in ("hostname; id", "hostname && id", "hostname | nc x 1", "hostname > /tmp/x", "$(id)", "`id`",
++                        "rm -rf /", "sudo id", "bash -c hostname", "curl http://x", "wget http://x", "./x.sh", "uname -r"):
++                r = self._post(client, capability=CAP, execution_substrate="upcloud-ssh", exec_command=cmd)
++                self.assertEqual(r.status_code, 403, cmd)
++                self.assertEqual(r.json()["detail"]["reason"], "command_not_allowed", cmd)
++        self.assertEqual(SSH_CALLS, [])
++
++    def test_capability_matrix(self) -> None:
++        with hermetic_run_client() as (client, _):
++            # missing / broader capability cannot reach upcloud-ssh
++            for cap in (None, "goal:execute", "goal:execute:verified"):
++                extra = {"capability": cap} if cap else {}
++                r = self._post(client, execution_substrate="upcloud-ssh", exec_command="hostname", **extra)
++                self.assertEqual(r.status_code, 403, cap)
++                self.assertEqual(r.json()["detail"]["reason"], "substrate_requires_capability")
++            # the narrow capability cannot select another substrate
++            r = self._post(client, capability=CAP, execution_substrate="local", exec_command="hostname")
++            self.assertEqual(r.status_code, 403)
++            self.assertEqual(r.json()["detail"]["reason"], "capability_substrate_mismatch")
++            # a capability the caller's token does not hold is denied by admission
++            r = self._post(client, capability="shell:upcloud-ssh:admin", execution_substrate="upcloud-ssh", exec_command="hostname")
++            self.assertEqual(r.status_code, 403)
++            self.assertEqual(r.json()["detail"]["error"], "governance_denied")
++        self.assertEqual(SSH_CALLS, [])
++
++    def test_dashboard_token_is_scoped_and_bound_to_its_agent(self) -> None:
++        with hermetic_run_client() as (client, _):
++            adm = client.post("/api/v1/run/admission-token", headers=auth_headers()).json()
++            self.assertEqual(adm["capability"], CAP)
++            base = {"goal": "x", "governance_token": adm["governance_token"]}
++            # goal:execute (the default) is neither granted to the dashboard identity nor in the token
++            r = client.post("/api/v1/run", headers=auth_headers(), json={**base, "agent_id": adm["agent_id"]})
++            self.assertEqual(r.status_code, 403)
++            self.assertEqual(r.json()["detail"]["reason"], "capability_not_granted")
++            # another agent cannot use it
++            r = client.post("/api/v1/run", headers=auth_headers(), json={**base, "agent_id": "other", "capability": CAP,
++                                                                          "execution_substrate": "upcloud-ssh", "exec_command": "hostname"})
++            self.assertEqual(r.json()["detail"]["reason"], "token_agent_mismatch")
++            # correct use succeeds
++            r = client.post("/api/v1/run", headers=auth_headers(), json={**base, "agent_id": adm["agent_id"], "capability": CAP,
++                                                                          "execution_substrate": "upcloud-ssh", "exec_command": "hostname"})
++            self.assertEqual(r.status_code, 200, r.text)
++            drain_background_tasks()
++        self.assertEqual(SSH_CALLS, ["hostname"])
++
++    def test_resume_path_cannot_smuggle_a_command_to_the_worker(self) -> None:
++        from thinkbox.governed_job_execution import (
++            GovernedJobExecutionError,
++            execute_governed_job_command,
++        )
++
++        with self.assertRaises(GovernedJobExecutionError):
++            execute_governed_job_command(substrate="upcloud-ssh", job_id="resumed", command="cat /etc/shadow")
++        self.assertEqual(SSH_CALLS, [])
++
++
++if __name__ == "__main__":
++    unittest.main()
+diff --git a/tests/unit/test_remote_exec_policy.py b/tests/unit/test_remote_exec_policy.py
+new file mode 100644
+index 00000000..e4d10ca9
+--- /dev/null
++++ b/tests/unit/test_remote_exec_policy.py
+@@ -0,0 +1,105 @@
++"""Backend remote-execution policy + admission token-capability enforcement (pure / hermetic)."""
++
++from __future__ import annotations
++
++import unittest
++
++from thinkbox.admission import AdmissionGate
++from thinkbox.governance_token import GovernanceTokenService, TokenRequest
++from thinkbox.governed_job_execution import (
++    GovernedJobExecutionError,
++    execute_governed_job_command,
++)
++from thinkbox.identity import IdentityLedger
++from thinkbox.remote_exec_policy import (
++    ALLOWED_READONLY_COMMANDS,
++    POLICY_ID,
++    command_fingerprint,
++    evaluate,
++    policy_metadata,
++)
++from thinkbox.remote_exec_policy import (
++    CAPABILITY_UPCLOUD_SSH_READONLY as CAP,
++)
++
++FORBIDDEN = [
++    "hostname; id", "hostname && id", "hostname || id", "hostname | cat", "hostname > /tmp/x", "hostname >> /tmp/x",
++    "hostname < /etc/passwd", "$(id)", "`id`", "hostname $(id)", "echo hi", "id", "cat /etc/shadow", "ls /root",
++    "rm -rf /", "sudo hostname", "su -c id", "bash -c hostname", "sh -c hostname", "/bin/sh", "python3 -c 'print(1)'",
++    "curl http://example.com", "wget http://example.com", "./script.sh", "hostname -I", "uname -r", "df -h", "df -h / ;",
++    " hostname", "hostname ", "HOSTNAME", "hostname\n", "hostname\nid", "uptime &", "", "free -m -t",
++]
++
++
++class TestPolicy(unittest.TestCase):
++    def test_all_six_allowed_commands(self) -> None:
++        self.assertEqual(ALLOWED_READONLY_COMMANDS, {"hostname", "uname -a", "uptime", "whoami", "df -h /", "free -m"})
++        for cmd in ALLOWED_READONLY_COMMANDS:
++            self.assertTrue(evaluate(capability=CAP, execution_substrate="upcloud-ssh", exec_command=cmd).allowed, cmd)
++
++    def test_forbidden_commands(self) -> None:
++        for cmd in FORBIDDEN:
++            d = evaluate(capability=CAP, execution_substrate="upcloud-ssh", exec_command=cmd)
++            self.assertFalse(d.allowed, repr(cmd))
++            self.assertEqual(d.reason, "command_not_allowed")
++
++    def test_capability_bound_to_upcloud_ssh_only(self) -> None:
++        for sub in ("local", "upstash-box", "", "UPCLOUD-SSH-X"):
++            self.assertEqual(evaluate(capability=CAP, execution_substrate=sub, exec_command="hostname").reason,
++                             "capability_substrate_mismatch", sub)
++
++    def test_upcloud_ssh_requires_the_narrow_capability(self) -> None:
++        for cap in ("goal:execute", "goal:execute:verified", "", "shell:upcloud-ssh", "shell:upcloud-ssh:readonly "):
++            d = evaluate(capability=cap.strip() if cap.endswith(" ") else cap, execution_substrate="upcloud-ssh", exec_command="hostname")
++            if cap.strip() == CAP:
++                self.assertTrue(d.allowed)
++            else:
++                self.assertEqual(d.reason, "substrate_requires_capability", cap)
++
++    def test_other_substrates_untouched(self) -> None:
++        self.assertTrue(evaluate(capability="goal:execute", execution_substrate="local", exec_command="echo x").allowed)
++        self.assertTrue(evaluate(capability="goal:execute", execution_substrate="", exec_command="").allowed)
++
++    def test_metadata_is_non_secret_and_deterministic(self) -> None:
++        m = policy_metadata(capability=CAP, execution_substrate="upcloud-ssh", exec_command="hostname")
++        self.assertEqual(m["policy_id"], POLICY_ID)
++        self.assertEqual(m["command_fingerprint"], command_fingerprint("hostname"))
++        self.assertEqual(len(m["command_fingerprint"]), 16)
++        self.assertEqual(set(m), {"policy_id", "policy_version", "capability", "execution_substrate", "command_fingerprint"})
++
++    def test_lowest_layer_refuses_forbidden_upcloud_commands_before_any_adapter(self) -> None:
++        for cmd in ("hostname; id", "rm -rf /", "echo x"):
++            with self.assertRaises(GovernedJobExecutionError) as ctx:
++                execute_governed_job_command(substrate="upcloud-ssh", job_id="j", command=cmd)
++            self.assertEqual(ctx.exception.code, "command_not_allowed")
++
++
++class TestAdmissionTokenCapability(unittest.TestCase):
++    def setUp(self) -> None:
++        self.tokens = GovernanceTokenService(signing_key="k")
++        self.ids = IdentityLedger()
++        self.gate = AdmissionGate(self.tokens, self.ids)
++        self.ids.register(agent_id="a", capabilities=["goal:execute", CAP])
++
++    def _tok(self, caps, agent="a"):
++        return self.tokens.issue(TokenRequest(agent_id=agent, capabilities=caps, ttl_seconds=60)).token_value
++
++    def test_scoped_token_cannot_exercise_other_identity_capabilities(self) -> None:
++        t = self._tok([CAP])
++        self.assertTrue(self.gate.authorize(t, "a", CAP).allowed)
++        d = self.gate.authorize(t, "a", "goal:execute")
++        self.assertFalse(d.allowed)
++        self.assertEqual(d.reason, "token_capability_not_granted")
++
++    def test_identity_must_also_hold_capability(self) -> None:
++        t = self._tok(["goal:execute:verified"])
++        self.assertEqual(self.gate.authorize(t, "a", "goal:execute:verified").reason, "capability_not_granted")
++
++    def test_wrong_agent_and_invalid_token(self) -> None:
++        t = self._tok([CAP])
++        self.assertEqual(self.gate.authorize(t, "b", CAP).reason, "token_agent_mismatch")
++        self.assertEqual(self.gate.authorize("forged", "a", CAP).reason, "token_invalid_or_expired")
++
++
++if __name__ == "__main__":
++    unittest.main()
+diff --git a/thinkbox/admission.py b/thinkbox/admission.py
+index 828059ba..ff28e7c1 100644
+--- a/thinkbox/admission.py
++++ b/thinkbox/admission.py
+@@ -59,6 +59,12 @@ def authorize(self, token_value: str, agent_id: str, capability: str, metadata:
+             decision = AdmissionDecision(False, "capability_not_granted", agent_id, capability)
+             self._record(decision, metadata)
+             return decision
++        if capability not in token.capabilities:
++            # The token is a scoped grant: an identity holding broader capabilities
++            # must not be able to use a narrowly scoped token for them.
++            decision = AdmissionDecision(False, "token_capability_not_granted", agent_id, capability)
++            self._record(decision, metadata)
++            return decision
+         decision = AdmissionDecision(True, "admitted", agent_id, capability)
+         self._record(decision, metadata)
+         return decision
+diff --git a/thinkbox/governed_job_execution.py b/thinkbox/governed_job_execution.py
+index f91e6200..18afd875 100644
+--- a/thinkbox/governed_job_execution.py
++++ b/thinkbox/governed_job_execution.py
+@@ -14,6 +14,7 @@
+     UpstashBoxExecutionAdapter,
+ )
+ from thinkbox.local_execution_adapter import LOCAL_PROVIDER, LocalExecutionAdapter, receipt_to_public_dict
++from thinkbox.remote_exec_policy import ALLOWED_READONLY_COMMANDS
+ from thinkbox.repository import Repository
+ from thinkbox.upcloud_ssh_execution_adapter import UPCLOUD_SSH_PROVIDER, UpCloudSSHExecutionAdapter
+ 
+@@ -99,8 +100,15 @@ def execute_governed_job_command(
+     artifact_name: str = "governed_exec.json",
+ ) -> GovernedJobExecutionResult:
+     """Run one bounded command through the governed execution adapter contract."""
+-    repository = repo or Repository()
+     normalized = normalize_execution_substrate(substrate)
++    if normalized == SUBSTRATE_UPCLOUD_SSH and command not in ALLOWED_READONLY_COMMANDS:
++        # Enforced here, below every caller (run, resume, reclaim), so no path can reach the worker
++        # with a command outside the read-only policy (thinkbox/remote_exec_policy.py).
++        raise GovernedJobExecutionError(
++            "command_not_allowed",
++            "upcloud-ssh only runs the exact read-only commands in the remote execution policy",
++        )
++    repository = repo or Repository()
+     adapter, provider = select_execution_adapter(normalized, repository)
+     receipt = adapter.execute(job_id=job_id, command=command, artifact_name=artifact_name)
+     proof = receipt_to_public_dict(receipt)
+diff --git a/thinkbox/remote_exec_policy.py b/thinkbox/remote_exec_policy.py
+new file mode 100644
+index 00000000..10efcbd5
+--- /dev/null
++++ b/thinkbox/remote_exec_policy.py
+@@ -0,0 +1,79 @@
++"""Backend-authoritative policy for governed remote shell execution on UpCloud.
++
++The single source of truth for what the ``shell:upcloud-ssh:readonly`` capability
++permits. Callers (the dashboard bridge, the CLI, tests) may pre-check, but the
++backend enforces this module before admission and before any SSH connection.
++
++- The capability authorizes exactly one substrate, ``upcloud-ssh``.
++- The command must equal one of a fixed set of read-only commands, compared as
++  exact strings. No arguments, metacharacters, chaining, redirects,
++  substitution, shells, scripts, network fetches or privilege escalation can
++  pass, because nothing is parsed: only exact equality admits a command.
++- Conversely, ``upcloud-ssh`` execution requires this capability. A broader
++  capability such as ``goal:execute`` cannot reach the worker.
++"""
++
++from __future__ import annotations
++
++import hashlib
++from dataclasses import dataclass
++
++POLICY_ID = "upcloud-ssh-readonly"
++POLICY_VERSION = "1"
++CAPABILITY_UPCLOUD_SSH_READONLY = "shell:upcloud-ssh:readonly"
++SUBSTRATE_UPCLOUD_SSH = "upcloud-ssh"
++
++ALLOWED_READONLY_COMMANDS: frozenset[str] = frozenset(
++    {"hostname", "uname -a", "uptime", "whoami", "df -h /", "free -m"}
++)
++
++# capability -> the only substrate it authorizes
++CAPABILITY_SUBSTRATES: dict[str, str] = {CAPABILITY_UPCLOUD_SSH_READONLY: SUBSTRATE_UPCLOUD_SSH}
++# substrate -> the only capability that may reach it
++SUBSTRATE_REQUIRED_CAPABILITY: dict[str, str] = {SUBSTRATE_UPCLOUD_SSH: CAPABILITY_UPCLOUD_SSH_READONLY}
++
++
++@dataclass(frozen=True)
++class PolicyDecision:
++    allowed: bool
++    reason: str
++
++    @property
++    def code(self) -> str:
++        return self.reason
++
++
++def command_fingerprint(command: str) -> str:
++    """Deterministic, non-secret identity for a command (sha256 hex, first 16 chars)."""
++    return hashlib.sha256(command.encode("utf-8")).hexdigest()[:16]
++
++
++def evaluate(*, capability: str, execution_substrate: str, exec_command: str) -> PolicyDecision:
++    """Decide whether (capability, substrate, command) is permitted. Pure; no side effects."""
++    cap = (capability or "").strip()
++    substrate = (execution_substrate or "").strip().lower()
++    command = exec_command if isinstance(exec_command, str) else ""
++
++    required = SUBSTRATE_REQUIRED_CAPABILITY.get(substrate)
++    if required is not None and cap != required:
++        return PolicyDecision(False, "substrate_requires_capability")
++
++    bound = CAPABILITY_SUBSTRATES.get(cap)
++    if bound is None:
++        return PolicyDecision(True, "not_governed_by_policy")
++    if substrate != bound:
++        return PolicyDecision(False, "capability_substrate_mismatch")
++    if command not in ALLOWED_READONLY_COMMANDS:
++        return PolicyDecision(False, "command_not_allowed")
++    return PolicyDecision(True, "allowed")
++
++
++def policy_metadata(*, capability: str, execution_substrate: str, exec_command: str) -> dict[str, str]:
++    """Non-secret policy facts recorded on the job result and receipt."""
++    return {
++        "policy_id": POLICY_ID,
++        "policy_version": POLICY_VERSION,
++        "capability": capability,
++        "execution_substrate": execution_substrate,
++        "command_fingerprint": command_fingerprint(exec_command),
++    }

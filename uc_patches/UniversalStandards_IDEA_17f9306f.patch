@@ -1,0 +1,234 @@
+From 17f9306fe9ff8d2ba3bbb939afbc42348480d58a Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 1 Oct 2026 15:03:58 -0700
+Subject: [PATCH] fix: close worker-session token replay on shared transports +
+ enforce TLS on broker/Vault URLs in prod
+
+Second round of Copilot review findings on PR #173:
+
+- security (high): the first review round fixed worker-session token
+  replay against the Admin API (requireAuth), but isTransportAuthorized
+  -- the shared gate for the SSE, WebSocket, and gRPC transports, all
+  of which route an authorized request straight into
+  runtimeManager.handleRequest() with full capability access -- had
+  the identical gap: signature-only verification, no scope check.
+  Mirrors the admin-api.ts fix: explicitly rejects scope:
+  'worker-session' tokens. This function had zero prior test coverage;
+  added tests/transport-auth.test.ts.
+
+- security (high): UPCLOUD_BROKER_URL and VAULT_ADDR were validated
+  with plain z.string().url(), which accepts http://. In production,
+  UPCLOUD_BROKER_URL carries the broker's X-API-Key header and all
+  session traffic; VAULT_ADDR carries the AppRole client_token and
+  every leased secret value. validateConfig()'s existing production
+  guard (same block that already requires these vars be set) now also
+  requires https://. Dev/test is unaffected -- this only runs inside
+  the existing NODE_ENV === 'production' branch. New tests in
+  tests/config.test.ts.
+
+- docs (low): CHANGELOG.md undercounted tests/upcloud-worker-factory
+  .test.ts's cases (10, should have been 13 after the prior round's
+  3 additions). Corrected.
+
+While verifying: tests/config.test.ts's pre-existing "rejects invalid
+MCP_TRANSPORT value" test fails identically on the unmodified base
+commit (confirmed via git stash) -- unrelated pre-existing bug, not
+touched here.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01NaMrQ4NGni9rU7GmSqSg5E
+---
+ CHANGELOG.md                     |  7 ++++-
+ src/config.ts                    | 11 +++++++
+ src/transport/middleware/auth.ts | 15 ++++++++-
+ tests/config.test.ts             | 37 ++++++++++++++++++++++
+ tests/transport-auth.test.ts     | 54 ++++++++++++++++++++++++++++++++
+ 5 files changed, 122 insertions(+), 2 deletions(-)
+ create mode 100644 tests/transport-auth.test.ts
+
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index b95bb10..809bd21 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
+ - `docs/gates/upcloud-worker-factory.md` — the frozen v1 interface contract (auth handshake / provider registration / credential lease protocol) this hub's own open work and the UpCloud-side broker/pool build can both proceed against in parallel without blocking each other
+ - `src/config.ts` — `ENABLE_UPCLOUD_WORKER_FACTORY`, `UPCLOUD_BROKER_URL`, `UPCLOUD_BROKER_API_KEY`, `WORKER_SESSION_DEFAULT_TTL_MS`, `WORKER_SESSION_MAX_TTL_MS`, `WORKER_POOL_WARM_SIZE`, `VAULT_ADDR`, `VAULT_ROLE_ID`, `VAULT_SECRET_ID`, `VAULT_SECRET_MOUNT`, plus a production guard requiring the broker/Vault vars when the feature is enabled
+ - `src/types/index.ts` — `WorkerSessionCapability`, `WorkerSessionState`, `WorkerSessionHandle`, `CredentialScopeRef`
+-- `tests/upcloud-worker-factory.test.ts` — 10 cases against a mocked broker/Vault HTTP surface (no live UpCloud/Vault account exists yet to integration-test against)
++- `tests/upcloud-worker-factory.test.ts` — 13 cases against a mocked broker/Vault HTTP surface (no live UpCloud/Vault account exists yet to integration-test against)
+ - `src/core/runtime-manager.ts` — `upcloudWorkerFactoryAdapter` wired into `initialize()`/`shutdown()`/`getStatus()` following the existing adapter pattern; shuts down before `credentialBroker` so its own leased scopes can be revoked
+ 
+ ### Fixed — 2026-10-01 session
+@@ -41,6 +41,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
+ ### ⚠️ Known issue, updated — 2026-10-01 session (PR #173 review response)
+ Fixing the `admin-api.ts` index-signature issue above (needed to unblock `tests/admin-api.test.ts`) exposed a **10th** file in the same pre-existing bug family: `src/policy/approval-gates.ts` (two more `exactOptionalPropertyTypes` violations — `metadata` and `decisionNote`), imported transitively via `adminRouter.use('/approvals', approvalGates.buildRouter())`. `tests/admin-api.test.ts` therefore still cannot run through the project's normal `npm run test` (ts-jest fails the whole suite on any compile error anywhere in the file's import graph) — confirmed via an isolated diagnostic run with `isolatedModules` that all 10 tests in that file, including the 2 new ones, pass once the unrelated compile error is bypassed. This does not change anything already recommended above: a dedicated session should sweep all ~10 now-identified files for this one error class.
+ 
++### Fixed — 2026-10-01 session (PR #173 second review round)
++- `src/transport/middleware/auth.ts` — `isTransportAuthorized()` (the shared auth gate for the SSE, WebSocket, and gRPC transports, all of which route straight into `runtimeManager.handleRequest()` with full capability access) checked only the JWT signature, the same gap just closed in `admin-api.ts`'s `requireAuth` — a worker-session token would have passed and reached general runtime access, not just the Admin API. Now explicitly rejects `scope: 'worker-session'` tokens here too. New test file `tests/transport-auth.test.ts` (this function had zero prior coverage). (Copilot High-severity finding.)
++- `src/config.ts` — `UPCLOUD_BROKER_URL` and `VAULT_ADDR` were validated with plain `z.string().url()`, which accepts `http://`; in production both carry real credentials (`UPCLOUD_BROKER_API_KEY` / the broker's `X-API-Key` header on the former, the Vault AppRole `client_token` and every leased secret value on the latter). `validateConfig()`'s existing production guard now also rejects either one unless it starts with `https://`. Dev/test environments are unaffected — this only runs inside the existing `NODE_ENV === 'production'` block. New tests in `tests/config.test.ts`. (Copilot High-severity finding.)
++- `CHANGELOG.md` — corrected the `tests/upcloud-worker-factory.test.ts` case count (10 → 13, after the previous round's 3 additions). (Copilot Low-severity finding.)
++
+ ### Added — 2026-09-10 session (`b77990f`, `8cfd69a`)
+ - `src/security/secret-store.ts` — in-memory AES-256-GCM secret store with TTL expiry and `rotateEncryption()` for zero-downtime key rotation
+ - `src/security/credential-broker.ts` — scope-enforced credential issue/retrieve/rotate/revoke with audit logging on every operation
+diff --git a/src/config.ts b/src/config.ts
+index 6c3192f..5ef0dad 100644
+--- a/src/config.ts
++++ b/src/config.ts
+@@ -165,11 +165,22 @@ export function validateConfig(): Config {
+       if (!_config.UPCLOUD_BROKER_URL) {
+         throw new Error('ENABLE_UPCLOUD_WORKER_FACTORY=true requires UPCLOUD_BROKER_URL in production');
+       }
++      // UPCLOUD_BROKER_API_KEY and every worker-session create/delete call
++      // ride on this URL — z.string().url() alone accepts http://, which
++      // would send that credential and all session traffic in cleartext.
++      if (!_config.UPCLOUD_BROKER_URL.startsWith('https://')) {
++        throw new Error('UPCLOUD_BROKER_URL must use https:// in production (it carries the broker API key)');
++      }
+       if (!_config.VAULT_ADDR || !_config.VAULT_ROLE_ID || !_config.VAULT_SECRET_ID) {
+         throw new Error(
+           'ENABLE_UPCLOUD_WORKER_FACTORY=true requires VAULT_ADDR, VAULT_ROLE_ID, and VAULT_SECRET_ID in production',
+         );
+       }
++      // The AppRole secret_id, the resulting client_token, and every leased
++      // secret value flow over this URL — same reasoning as above.
++      if (_config.VAULT_ADDR && !_config.VAULT_ADDR.startsWith('https://')) {
++        throw new Error('VAULT_ADDR must use https:// in production (it carries Vault auth tokens and leased secrets)');
++      }
+     }
+   }
+ 
+diff --git a/src/transport/middleware/auth.ts b/src/transport/middleware/auth.ts
+index 4e511e5..508379b 100644
+--- a/src/transport/middleware/auth.ts
++++ b/src/transport/middleware/auth.ts
+@@ -16,7 +16,20 @@ export function isTransportAuthorized(options: TransportAuthOptions): boolean {
+   }
+ 
+   try {
+-    jwt.verify(token, options.config.JWT_SECRET);
++    const decoded = jwt.verify(token, options.config.JWT_SECRET);
++
++    // Every bearer token this hub issues is signed with the same JWT_SECRET,
++    // so a valid signature alone is not "authorized for general runtime
++    // access" — a worker-session token (see
++    // adapters/upcloud-worker-factory/index.ts) is scoped to a single
++    // browser/desktop session's own lifecycle calls and must not be
++    // replayable here to reach runtimeManager.handleRequest with full
++    // capability access via SSE/WebSocket/gRPC. Mirrors the same check in
++    // api/admin-api.ts's requireAuth.
++    if (typeof decoded === 'object' && decoded !== null && (decoded as Record<string, unknown>)['scope'] === 'worker-session') {
++      return false;
++    }
++
+     return true;
+   } catch {
+     return false;
+diff --git a/tests/config.test.ts b/tests/config.test.ts
+index f9d7fee..44757af 100644
+--- a/tests/config.test.ts
++++ b/tests/config.test.ts
+@@ -99,6 +99,43 @@ describe('Config', () => {
+     expect(() => validateConfig()).toThrow('ENCRYPTION_KEY must be set');
+   });
+ 
++  describe('UpCloud worker factory — production transport security', () => {
++    function productionEnv(overrides: Record<string, string> = {}): void {
++      process.env['NODE_ENV'] = 'production';
++      process.env['JWT_SECRET'] = 'valid-production-jwt-secret-32-chars!!';
++      process.env['ENCRYPTION_KEY'] = 'valid-production-encryption-key-here!';
++      process.env['ENABLE_UPCLOUD_WORKER_FACTORY'] = 'true';
++      process.env['UPCLOUD_BROKER_URL'] = 'https://broker.example.com';
++      process.env['VAULT_ADDR'] = 'https://vault.example.com';
++      process.env['VAULT_ROLE_ID'] = 'role-123';
++      process.env['VAULT_SECRET_ID'] = 'secret-123';
++      Object.assign(process.env, overrides);
++    }
++
++    it('rejects an http:// UPCLOUD_BROKER_URL in production (carries the broker API key)', () => {
++      productionEnv({ UPCLOUD_BROKER_URL: 'http://broker.example.com' });
++      expect(() => validateConfig()).toThrow('UPCLOUD_BROKER_URL must use https://');
++    });
++
++    it('rejects an http:// VAULT_ADDR in production (carries Vault auth tokens and leased secrets)', () => {
++      productionEnv({ VAULT_ADDR: 'http://vault.example.com' });
++      expect(() => validateConfig()).toThrow('VAULT_ADDR must use https://');
++    });
++
++    it('accepts https:// UPCLOUD_BROKER_URL and VAULT_ADDR in production', () => {
++      productionEnv();
++      expect(() => validateConfig()).not.toThrow();
++    });
++
++    it('does not require https:// when ENABLE_UPCLOUD_WORKER_FACTORY is false', () => {
++      process.env['NODE_ENV'] = 'production';
++      process.env['JWT_SECRET'] = 'valid-production-jwt-secret-32-chars!!';
++      process.env['ENCRYPTION_KEY'] = 'valid-production-encryption-key-here!';
++      process.env['ENABLE_UPCLOUD_WORKER_FACTORY'] = 'false';
++      expect(() => validateConfig()).not.toThrow();
++    });
++  });
++
+   it('accepts MCP_TRANSPORT values: http, stdio, sse', () => {
+     for (const transport of ['http', 'stdio', 'sse'] as const) {
+       process.env['MCP_TRANSPORT'] = transport;
+diff --git a/tests/transport-auth.test.ts b/tests/transport-auth.test.ts
+new file mode 100644
+index 0000000..7ab96bd
+--- /dev/null
++++ b/tests/transport-auth.test.ts
+@@ -0,0 +1,54 @@
++/**
++ * tests/transport-auth.test.ts
++ * Unit tests for src/transport/middleware/auth.ts — isTransportAuthorized()
++ * is the shared gate for the SSE, WebSocket, and gRPC transports, all of
++ * which route an authorized request straight into
++ * runtimeManager.handleRequest() with full capability access. A
++ * worker-session token (minted by adapters/upcloud-worker-factory for a
++ * single browser/desktop session) is signed with the same JWT_SECRET as
++ * every other bearer token this hub issues, so it must be explicitly
++ * rejected here — not just at the Admin API — or it becomes a general
++ * runtime-access credential.
++ */
++
++import jwt from 'jsonwebtoken';
++import { isTransportAuthorized } from '../src/transport/middleware/auth';
++
++const JWT_SECRET = 'test-secret-that-is-32-characters-long!!';
++
++describe('isTransportAuthorized()', () => {
++  it('returns false when no token is provided and auth is required', () => {
++    expect(isTransportAuthorized({ config: { JWT_SECRET } })).toBe(false);
++  });
++
++  it('returns true when no token is provided and auth is not required', () => {
++    expect(isTransportAuthorized({ config: { JWT_SECRET }, required: false })).toBe(true);
++  });
++
++  it('returns false for a token signed with the wrong secret', () => {
++    const token = jwt.sign({ sub: 'someone' }, 'wrong-secret-that-is-very-long-padding!!');
++    expect(isTransportAuthorized({ config: { JWT_SECRET }, token })).toBe(false);
++  });
++
++  it('returns true for an ordinary token with no worker-session scope', () => {
++    const token = jwt.sign({ sub: 'agent-1' }, JWT_SECRET, { expiresIn: '1h' });
++    expect(isTransportAuthorized({ config: { JWT_SECRET }, token })).toBe(true);
++  });
++
++  it('accepts the token via an Authorization: Bearer header', () => {
++    const token = jwt.sign({ sub: 'agent-1' }, JWT_SECRET, { expiresIn: '1h' });
++    expect(isTransportAuthorized({ config: { JWT_SECRET }, authorization: `Bearer ${token}` })).toBe(true);
++  });
++
++  it('rejects a worker-session-scoped token, even though it is validly signed', () => {
++    const workerToken = jwt.sign(
++      { sub: 'agent-1', scope: 'worker-session', sessionId: 'sess-abc', capabilities: ['browser'] },
++      JWT_SECRET,
++      { expiresIn: '15m' },
++    );
++    expect(isTransportAuthorized({ config: { JWT_SECRET }, token: workerToken })).toBe(false);
++    expect(
++      isTransportAuthorized({ config: { JWT_SECRET }, authorization: `Bearer ${workerToken}` }),
++    ).toBe(false);
++  });
++});

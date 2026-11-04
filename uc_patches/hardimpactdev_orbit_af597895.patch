@@ -1,0 +1,176 @@
+From af59789546b2c181c986e6ae7a9360892e02e209 Mon Sep 17 00:00:00 2001
+From: nckrtl <nick.retel@gmail.com>
+Date: Mon, 12 Oct 2026 21:23:32 +0200
+Subject: [PATCH] Sweep UpCloud and refresh its template nightly while the
+ token file is set
+
+The host sweep now runs whenever the UpCloud token file is set, also with
+task VMs off; the Incus hosts are swept only while task VMs are enabled.
+RefreshUpCloudTaskVmTemplate builds a new template every night at 02:00 on
+the template queue, once a first verified template exists.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../TaskVms/RefreshUpCloudTaskVmTemplate.php  | 52 +++++++++++++++++++
+ .../app/Jobs/TaskVms/SweepTaskVmHosts.php     |  9 ++--
+ apps/gateway/bootstrap/app.php                | 10 +++-
+ .../tests/Feature/TaskVms/TaskVmSweepTest.php | 17 +++++-
+ 4 files changed, 80 insertions(+), 8 deletions(-)
+ create mode 100644 apps/gateway/app/Jobs/TaskVms/RefreshUpCloudTaskVmTemplate.php
+
+diff --git a/apps/gateway/app/Jobs/TaskVms/RefreshUpCloudTaskVmTemplate.php b/apps/gateway/app/Jobs/TaskVms/RefreshUpCloudTaskVmTemplate.php
+new file mode 100644
+index 0000000000..ee28920c2a
+--- /dev/null
++++ b/apps/gateway/app/Jobs/TaskVms/RefreshUpCloudTaskVmTemplate.php
+@@ -0,0 +1,52 @@
++<?php
++
++declare(strict_types=1);
++
++namespace App\Jobs\TaskVms;
++
++use App\Domain\TaskVms\TaskVmSettings;
++use App\Infrastructure\TaskVms\TaskVmWorkspaceTemplates;
++use App\Infrastructure\TaskVms\UpCloudServers;
++use App\Infrastructure\TaskVms\UpCloudTaskVmImageBuilder;
++use Illuminate\Contracts\Queue\ShouldBeUnique;
++use Illuminate\Contracts\Queue\ShouldQueue;
++use Illuminate\Foundation\Queue\Queueable;
++use Illuminate\Support\Facades\Log;
++
++/**
++ * The nightly UpCloud refresh: builds a new task VM template inside UpCloud with the shared recipe, as
++ * `task-vms:build-upcloud-image` does, and keeps the two newest verified templates. The first build is always that
++ * command, so while UpCloud has no verified template the job changes nothing. A failed build keeps the current
++ * template. It runs on the template queue, whose own worker runs one job at a time, so the build holds up no task VM
++ * job.
++ */
++final class RefreshUpCloudTaskVmTemplate implements ShouldBeUnique, ShouldQueue
++{
++    use Queueable;
++
++    public int $tries = 1;
++
++    /** The template worker's limit, below the queue's `retry_after` of 1800 seconds. A build takes about 20 minutes. */
++    public int $timeout = 1700;
++
++    public bool $failOnTimeout = true;
++
++    public int $uniqueFor = 3600;
++
++    public function __construct()
++    {
++        $this->onConnection('task-vms')->onQueue(TaskVmWorkspaceTemplates::Queue);
++    }
++
++    public function handle(TaskVmSettings $settings, UpCloudServers $servers, UpCloudTaskVmImageBuilder $builder): void
++    {
++        if ($settings->upcloud === null || $servers->currentTemplate() === null) {
++            return;
++        }
++
++        $template = $builder->build(static function (string $stage, float $seconds): void {
++            Log::info('UpCloud task VM template build stage done.', ['stage' => $stage, 'seconds' => $seconds]);
++        });
++        Log::info('UpCloud task VM template refreshed.', ['template' => $template]);
++    }
++}
+diff --git a/apps/gateway/app/Jobs/TaskVms/SweepTaskVmHosts.php b/apps/gateway/app/Jobs/TaskVms/SweepTaskVmHosts.php
+index 267e60ec9f..dfccdaba57 100644
+--- a/apps/gateway/app/Jobs/TaskVms/SweepTaskVmHosts.php
++++ b/apps/gateway/app/Jobs/TaskVms/SweepTaskVmHosts.php
+@@ -27,13 +27,14 @@
+ use Throwable;
+ 
+ /**
+- * Every 10 minutes: deletes orphaned `tvm-<number>` VMs in each configured host's Incus project, then the workspace
++ * Every 10 minutes, while task VMs are enabled: deletes orphaned `tvm-<number>` VMs in each configured host's Incus project, then the workspace
+  * clones `tvm-<number>-workspace` that no live row owns, and fails the
+  * `warm`, `ready`, or `parked` rows whose VM is gone on two sweeps in a row, so their groups ask for assistance. A
+  * failed warm VM has no group: the pool refill destroys it. The
+  * first sweep that misses a VM only marks it in the cache; a sweep that finds the VM clears the mark. It reads and changes only the
+- * host's configured project. While UpCloud is configured, it does the same for the servers with the task VM label
+- * there, and deletes base image build servers and unverified templates older than two hours. The worker runs one job at a time, so no task VM job creates or deletes a VM while the sweep runs. A failed
++ * host's configured project. While UpCloud is configured, also with task VMs or the overflow off, it does the same for
++ * the servers with the task VM label there, and deletes base image build servers and unverified templates older than
++ * two hours, except those of a build that is marked as running. The worker runs one job at a time, so no task VM job creates or deletes a VM while the sweep runs. A failed
+  * host is logged, and the other hosts still run.
+  */
+ final class SweepTaskVmHosts implements ShouldBeUnique, ShouldQueue
+@@ -56,7 +57,7 @@ public function __construct()
+     public function handle(TaskVmSettings $settings, TaskVmHostAudit $audit, TaskVmWorkspaceTemplates $templates, UpCloudServers $servers, UpCloudTaskVmImageBuilder $images): void
+     {
+         $failures = [];
+-        foreach ($settings->hosts as $host) {
++        foreach ($settings->enabled ? $settings->hosts : [] as $host) {
+             $node = Node::query()->whereKey($host->nodeId)->where('status', LifecycleStatus::Active)->first();
+             if (! $node instanceof Node) {
+                 continue;
+diff --git a/apps/gateway/bootstrap/app.php b/apps/gateway/bootstrap/app.php
+index 52623b829b..f86b8addc4 100644
+--- a/apps/gateway/bootstrap/app.php
++++ b/apps/gateway/bootstrap/app.php
+@@ -33,6 +33,7 @@
+ use App\Infrastructure\TaskVms\TaskVmWorkspaceTemplates;
+ use App\Jobs\TaskVms\RefillTaskVmPool;
+ use App\Jobs\TaskVms\RefreshTaskVmBaseImages;
++use App\Jobs\TaskVms\RefreshUpCloudTaskVmTemplate;
+ use App\Jobs\TaskVms\SweepTaskVmHosts;
+ use Illuminate\Console\Scheduling\Schedule;
+ use Illuminate\Database\Eloquent\ModelNotFoundException;
+@@ -79,9 +80,14 @@
+         // refresh when it ends, and every base image promote does too, so templates always follow the image.
+         $schedule->job(new RefreshTaskVmBaseImages)->dailyAt('03:00')
+             ->when(static fn (): bool => config('task_vms.enabled') === true);
+-        // The task VM host sweep: orphaned VMs and clones, and live rows whose VM is gone.
++        // The nightly UpCloud template refresh, on the template queue, so its build of about 20 minutes holds up no
++        // task VM job. It runs while the UpCloud token file is set, also with the overflow off.
++        $schedule->job(new RefreshUpCloudTaskVmTemplate)->dailyAt('02:00')
++            ->when(static fn (): bool => filled(config('task_vms.upcloud.token_file')));
++        // The task VM host sweep: orphaned VMs and clones, and live rows whose VM is gone. It also runs while only the
++        // UpCloud token file is set, so no UpCloud server that Orbit created keeps costing money.
+         $schedule->job(new SweepTaskVmHosts)->everyTenMinutes()
+-            ->when(static fn (): bool => config('task_vms.enabled') === true);
++            ->when(static fn (): bool => config('task_vms.enabled') === true || filled(config('task_vms.upcloud.token_file')));
+         // The task VM pool: warm VMs up to each host's warm_vms, and a drain while task VMs are off. Inert while no
+         // host has warm_vms and no pool VM exists.
+         $schedule->job(new RefillTaskVmPool)->everyMinute()
+diff --git a/apps/gateway/tests/Feature/TaskVms/TaskVmSweepTest.php b/apps/gateway/tests/Feature/TaskVms/TaskVmSweepTest.php
+index 724c2be691..ff71797ddc 100644
+--- a/apps/gateway/tests/Feature/TaskVms/TaskVmSweepTest.php
++++ b/apps/gateway/tests/Feature/TaskVms/TaskVmSweepTest.php
+@@ -215,11 +215,11 @@ public function put(string $host, int $port, HostKey $key): void {}
+         expect($this->incus->instances['10.44.0.8'])->toBe(['tvm-8888']);
+     });
+ 
+-    it('is queued on the task VM queue every 10 minutes while task VMs are enabled', function (): void {
++    it('is queued on the task VM queue every 10 minutes while task VMs are enabled or the UpCloud token file is set', function (): void {
+         Artisan::call('schedule:list');
+         $sweep = collect(app(Schedule::class)->events())->first(static fn ($event): bool => $event instanceof CallbackEvent && $event->description === SweepTaskVmHosts::class);
+ 
+-        config(['task_vms.enabled' => false]);
++        config(['task_vms.enabled' => false, 'task_vms.upcloud.token_file' => null]);
+         expect($sweep)->not->toBeNull()
+             ->and($sweep->expression)->toBe('*/10 * * * *')
+             ->and($sweep->filtersPass(app()))->toBeFalse()
+@@ -227,6 +227,19 @@ public function put(string $host, int $port, HostKey $key): void {}
+ 
+         config(['task_vms.enabled' => true]);
+         expect($sweep->filtersPass(app()))->toBeTrue();
++
++        config(['task_vms.enabled' => false, 'task_vms.upcloud.token_file' => '/home/orbit/upcloud.yaml']);
++        expect($sweep->filtersPass(app()))->toBeTrue();
++    });
++
++    it('leaves the Incus hosts alone while task VMs are off', function (): void {
++        app()->instance(TaskVmSettings::class, new TaskVmSettings(false, null, '10.44.0.128/25', app(TaskVmSettings::class)->hosts, null, null, null, []));
++        $this->incus->instances = ['10.44.0.7' => ['tvm-9999']];
++
++        app()->call([new SweepTaskVmHosts, 'handle']);
++
++        expect($this->incus->instances['10.44.0.7'])->toBe(['tvm-9999'])
++            ->and($this->incus->calls)->toBe([]);
+     });
+ });
+ 

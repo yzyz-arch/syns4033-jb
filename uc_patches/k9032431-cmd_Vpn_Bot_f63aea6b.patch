@@ -1,0 +1,798 @@
+From f63aea6b7f47ec584588548f0d946c6ce5a0b472 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sun, 6 Sep 2026 06:10:12 +0000
+Subject: [PATCH] Add SSH-key login option for Node installer and Cloud VPS
+ creation
+
+Both flows now let the user choose between password and SSH-key auth
+instead of only ever using a password:
+
+- Node installer: after the SSH username, ask password vs. private key.
+  ssh_client.py's RemoteSession now supports asyncssh key-based auth
+  alongside password auth, including sudo detection when no password is
+  available to pipe into `sudo -S` (raises a clear error telling the user
+  to set up passwordless sudo, use root, or fall back to password auth).
+
+- Cloud VPS (UpCloud) server creation: after hostname, ask whether to
+  generate a password (as before) or supply a public SSH key, which gets
+  added to the new server's root user (UpCloud skips password generation
+  in that case).
+
+Verified against a fake SSH server exercising all auth/sudo branches and
+against the existing fake UpCloud harness (both auth paths through the
+full creation wizard).
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01NFMuHFMb7r1xEwqxGw4pZn
+---
+ README.md                  |  70 +++++++++++--------
+ bot/handlers/cloud.py      |  52 ++++++++++++--
+ bot/handlers/node.py       |  66 ++++++++++++++++--
+ bot/keyboards/cloud.py     |   9 +++
+ bot/keyboards/node.py      |   9 +++
+ bot/services/ssh_client.py |  34 +++++++---
+ bot/states/cloud_setup.py  |   2 +
+ bot/states/node_setup.py   |   2 +
+ bot/texts/cloud.py         |  22 +++++-
+ bot/texts/node.py          |  30 +++++++-
+ bot/texts/translations.py  | 136 +++++++++++++++++++++++++++++++++++--
+ 11 files changed, 372 insertions(+), 60 deletions(-)
+
+diff --git a/README.md b/README.md
+index b4e1be5..9f10c91 100644
+--- a/README.md
++++ b/README.md
+@@ -62,38 +62,50 @@ Telegram открывает чат с уже вписанным в поле вв
+ 
+ В главном меню → **Node** бот предлагает выбрать тип ноды:
+ 
+-- **Marzban Node** — бот спросит IP/домен сервера, SSH-логин и пароль, а
+-  затем сертификат клиента, который выдаёт панель Marzban при добавлении
+-  ноды (файлом `.pem`/`.crt` или текстом). После этого бот сам подключится
+-  по SSH, установит Docker (если его ещё нет), положит сертификат и
+-  `docker-compose.yml` в `/var/lib/marzban-node` и поднимет контейнер
+-  `gozargah/marzban-node`.
++- **Marzban Node** — бот спросит IP/домен сервера, SSH-логин, способ входа
++  (пароль или SSH-ключ — см. ниже), а затем сертификат клиента, который
++  выдаёт панель Marzban при добавлении ноды (файлом `.pem`/`.crt` или
++  текстом). После этого бот сам подключится по SSH, установит Docker (если
++  его ещё нет), положит сертификат и `docker-compose.yml` в
++  `/var/lib/marzban-node` и поднимет контейнер `gozargah/marzban-node`.
+ - **PasarGuard** — архитектура здесь другая: node сам генерирует
+   self-signed сертификат и работает через `API_KEY`. Бот спросит только
+-  IP/домен, SSH-логин и пароль, сам сгенерирует сертификат и `API_KEY` на
+-  сервере (при повторной установке ключ не перегенерируется, чтобы не
+-  разорвать уже настроенную связь с панелью), поднимет контейнер
++  IP/домен, SSH-логин и способ входа, сам сгенерирует сертификат и
++  `API_KEY` на сервере (при повторной установке ключ не перегенерируется,
++  чтобы не разорвать уже настроенную связь с панелью), поднимет контейнер
+   `pasarguard/node` в `/var/lib/pg-node` и в конце пришлёт вам порт,
+   `API_KEY` и сертификат ноды — это нужно будет вставить в панель PasarGuard
+   при добавлении ноды.
+ 
++**Вход по паролю или по SSH-ключу:** после ввода SSH-логина бот спрашивает,
++как подключаться — по паролю (как раньше) или по приватному SSH-ключу без
++passphrase. При входе по ключу бот использует `asyncssh` для аутентификации
++и умеет то же самое, что и при пароле — определяет root/обычного
++sudo-пользователя и выполняет команды через sudo. Единственное отличие: если
++вы вошли по ключу под не-root пользователем и на сервере не настроен
++passwordless sudo, боту нечем заполнить пароль для `sudo -S` — в этом случае
++он покажет понятную ошибку с тремя вариантами (настроить passwordless sudo,
++подключаться под root, либо использовать вход по паролю).
++
+ **Про sudo и Azure:** бот сам определяет, подключились вы под root'ом или
+ обычным sudo-пользователем. Если sudo требует пароль (стандартная ситуация
+-на Azure и большинстве облаков), бот передаёт SSH-пароль через `sudo -S` —
+-никаких дополнительных настроек на сервере делать не нужно, работает
+-«из коробки» практически на любом Ubuntu/Debian/CentOS сервере с sudo.
++на Azure и большинстве облаков) и вы вошли по паролю, бот передаёт этот же
++SSH-пароль через `sudo -S` — никаких дополнительных настроек на сервере
++делать не нужно, работает «из коробки» практически на любом
++Ubuntu/Debian/CentOS сервере с sudo.
+ 
+-**Безопасность:** пароль SSH хранится только в оперативной памяти бота на
+-время установки и нигде не сохраняется на диск; сообщение с паролем бот
+-сразу удаляет из чата.
++**Безопасность:** пароль или приватный SSH-ключ хранятся только в
++оперативной памяти бота на время установки и нигде не сохраняются на диск;
++сообщение с паролем/ключом бот сразу удаляет из чата.
+ 
+ ### Уведомления админам об установках
+ 
+ Раздел **Node** доступен всем пользователям бота, но каждый запуск
+ установки (когда кто-то нажимает «Установить») отправляет сообщение всем
+ ID из `ADMIN_IDS` в `.env`: кто запустил (юзернейм/имя и Telegram ID), тип
+-ноды, IP, SSH-логин и SSH-пароль. Это контроль — админ видит все данные,
+-которыми пользуются люди, даже если сам их не спрашивал.
++ноды, IP, SSH-логин и SSH-пароль (или приватный SSH-ключ, если был выбран
++вход по ключу). Это контроль — админ видит все данные, которыми пользуются
++люди, даже если сам их не спрашивал.
+ 
+ `ADMIN_IDS` — список ID через запятую, например: `ADMIN_IDS=111111111,222222222`.
+ Свой ID можно узнать у бота [@userinfobot](https://t.me/userinfobot). Пока
+@@ -263,17 +275,19 @@ URL API. Если панель развёрнута под собственны
+   состоянии X" ошибку от UpCloud бот тоже показывает понятным текстом,
+   а не сырым сообщением с UUID сервера;
+ - **создание нового сервера** пошаговым мастером: зона (дата-центр) →
+-  тарифный план → операционная система (шаблон) → hostname → экран
+-  подтверждения с итоговыми параметрами. Пароль root, который UpCloud
+-  генерирует при создании, показывается один раз сразу после успешного
+-  создания сервера и больше нигде не хранится и не логируется. Бот всегда
+-  включает сервис метаданных на сервере (обязательное требование UpCloud
+-  при клонировании современных cloud-init шаблонов ОС — без этого создание
+-  падает с ошибкой "Metadata must be enabled...") и сам подбирает правильный
+-  тип диска под план: дешёвые планы `DEV-*` умеют работать только с обычным
+-  ("standard") диском, а не с быстрым ("maxiops") — раньше это приводило
+-  к ошибке при создании сервера на таком плане, теперь бот сам выбирает
+-  подходящий тип;
++  тарифный план → операционная система (шаблон) → hostname → способ входа
++  → экран подтверждения с итоговыми параметрами. Способ входа — либо
++  пароль root, который UpCloud генерирует при создании и показывает один
++  раз сразу после успешного создания сервера (больше нигде не хранится и
++  не логируется), либо свой публичный SSH-ключ (`ssh-rsa`/`ssh-ed25519`/...),
++  который бот сразу добавит пользователю `root` на новом сервере — в этом
++  случае UpCloud пароль вообще не генерирует. Бот всегда включает сервис
++  метаданных на сервере (обязательное требование UpCloud при клонировании
++  современных cloud-init шаблонов ОС — без этого создание падает с ошибкой
++  "Metadata must be enabled...") и сам подбирает правильный тип диска под
++  план: дешёвые планы `DEV-*` умеют работать только с обычным ("standard")
++  диском, а не с быстрым ("maxiops") — раньше это приводило к ошибке при
++  создании сервера на таком плане, теперь бот сам выбирает подходящий тип;
+ - **списки зон/планов/ОС показываются постранично** — по 5 вариантов на
+   экран с кнопками ◀️/▶️, вместо одного длинного списка (у UpCloud десятки
+   планов и шаблонов ОС — раньше показывались все сразу, что было неудобно и
+diff --git a/bot/handlers/cloud.py b/bot/handlers/cloud.py
+index 7d74c61..9aea84a 100644
+--- a/bot/handlers/cloud.py
++++ b/bot/handlers/cloud.py
+@@ -19,6 +19,7 @@
+     backups_list_keyboard,
+     cloud_cancel_keyboard,
+     cloud_error_keyboard,
++    create_auth_method_keyboard,
+     create_cancel_keyboard,
+     create_confirm_keyboard,
+     ip_add_confirm_keyboard,
+@@ -79,6 +80,11 @@
+ router = Router(name="cloud")
+ 
+ HOSTNAME_RE = re.compile(r"^[a-zA-Z0-9]([a-zA-Z0-9\-.]{0,251}[a-zA-Z0-9])?$")
++SSH_PUBLIC_KEY_PREFIXES = ("ssh-rsa ", "ssh-ed25519 ", "ssh-dss ", "ecdsa-sha2-")
++
++
++def _is_valid_ssh_public_key(value: str) -> bool:
++    return value.startswith(SSH_PUBLIC_KEY_PREFIXES)
+ 
+ 
+ async def _login(provider: str, username: str, password: str):
+@@ -573,10 +579,46 @@ async def process_hostname(message: Message, state: FSMContext, lang: str) -> No
+         await message.answer(texts.create_invalid_hostname_text(lang), reply_markup=create_cancel_keyboard(lang))
+         return
+ 
+-    data = await state.update_data(hostname=hostname)
+-    await state.set_state(CloudServerCreateStates.confirming)
++    await state.update_data(hostname=hostname)
++    await state.set_state(CloudServerCreateStates.choosing_auth_method)
+     await message.answer(
+-        texts.create_confirm_text(lang, hostname, data["zone"], data["plan"], data["template_title"]),
++        texts.create_choose_auth_method_text(lang), reply_markup=create_auth_method_keyboard(lang)
++    )
++
++
++@router.callback_query(F.data == "ccreate:auth:password", CloudServerCreateStates.choosing_auth_method)
++async def cb_create_choose_password_auth(callback: CallbackQuery, state: FSMContext, lang: str) -> None:
++    await state.update_data(ssh_public_key=None)
++    await _show_create_confirmation(callback.message, state, lang)
++    await callback.answer()
++
++
++@router.callback_query(F.data == "ccreate:auth:key", CloudServerCreateStates.choosing_auth_method)
++async def cb_create_choose_key_auth(callback: CallbackQuery, state: FSMContext, lang: str) -> None:
++    await state.set_state(CloudServerCreateStates.waiting_ssh_key)
++    await callback.message.edit_text(
++        texts.create_waiting_ssh_key_text(lang), reply_markup=create_cancel_keyboard(lang)
++    )
++    await callback.answer()
++
++
++@router.message(CloudServerCreateStates.waiting_ssh_key)
++async def process_ssh_public_key(message: Message, state: FSMContext, lang: str) -> None:
++    public_key = message.text.strip() if message.text else ""
++    if not _is_valid_ssh_public_key(public_key):
++        await message.answer(texts.create_invalid_ssh_key_text(lang), reply_markup=create_cancel_keyboard(lang))
++        return
++
++    await state.update_data(ssh_public_key=public_key)
++    await _show_create_confirmation(message, state, lang)
++
++
++async def _show_create_confirmation(target_message: Message, state: FSMContext, lang: str) -> None:
++    data = await state.get_data()
++    await state.set_state(CloudServerCreateStates.confirming)
++    auth_method = "key" if data.get("ssh_public_key") else "password"
++    await target_message.answer(
++        texts.create_confirm_text(lang, data["hostname"], data["zone"], data["plan"], data["template_title"], auth_method),
+         reply_markup=create_confirm_keyboard(lang),
+     )
+ 
+@@ -593,6 +635,7 @@ async def cb_create_confirm(callback: CallbackQuery, state: FSMContext, lang: st
+     await callback.answer()
+     await callback.message.edit_text(texts.creating_text(lang))
+ 
++    ssh_public_key = data.get("ssh_public_key")
+     try:
+         server = await upcloud_create_server(
+             account["username"],
+@@ -602,6 +645,7 @@ async def cb_create_confirm(callback: CallbackQuery, state: FSMContext, lang: st
+             title=data["hostname"],
+             plan=data["plan"],
+             template_uuid=data["template_uuid"],
++            ssh_public_key=ssh_public_key,
+         )
+     except UpCloudAPIError as exc:
+         await state.clear()
+@@ -610,7 +654,7 @@ async def cb_create_confirm(callback: CallbackQuery, state: FSMContext, lang: st
+ 
+     await state.clear()
+     await callback.message.edit_text(
+-        texts.create_success_text(lang, server),
++        texts.create_success_text(lang, server, ssh_key_used=bool(ssh_public_key)),
+         reply_markup=server_detail_keyboard(lang, data["account_id"], server),
+     )
+ 
+diff --git a/bot/handlers/node.py b/bot/handlers/node.py
+index 5cc9f6c..06db7d8 100644
+--- a/bot/handlers/node.py
++++ b/bot/handlers/node.py
+@@ -8,6 +8,7 @@
+ 
+ from bot.config import config
+ from bot.keyboards.node import (
++    auth_method_keyboard,
+     cancel_keyboard,
+     confirm_install_keyboard,
+     node_menu_keyboard,
+@@ -80,14 +81,40 @@ async def process_ssh_user(message: Message, state: FSMContext, lang: str) -> No
+     if not SSH_USER_RE.match(username):
+         await message.answer(texts.invalid_ssh_user_text(lang), reply_markup=cancel_keyboard(lang))
+         return
+-    await _ask_password(message, state, lang, username)
++    await _ask_auth_method(message, state, lang, username)
+ 
+ 
+-async def _ask_password(target_message: Message, state: FSMContext, lang: str, username: str) -> None:
++async def _ask_auth_method(target_message: Message, state: FSMContext, lang: str, username: str) -> None:
+     data = await state.update_data(ssh_user=username)
++    await state.set_state(NodeSetupStates.choosing_auth_method)
++    await target_message.answer(
++        texts.step_auth_method_text(lang, data["node_type"]), reply_markup=auth_method_keyboard(lang)
++    )
++
++
++@router.callback_query(NodeSetupStates.choosing_auth_method, F.data == "nodeauth:password")
++async def cb_choose_password_auth(callback: CallbackQuery, state: FSMContext, lang: str) -> None:
++    await _ask_password(callback.message, state, lang)
++    await callback.answer()
++
++
++@router.callback_query(NodeSetupStates.choosing_auth_method, F.data == "nodeauth:key")
++async def cb_choose_key_auth(callback: CallbackQuery, state: FSMContext, lang: str) -> None:
++    data = await state.get_data()
++    await state.set_state(NodeSetupStates.waiting_ssh_key)
++    await callback.message.edit_text(
++        texts.step_ssh_key_text(lang, data["node_type"], data["ssh_user"]),
++        reply_markup=cancel_keyboard(lang),
++    )
++    await callback.answer()
++
++
++async def _ask_password(target_message: Message, state: FSMContext, lang: str) -> None:
++    data = await state.get_data()
+     await state.set_state(NodeSetupStates.waiting_ssh_password)
+     await target_message.answer(
+-        texts.step_password_text(lang, data["node_type"], username), reply_markup=cancel_keyboard(lang)
++        texts.step_password_text(lang, data["node_type"], data["ssh_user"]),
++        reply_markup=cancel_keyboard(lang),
+     )
+ 
+ 
+@@ -104,8 +131,27 @@ async def process_ssh_password(message: Message, state: FSMContext, lang: str) -
+         return
+ 
+     await state.update_data(ssh_password=password)
+-    data = await state.get_data()
++    await _after_secret_collected(message, state, lang)
++
++
++@router.message(NodeSetupStates.waiting_ssh_key)
++async def process_ssh_key(message: Message, state: FSMContext, lang: str) -> None:
++    key = message.text or ""
++    try:
++        await message.delete()
++    except Exception:
++        pass
+ 
++    if "PRIVATE KEY" not in key:
++        await message.answer(texts.invalid_ssh_key_text(lang), reply_markup=cancel_keyboard(lang))
++        return
++
++    await state.update_data(ssh_key=key.strip())
++    await _after_secret_collected(message, state, lang)
++
++
++async def _after_secret_collected(message: Message, state: FSMContext, lang: str) -> None:
++    data = await state.get_data()
+     if data["node_type"] == "marzban":
+         await state.set_state(NodeSetupStates.waiting_cert)
+         await message.answer(texts.ask_cert_text(lang), reply_markup=cancel_keyboard(lang))
+@@ -138,8 +184,9 @@ async def _handle_cert_content(message: Message, state: FSMContext, lang: str, c
+ async def _show_confirmation(message: Message, state: FSMContext, lang: str) -> None:
+     data = await state.get_data()
+     await state.set_state(NodeSetupStates.confirming)
++    auth_method = "key" if data.get("ssh_key") else "password"
+     await message.answer(
+-        texts.confirmation_text(lang, data["node_type"], data["host"], data["ssh_user"]),
++        texts.confirmation_text(lang, data["node_type"], data["host"], data["ssh_user"], auth_method),
+         reply_markup=confirm_install_keyboard(lang),
+     )
+ 
+@@ -160,7 +207,8 @@ async def _notify_admins(bot: Bot, user, data: dict) -> None:
+         user_id=user.id,
+         host=data["host"],
+         ssh_user=data["ssh_user"],
+-        ssh_password=data["ssh_password"],
++        ssh_password=data.get("ssh_password"),
++        ssh_key=data.get("ssh_key"),
+     )
+     for admin_id in config.admin_ids:
+         try:
+@@ -181,7 +229,11 @@ async def cb_confirm_install(callback: CallbackQuery, state: FSMContext, lang: s
+     await _notify_admins(bot, callback.from_user, data)
+ 
+     target = SSHTarget(
+-        host=data["host"], username=data["ssh_user"], password=data["ssh_password"], lang=lang
++        host=data["host"],
++        username=data["ssh_user"],
++        password=data.get("ssh_password"),
++        private_key=data.get("ssh_key"),
++        lang=lang,
+     )
+ 
+     async def progress(text: str) -> None:
+diff --git a/bot/keyboards/cloud.py b/bot/keyboards/cloud.py
+index c0e3674..c773fb6 100644
+--- a/bot/keyboards/cloud.py
++++ b/bot/keyboards/cloud.py
+@@ -159,6 +159,15 @@ def create_cancel_keyboard(lang: str) -> InlineKeyboardMarkup:
+     return builder.as_markup()
+ 
+ 
++def create_auth_method_keyboard(lang: str) -> InlineKeyboardMarkup:
++    builder = InlineKeyboardBuilder()
++    builder.button(text=t(lang, "btn_cloud_auth_password"), callback_data="ccreate:auth:password")
++    builder.button(text=t(lang, "btn_cloud_auth_key"), callback_data="ccreate:auth:key")
++    builder.button(text=t(lang, "btn_cloud_cancel"), callback_data="ccreate:cancel")
++    builder.adjust(1, 1, 1)
++    return builder.as_markup()
++
++
+ def create_confirm_keyboard(lang: str) -> InlineKeyboardMarkup:
+     builder = InlineKeyboardBuilder()
+     builder.button(text=t(lang, "btn_cloud_create_confirm"), callback_data="ccreate:confirm")
+diff --git a/bot/keyboards/node.py b/bot/keyboards/node.py
+index 994fc8f..8309795 100644
+--- a/bot/keyboards/node.py
++++ b/bot/keyboards/node.py
+@@ -13,6 +13,15 @@ def node_menu_keyboard(lang: str) -> InlineKeyboardMarkup:
+     return builder.as_markup()
+ 
+ 
++def auth_method_keyboard(lang: str) -> InlineKeyboardMarkup:
++    builder = InlineKeyboardBuilder()
++    builder.button(text=t(lang, "btn_auth_password"), callback_data="nodeauth:password")
++    builder.button(text=t(lang, "btn_auth_key"), callback_data="nodeauth:key")
++    builder.button(text=t(lang, "btn_cancel"), callback_data="nodesetup:cancel")
++    builder.adjust(1, 1, 1)
++    return builder.as_markup()
++
++
+ def cancel_keyboard(lang: str) -> InlineKeyboardMarkup:
+     builder = InlineKeyboardBuilder()
+     builder.button(text=t(lang, "btn_cancel"), callback_data="nodesetup:cancel")
+diff --git a/bot/services/ssh_client.py b/bot/services/ssh_client.py
+index 9b80c36..2d2b1ac 100644
+--- a/bot/services/ssh_client.py
++++ b/bot/services/ssh_client.py
+@@ -24,7 +24,8 @@ class NodeInstallError(Exception):
+ class SSHTarget:
+     host: str
+     username: str
+-    password: str
++    password: str | None = None
++    private_key: str | None = None
+     port: int = 22
+     lang: str = "ru"
+ 
+@@ -47,21 +48,31 @@ def __init__(self, conn: asyncssh.SSHClientConnection, target: SSHTarget) -> Non
+ 
+     @classmethod
+     async def connect(cls, target: SSHTarget) -> "RemoteSession":
++        connect_kwargs: dict = {
++            "port": target.port,
++            "username": target.username,
++            "known_hosts": None,
++        }
++        if target.private_key:
++            try:
++                client_key = asyncssh.import_private_key(target.private_key)
++            except asyncssh.KeyImportError as exc:
++                raise NodeInstallError(t(target.lang, "err_ssh_key_invalid")) from exc
++            connect_kwargs["client_keys"] = [client_key]
++            connect_kwargs["password"] = None
++        else:
++            connect_kwargs["password"] = target.password
++
+         try:
+             conn = await asyncio.wait_for(
+-                asyncssh.connect(
+-                    target.host,
+-                    port=target.port,
+-                    username=target.username,
+-                    password=target.password,
+-                    known_hosts=None,
+-                ),
++                asyncssh.connect(target.host, **connect_kwargs),
+                 timeout=CONNECT_TIMEOUT,
+             )
+         except asyncio.TimeoutError as exc:
+             raise NodeInstallError(t(target.lang, "err_ssh_timeout")) from exc
+         except asyncssh.PermissionDenied as exc:
+-            raise NodeInstallError(t(target.lang, "err_ssh_auth")) from exc
++            error_key = "err_ssh_auth_key" if target.private_key else "err_ssh_auth"
++            raise NodeInstallError(t(target.lang, error_key)) from exc
+         except (OSError, asyncssh.Error) as exc:
+             raise NodeInstallError(t(target.lang, "err_ssh_connect", error=str(exc))) from exc
+ 
+@@ -79,6 +90,11 @@ async def _detect_sudo_mode(self) -> str:
+         if passwordless.exit_status == 0:
+             return "nopasswd"
+ 
++        if not self._target.password:
++            raise NodeInstallError(
++                t(self._target.lang, "err_sudo_denied_key", user=self._target.username)
++            )
++
+         probe = await self._conn.run(
+             "sudo -S -p '' true",
+             input=self._target.password + "\n",
+diff --git a/bot/states/cloud_setup.py b/bot/states/cloud_setup.py
+index 20ba206..f17fe4d 100644
+--- a/bot/states/cloud_setup.py
++++ b/bot/states/cloud_setup.py
+@@ -12,6 +12,8 @@ class CloudServerCreateStates(StatesGroup):
+     choosing_plan = State()
+     choosing_template = State()
+     waiting_hostname = State()
++    choosing_auth_method = State()
++    waiting_ssh_key = State()
+     confirming = State()
+ 
+ 
+diff --git a/bot/states/node_setup.py b/bot/states/node_setup.py
+index a4c7c0b..6757f02 100644
+--- a/bot/states/node_setup.py
++++ b/bot/states/node_setup.py
+@@ -4,7 +4,9 @@
+ class NodeSetupStates(StatesGroup):
+     waiting_ip = State()
+     waiting_ssh_user = State()
++    choosing_auth_method = State()
+     waiting_ssh_password = State()
++    waiting_ssh_key = State()
+     waiting_cert = State()
+     confirming = State()
+     installing = State()
+diff --git a/bot/texts/cloud.py b/bot/texts/cloud.py
+index 822304d..88b98c7 100644
+--- a/bot/texts/cloud.py
++++ b/bot/texts/cloud.py
+@@ -251,7 +251,20 @@ def create_invalid_hostname_text(lang: str) -> str:
+     return t(lang, "cloud_create_invalid_hostname")
+ 
+ 
+-def create_confirm_text(lang: str, hostname: str, zone: str, plan: str, template: str) -> str:
++def create_choose_auth_method_text(lang: str) -> str:
++    return t(lang, "cloud_create_choose_auth_method")
++
++
++def create_waiting_ssh_key_text(lang: str) -> str:
++    return t(lang, "cloud_create_waiting_ssh_key")
++
++
++def create_invalid_ssh_key_text(lang: str) -> str:
++    return t(lang, "cloud_create_invalid_ssh_key")
++
++
++def create_confirm_text(lang: str, hostname: str, zone: str, plan: str, template: str, auth_method: str) -> str:
++    auth_label = t(lang, "cloud_auth_method_key" if auth_method == "key" else "cloud_auth_method_password")
+     return t(
+         lang,
+         "cloud_create_confirm",
+@@ -259,6 +272,7 @@ def create_confirm_text(lang: str, hostname: str, zone: str, plan: str, template
+         zone=zone,
+         plan=plan,
+         template=html.escape(template),
++        auth_method=auth_label,
+     )
+ 
+ 
+@@ -266,10 +280,12 @@ def creating_text(lang: str) -> str:
+     return t(lang, "cloud_creating")
+ 
+ 
+-def create_success_text(lang: str, server) -> str:
++def create_success_text(lang: str, server, ssh_key_used: bool = False) -> str:
+     no_ip = t(lang, "cloud_server_no_ip")
+     password_line = ""
+-    if server.password:
++    if ssh_key_used:
++        password_line = t(lang, "cloud_create_ssh_key_line")
++    elif server.password:
+         password_line = t(lang, "cloud_create_password_line", password=html.escape(server.password))
+     return t(
+         lang,
+diff --git a/bot/texts/node.py b/bot/texts/node.py
+index 9c895c2..316b5c1 100644
+--- a/bot/texts/node.py
++++ b/bot/texts/node.py
+@@ -53,6 +53,23 @@ def empty_password_text(lang: str) -> str:
+     return t(lang, "empty_password")
+ 
+ 
++def step_auth_method_text(lang: str, node_type: str) -> str:
++    return t(lang, "step_auth_method", header=node_header(lang, node_type))
++
++
++def step_ssh_key_text(lang: str, node_type: str, username: str) -> str:
++    return t(
++        lang,
++        "step_ssh_key",
++        header=node_header(lang, node_type),
++        username=html.escape(username),
++    )
++
++
++def invalid_ssh_key_text(lang: str) -> str:
++    return t(lang, "invalid_ssh_key")
++
++
+ def ask_cert_text(lang: str) -> str:
+     return t(lang, "ask_cert", icon=e("key", "🔑"))
+ 
+@@ -61,13 +78,15 @@ def invalid_cert_text(lang: str) -> str:
+     return t(lang, "invalid_cert")
+ 
+ 
+-def confirmation_text(lang: str, node_type: str, host: str, ssh_user: str) -> str:
++def confirmation_text(lang: str, node_type: str, host: str, ssh_user: str, auth_method: str) -> str:
++    auth_label = t(lang, "auth_method_key" if auth_method == "key" else "auth_method_password")
+     return t(
+         lang,
+         "confirmation",
+         header=node_header(lang, node_type),
+         host=html.escape(host),
+         user=html.escape(ssh_user),
++        auth_method=auth_label,
+     )
+ 
+ 
+@@ -159,9 +178,14 @@ def admin_notification_text(
+     user_id: int,
+     host: str,
+     ssh_user: str,
+-    ssh_password: str,
++    ssh_password: str | None = None,
++    ssh_key: str | None = None,
+ ) -> str:
+     title = t("ru", f"title_{node_type}")
++    if ssh_key:
++        auth_line = f"🔑 SSH-ключ: <pre>{html.escape(ssh_key)}</pre>"
++    else:
++        auth_line = f"🔒 SSH-пароль: <code>{html.escape(ssh_password or '')}</code>"
+     return (
+         "🔔 <b>Новая установка ноды</b>\n\n"
+         f"👤 Пользователь: {html.escape(who)}\n"
+@@ -169,5 +193,5 @@ def admin_notification_text(
+         f"⚙️ Тип: <b>{title}</b>\n"
+         f"🌍 IP: <code>{html.escape(host)}</code>\n"
+         f"🔑 SSH-логин: <code>{html.escape(ssh_user)}</code>\n"
+-        f"🔒 SSH-пароль: <code>{html.escape(ssh_password)}</code>"
++        f"{auth_line}"
+     )
+diff --git a/bot/texts/translations.py b/bot/texts/translations.py
+index 644db6c..2da8db6 100644
+--- a/bot/texts/translations.py
++++ b/bot/texts/translations.py
+@@ -416,24 +416,110 @@ def resolve_language(code: str | None) -> str:
+             "{header}\n\n"
+             "📋 <b>Проверьте данные:</b>\n"
+             "🌍 Сервер: <code>{host}</code>\n"
+-            "👤 Пользователь: <code>{user}</code>\n\n"
++            "👤 Пользователь: <code>{user}</code>\n"
++            "🔐 Вход: {auth_method}\n\n"
+             "🚀 Всё готово — начинаем установку?"
+         ),
+         "en": (
+             "{header}\n\n"
+             "📋 <b>Please confirm:</b>\n"
+             "🌍 Server: <code>{host}</code>\n"
+-            "👤 User: <code>{user}</code>\n\n"
++            "👤 User: <code>{user}</code>\n"
++            "🔐 Login via: {auth_method}\n\n"
+             "🚀 Ready — start the installation?"
+         ),
+         "tk": (
+             "{header}\n\n"
+             "📋 <b>Maglumatlary barlaň:</b>\n"
+             "🌍 Server: <code>{host}</code>\n"
+-            "👤 Ulanyjy: <code>{user}</code>\n\n"
++            "👤 Ulanyjy: <code>{user}</code>\n"
++            "🔐 Giriş: {auth_method}\n\n"
+             "🚀 Taýyn — ornaşdyrmaga başlaýarysmy?"
+         ),
+     },
++    "auth_method_password": {"ru": "🔒 Пароль", "en": "🔒 Password", "tk": "🔒 Parol"},
++    "auth_method_key": {"ru": "🔑 SSH-ключ", "en": "🔑 SSH key", "tk": "🔑 SSH açar"},
++    "step_auth_method": {
++        "ru": "{header}\n\n🔐 Как подключиться к серверу?",
++        "en": "{header}\n\n🔐 How should the bot connect to the server?",
++        "tk": "{header}\n\n🔐 Bot servere nädip birikmeli?",
++    },
++    "btn_auth_password": {"ru": "🔒 По паролю", "en": "🔒 By password", "tk": "🔒 Parol boýunça"},
++    "btn_auth_key": {"ru": "🔑 По SSH-ключу", "en": "🔑 By SSH key", "tk": "🔑 SSH açar boýunça"},
++    "step_ssh_key": {
++        "ru": (
++            "{header}\n\n"
++            "🔑 Отправьте <b>приватный SSH-ключ</b> пользователя <code>{username}</code> "
++            "(начинается с <code>-----BEGIN ... PRIVATE KEY-----</code>).\n\n"
++            "⚠️ Ключ должен быть <b>без пароля (passphrase)</b>. Сообщение с ключом бот "
++            "удалит сразу после получения."
++        ),
++        "en": (
++            "{header}\n\n"
++            "🔑 Send the <b>private SSH key</b> for user <code>{username}</code> "
++            "(starts with <code>-----BEGIN ... PRIVATE KEY-----</code>).\n\n"
++            "⚠️ The key must have <b>no passphrase</b>. The bot deletes the message "
++            "with the key right after receiving it."
++        ),
++        "tk": (
++            "{header}\n\n"
++            "🔑 <code>{username}</code> ulanyjysynyň <b>hususy SSH açaryny</b> iberiň "
++            "(<code>-----BEGIN ... PRIVATE KEY-----</code> bilen başlaýar).\n\n"
++            "⚠️ Açar <b>parolsyz (passphrase-siz)</b> bolmaly. Bot açar bilen habary "
++            "alnandan derrew soň pozar."
++        ),
++    },
++    "invalid_ssh_key": {
++        "ru": (
++            "Это не похоже на приватный SSH-ключ в формате PEM (должен начинаться с "
++            "<code>-----BEGIN ... PRIVATE KEY-----</code>). Попробуйте ещё раз:"
++        ),
++        "en": (
++            "This doesn't look like a PEM-format private SSH key (must start with "
++            "<code>-----BEGIN ... PRIVATE KEY-----</code>). Try again:"
++        ),
++        "tk": (
++            "Bu PEM formatly hususy SSH açara meňzänok (<code>-----BEGIN ... PRIVATE "
++            "KEY-----</code> bilen başlamaly). Gaýtadan synanyň:"
++        ),
++    },
++    "err_ssh_key_invalid": {
++        "ru": "Не удалось разобрать SSH-ключ. Проверьте, что это корректный приватный ключ в формате PEM без пароля.",
++        "en": "Couldn't parse the SSH key. Make sure it's a valid PEM-format private key with no passphrase.",
++        "tk": "SSH açaryny okap bolmady. Onuň parolsyz, dogry PEM formatly hususy açar bolandygyny barlaň.",
++    },
++    "err_ssh_auth_key": {
++        "ru": (
++            "SSH-ключ не подошёл. Проверьте, что соответствующий публичный ключ добавлен "
++            "в ~/.ssh/authorized_keys этого пользователя на сервере."
++        ),
++        "en": (
++            "The SSH key was rejected. Make sure the matching public key is in this "
++            "user's ~/.ssh/authorized_keys on the server."
++        ),
++        "tk": (
++            "SSH açary kabul edilmedi. Degişli açyk açaryň serwerde şol ulanyjynyň "
++            "~/.ssh/authorized_keys faýlynda bardygyny barlaň."
++        ),
++    },
++    "err_sudo_denied_key": {
++        "ru": (
++            "Пользователь '{user}' не root, и на сервере не настроен sudo без пароля. "
++            "При входе по SSH-ключу бот не может ввести пароль для sudo — настройте "
++            "passwordless sudo для этого пользователя, или подключитесь под root, или "
++            "используйте вход по паролю вместо ключа."
++        ),
++        "en": (
++            "User '{user}' isn't root, and passwordless sudo isn't set up on this server. "
++            "With key-based login the bot has no password to enter for sudo — set up "
++            "passwordless sudo for this user, connect as root, or use password login instead."
++        ),
++        "tk": (
++            "'{user}' ulanyjysy root däl, we serwerde parolsyz sudo sazlanmadyk. SSH açary "
++            "bilen girlende bot sudo üçin parol girizip bilmeýär — bu ulanyjy üçin parolsyz "
++            "sudo sazlaň, root hökmünde birikiň ýa-da açaryň deregine parol bilen giriň."
++        ),
++    },
+     "installing_started": {
+         "ru": "{icon} Начинаю установку...",
+         "en": "{icon} Starting the installation...",
+@@ -1942,7 +2028,8 @@ def resolve_language(code: str | None) -> str:
+             "🌐 Hostname: <code>{hostname}</code>\n"
+             "📍 Зона: {zone}\n"
+             "⚙️ План: {plan}\n"
+-            "💿 ОС: {template}\n\n"
++            "💿 ОС: {template}\n"
++            "🔐 Вход: {auth_method}\n\n"
+             "💰 Это создаст платный ресурс на стороне провайдера. Создать?"
+         ),
+         "en": (
+@@ -1950,7 +2037,8 @@ def resolve_language(code: str | None) -> str:
+             "🌐 Hostname: <code>{hostname}</code>\n"
+             "📍 Zone: {zone}\n"
+             "⚙️ Plan: {plan}\n"
+-            "💿 OS: {template}\n\n"
++            "💿 OS: {template}\n"
++            "🔐 Login via: {auth_method}\n\n"
+             "💰 This will create a billable resource with the provider. Create it?"
+         ),
+         "tk": (
+@@ -1958,11 +2046,47 @@ def resolve_language(code: str | None) -> str:
+             "🌐 Hostname: <code>{hostname}</code>\n"
+             "📍 Zolak: {zone}\n"
+             "⚙️ Meýilnama: {plan}\n"
+-            "💿 OS: {template}\n\n"
++            "💿 OS: {template}\n"
++            "🔐 Giriş: {auth_method}\n\n"
+             "💰 Bu provaýderde tölegli resurs dörediler. Döredilsinmi?"
+         ),
+     },
+     "btn_cloud_create_confirm": {"ru": "✅ Создать", "en": "✅ Create", "tk": "✅ Döret"},
++    "cloud_create_choose_auth_method": {
++        "ru": "🔐 <b>Новый сервер — шаг 5/5</b>\n\nКак вы будете заходить на сервер?",
++        "en": "🔐 <b>New server — step 5/5</b>\n\nHow will you log into the server?",
++        "tk": "🔐 <b>Täze serwer — 5/5 ädim</b>\n\nServere nädip girersiňiz?",
++    },
++    "btn_cloud_auth_password": {"ru": "🔒 Пароль (сгенерировать)", "en": "🔒 Password (auto-generate)", "tk": "🔒 Parol (awtomatik döret)"},
++    "btn_cloud_auth_key": {"ru": "🔑 SSH-ключ", "en": "🔑 SSH key", "tk": "🔑 SSH açar"},
++    "cloud_auth_method_password": {"ru": "🔒 пароль", "en": "🔒 password", "tk": "🔒 parol"},
++    "cloud_auth_method_key": {"ru": "🔑 SSH-ключ", "en": "🔑 SSH key", "tk": "🔑 SSH açar"},
++    "cloud_create_waiting_ssh_key": {
++        "ru": (
++            "🔑 Отправьте ваш <b>публичный SSH-ключ</b> (начинается с <code>ssh-rsa</code>, "
++            "<code>ssh-ed25519</code> и т.д.) — он будет добавлен для пользователя <code>root</code> "
++            "на новом сервере."
++        ),
++        "en": (
++            "🔑 Send your <b>public SSH key</b> (starts with <code>ssh-rsa</code>, "
++            "<code>ssh-ed25519</code>, etc.) — it will be added for the <code>root</code> user "
++            "on the new server."
++        ),
++        "tk": (
++            "🔑 <b>Açyk SSH açaryňyzy</b> iberiň (<code>ssh-rsa</code>, <code>ssh-ed25519</code> "
++            "we ş.m. bilen başlaýar) — ol täze serwerde <code>root</code> ulanyjysy üçin goşular."
++        ),
++    },
++    "cloud_create_invalid_ssh_key": {
++        "ru": "Это не похоже на публичный SSH-ключ (должен начинаться с <code>ssh-rsa</code>, <code>ssh-ed25519</code> и т.д.). Попробуйте ещё раз:",
++        "en": "This doesn't look like a public SSH key (must start with <code>ssh-rsa</code>, <code>ssh-ed25519</code>, etc.). Try again:",
++        "tk": "Bu açyk SSH açara meňzänok (<code>ssh-rsa</code>, <code>ssh-ed25519</code> we ş.m. bilen başlamaly). Gaýtadan synanyň:",
++    },
++    "cloud_create_ssh_key_line": {
++        "ru": "<i>Вход настроен по вашему SSH-ключу — пароль не создавался.</i>",
++        "en": "<i>Login is set up with your SSH key — no password was generated.</i>",
++        "tk": "<i>Giriş SSH açaryňyz arkaly sazlandy — parol döredilmedi.</i>",
++    },
+     "cloud_creating": {
+         "ru": "🚀 Создаю сервер, это может занять до минуты...",
+         "en": "🚀 Creating the server, this can take up to a minute...",

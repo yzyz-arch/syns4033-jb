@@ -1,0 +1,600 @@
+From 099543dfa953d9aa48f2bdc6224f35b0f8a72eb6 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Aur=C3=A9lien=20Sibiril?=
+ <81782+aureliensibiril@users.noreply.github.com>
+Date: Mon, 27 Jul 2026 10:31:40 +0200
+Subject: [PATCH] Fix UpCloud admin detection and add name resolver
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+account/list marks the contract's primary account "main" on the live
+API, not "mymain" as the published docs example shows, so matching the
+documented spelling reported every account as a non-admin, including
+the contract owner. Roles cannot stand in: a main account carries the
+same technical/billing values a sub-account can hold. Classify off
+"sub" instead, the one value the docs and the API agree on.
+
+The fixture copied the docs example, so the test passed on the same
+wrong assumption. Its bodies now mirror a live capture, anonymized: the
+main account carries no main_account or allow_gui, sub-accounts add
+them plus the access lists, and the primary account's type is "main".
+A table test pins both spellings.
+
+A review keys accounts on email plus external ID. Email came only from
+account/details, and any failure blanked it while still emitting the
+record, so a transient 5xx moved an account to a different key and
+surfaced it as one account removed and another added. Only the stable
+answers now degrade: UpCloud returns 403 ACCOUNT_FORBIDDEN, not 404,
+for an account outside the token's reach, and both keep the list-only
+fields. Anything else aborts the run.
+
+A blank username no longer discards every account already collected,
+matching the sibling drivers.
+
+Resolve the source name from GET /1.3/account so sources read
+"UpCloud <username>" rather than staying generic, and link the
+connector to its documentation page.
+
+Signed-off-by: Aurélien Sibiril <81782+aureliensibiril@users.noreply.github.com>
+---
+ pkg/accessreview/drivers/name_resolver.go     |  43 ++++++
+ .../drivers/name_resolver_test.go             |  67 +++++++++
+ .../drivers/testdata/upcloud.yaml             |  31 ++--
+ pkg/accessreview/drivers/upcloud.go           |  74 ++++++----
+ pkg/accessreview/drivers/upcloud_test.go      | 134 ++++++++++++++++--
+ pkg/connector/provider/upcloud.go             |  31 ++--
+ 6 files changed, 315 insertions(+), 65 deletions(-)
+
+diff --git a/pkg/accessreview/drivers/name_resolver.go b/pkg/accessreview/drivers/name_resolver.go
+index 455751de75..a5370a7461 100644
+--- a/pkg/accessreview/drivers/name_resolver.go
++++ b/pkg/accessreview/drivers/name_resolver.go
+@@ -1809,3 +1809,46 @@ func (r *segmentNameResolver) ResolveInstanceName(ctx context.Context) (string,
+ 
+ 	return resp.Data.Workspace.Name, nil
+ }
++
++// upcloudNameResolver names the source after the username the API token
++// belongs to, via GET /1.3/account. UpCloud exposes no organisation or
++// workspace name, and account/list carries no marker for which of its rows
++// the token authenticated as.
++type upcloudNameResolver struct {
++	httpClient *http.Client
++}
++
++func NewUpCloudNameResolver(httpClient *http.Client) NameResolver {
++	return &upcloudNameResolver{httpClient: httpClient}
++}
++
++func (r *upcloudNameResolver) ResolveInstanceName(ctx context.Context) (string, error) {
++	req, err := http.NewRequestWithContext(ctx, http.MethodGet, upcloudAPIBaseURL+"/account", nil)
++	if err != nil {
++		return "", fmt.Errorf("cannot create upcloud account request: %w", err)
++	}
++
++	req.Header.Set("Accept", "application/json")
++
++	httpResp, err := r.httpClient.Do(req)
++	if err != nil {
++		return "", fmt.Errorf("cannot execute upcloud account request: %w", err)
++	}
++
++	defer func() { _ = httpResp.Body.Close() }()
++
++	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
++		return "", nameStatusError("upcloud account", httpResp.StatusCode)
++	}
++
++	var resp struct {
++		Account struct {
++			Username string `json:"username"`
++		} `json:"account"`
++	}
++	if err := json.NewDecoder(httpResp.Body).Decode(&resp); err != nil {
++		return "", fmt.Errorf("cannot decode upcloud account response: %w", err)
++	}
++
++	return resp.Account.Username, nil
++}
+diff --git a/pkg/accessreview/drivers/name_resolver_test.go b/pkg/accessreview/drivers/name_resolver_test.go
+index da8797d75a..8e39d1cb7b 100644
+--- a/pkg/accessreview/drivers/name_resolver_test.go
++++ b/pkg/accessreview/drivers/name_resolver_test.go
+@@ -1042,3 +1042,70 @@ func TestSegmentDriverUsesInlinePermissions(t *testing.T) {
+ 	assert.False(t, records[1].IsAdmin)
+ 	assert.Empty(t, records[1].Roles)
+ }
++
++func TestUpCloudNameResolver(t *testing.T) {
++	t.Parallel()
++
++	cases := []struct {
++		name       string
++		status     int
++		body       string
++		want       string
++		wantErr    bool
++		isTerminal bool
++	}{
++		{
++			name:   "main account username",
++			status: http.StatusOK,
++			body:   `{"account":{"credits":50000,"username":"aureliens"}}`,
++			want:   "aureliens",
++		},
++		{
++			name:   "no username in payload",
++			status: http.StatusOK,
++			body:   `{"account":{"credits":0}}`,
++			want:   "",
++		},
++		{
++			name:       "revoked token is terminal",
++			status:     http.StatusUnauthorized,
++			body:       `{"error":{"error_code":"AUTHENTICATION_FAILED"}}`,
++			wantErr:    true,
++			isTerminal: true,
++		},
++		{
++			name:    "server error stays retryable",
++			status:  http.StatusInternalServerError,
++			body:    `{"error":{"error_code":"BOOM"}}`,
++			wantErr: true,
++		},
++	}
++
++	for _, tc := range cases {
++		t.Run(tc.name, func(t *testing.T) {
++			t.Parallel()
++
++			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++				assert.Equal(t, http.MethodGet, r.Method)
++				assert.Equal(t, "/1.3/account", r.URL.Path)
++				w.Header().Set("Content-Type", "application/json")
++				w.WriteHeader(tc.status)
++				_, _ = w.Write([]byte(tc.body))
++			}))
++			defer srv.Close()
++
++			client := &http.Client{Transport: &hostRewriter{target: srv.URL}}
++
++			got, err := NewUpCloudNameResolver(client).ResolveInstanceName(context.Background())
++			if tc.wantErr {
++				require.Error(t, err)
++				assert.Equal(t, tc.isTerminal, errors.Is(err, ErrTerminalNameResolution))
++
++				return
++			}
++
++			require.NoError(t, err)
++			assert.Equal(t, tc.want, got)
++		})
++	}
++}
+diff --git a/pkg/accessreview/drivers/testdata/upcloud.yaml b/pkg/accessreview/drivers/testdata/upcloud.yaml
+index 1ba8c6b5f0..a2571ccdee 100644
+--- a/pkg/accessreview/drivers/testdata/upcloud.yaml
++++ b/pkg/accessreview/drivers/testdata/upcloud.yaml
+@@ -1,8 +1,15 @@
+-# Hand-authored fixture for the UpCloud account-listing flow: GET
+-# /1.3/account/list returns the main account plus its sub-accounts in one
+-# call, then GET /1.3/account/details/{username} is called per account to
+-# enrich with name/email. my_temp_account's details call 404s to exercise
+-# the driver's fallback to list-only fields. Synthetic usernames only.
++---
++# Fixture for the UpCloud account-listing flow: GET /1.3/account/list returns
++# the main account plus its sub-accounts in one call, then GET
++# /1.3/account/details/{username} enriches each with name and email.
++# my_temp_account's details call returns 403 ACCOUNT_FORBIDDEN, the status the
++# live API gives for an account the token cannot read, exercising the driver's
++# fallback to list-only fields.
++#
++# Response shapes mirror a live capture (the main account carries no
++# main_account or allow_gui; sub-accounts add them plus the access lists) and
++# the primary account's type is "main", as the API returns it, not the
++# "mymain" of the published docs example. All values are synthetic.
+ version: 2
+ interactions:
+     - id: 0
+@@ -23,7 +30,7 @@ interactions:
+         proto_minor: 0
+         content_length: -1
+         uncompressed: true
+-        body: '{"accounts":{"account":[{"labels":[],"roles":{"role":["technical"]},"type":"mymain","username":"test"},{"labels":[],"roles":{"role":["technical"]},"type":"sub","username":"my_sub_account"},{"labels":[{"key":"to_be_removed","value":"after 2022-31-12"}],"roles":{"role":[]},"type":"sub","username":"my_temp_account"},{"labels":[],"roles":{"role":["billing"]},"type":"sub","username":"my_billing_account"}]}}'
++        body: '{"accounts":{"account":[{"labels":[],"roles":{"role":["technical"]},"type":"main","username":"test"},{"labels":[],"roles":{"role":["technical"]},"type":"sub","username":"my_sub_account"},{"labels":[{"key":"to_be_removed","value":"after 2022-31-12"}],"roles":{"role":[]},"type":"sub","username":"my_temp_account"},{"labels":[],"roles":{"role":["billing"]},"type":"sub","username":"my_billing_account"}]}}'
+         headers:
+             Content-Type:
+                 - application/json
+@@ -48,7 +55,7 @@ interactions:
+         proto_minor: 0
+         content_length: -1
+         uncompressed: true
+-        body: '{"account":{"main_account":"","type":"mymain","username":"test","first_name":"Main","last_name":"Account","email":"main@example.com","roles":{"role":["technical"]}}}'
++        body: '{"account":{"abuse_email":"","address":"","allow_api":"no","campaigns":{"campaign":[]},"city":"","company":"","country":"FIN","currency":"EUR","email":"main@example.com","enable_3rd_party_services":"yes","first_name":"Main","ip_filters":{"ip_filter":[]},"labels":[],"language":"en","last_name":"Account","phone":"+358.31245434","postal_code":"","roles":{"role":["technical"]},"simple_backup":"no","state":"","timezone":"UTC","type":"main","username":"test","vat_number":""}}'
+         headers:
+             Content-Type:
+                 - application/json
+@@ -73,7 +80,7 @@ interactions:
+         proto_minor: 0
+         content_length: -1
+         uncompressed: true
+-        body: '{"account":{"main_account":"test","type":"sub","username":"my_sub_account","first_name":"Sub","last_name":"Account","email":"sub@example.com","roles":{"role":["technical"]}}}'
++        body: '{"account":{"address":"","allow_api":"yes","allow_gui":"no","campaigns":{"campaign":[]},"city":"","company":"","country":"FIN","currency":"EUR","email":"sub@example.com","enable_3rd_party_services":"yes","first_name":"Sub","ip_filters":{"ip_filter":[]},"labels":[],"language":"en","last_name":"Account","main_account":"test","network_access":{"network":[]},"phone":"+358.31245434","postal_code":"","roles":{"role":["technical"]},"server_access":{"server":[{"storage":"no","uuid":"*"}]},"state":"","storage_access":{"storage":["*"]},"tag_access":{"tag":[]},"timezone":"UTC","type":"sub","username":"my_sub_account","vat_number":""}}'
+         headers:
+             Content-Type:
+                 - application/json
+@@ -98,12 +105,12 @@ interactions:
+         proto_minor: 0
+         content_length: -1
+         uncompressed: true
+-        body: '{"error":{"error_code":"ACCOUNT_NOT_FOUND","error_message":"Account not found"}}'
++        body: '{"error":{"error_code":"ACCOUNT_FORBIDDEN","error_message":"You have no permission to access the account my_temp_account."}}'
+         headers:
+             Content-Type:
+                 - application/json
+-        status: 404 Not Found
+-        code: 404
++        status: 403 Forbidden
++        code: 403
+         duration: 90ms
+     - id: 4
+       request:
+@@ -123,7 +130,7 @@ interactions:
+         proto_minor: 0
+         content_length: -1
+         uncompressed: true
+-        body: '{"account":{"main_account":"test","type":"sub","username":"my_billing_account","first_name":"Billing","last_name":"Account","email":"billing@example.com","roles":{"role":["billing"]}}}'
++        body: '{"account":{"address":"","allow_api":"yes","allow_gui":"no","campaigns":{"campaign":[]},"city":"","company":"","country":"FIN","currency":"EUR","email":"billing@example.com","enable_3rd_party_services":"yes","first_name":"Billing","ip_filters":{"ip_filter":[]},"labels":[],"language":"en","last_name":"Account","main_account":"test","network_access":{"network":[]},"phone":"+358.31245434","postal_code":"","roles":{"role":["billing"]},"server_access":{"server":[{"storage":"no","uuid":"*"}]},"state":"","storage_access":{"storage":["*"]},"tag_access":{"tag":[]},"timezone":"UTC","type":"sub","username":"my_billing_account","vat_number":""}}'
+         headers:
+             Content-Type:
+                 - application/json
+diff --git a/pkg/accessreview/drivers/upcloud.go b/pkg/accessreview/drivers/upcloud.go
+index 60f9f77cb3..3b4a21d7d3 100644
+--- a/pkg/accessreview/drivers/upcloud.go
++++ b/pkg/accessreview/drivers/upcloud.go
+@@ -32,7 +32,10 @@ import (
+ 	"go.probo.inc/probo/pkg/coredata"
+ )
+ 
+-const upcloudAccountListURL = "https://api.upcloud.com/1.3/account/list"
++const (
++	upcloudAPIBaseURL     = "https://api.upcloud.com/1.3"
++	upcloudAccountListURL = upcloudAPIBaseURL + "/account/list"
++)
+ 
+ // UpCloudDriver lists the main account and its sub-accounts via UpCloud's
+ // account/list endpoint, then enriches each with account/details/{username}
+@@ -40,14 +43,12 @@ const upcloudAccountListURL = "https://api.upcloud.com/1.3/account/list"
+ // token) attached by the connection transport.
+ //
+ // Notes on data quality:
+-//   - account/details has no explicit account-status field, so Active is
+-//     left nil (no signal).
+-//   - Neither endpoint exposes per-account MFA status, so MFAStatus is left
+-//     Unknown.
+-//   - If the details fetch for an account fails, the account is still
+-//     returned (per Driver contract, no account may be dropped) with just
+-//     the list fields; Email stays blank and FullName falls back to the
+-//     username.
++//   - Neither endpoint exposes an account-status or MFA field, so Active
++//     stays nil and MFAStatus Unknown.
++//   - An account the token cannot read (403/404) keeps its list-only
++//     fields, with a blank email and the username as its name. Any other
++//     details failure aborts the run rather than emit a half-identified
++//     record.
+ type UpCloudDriver struct {
+ 	httpClient *http.Client
+ 	logger     *log.Logger
+@@ -115,30 +116,28 @@ func (d *UpCloudDriver) ListAccounts(ctx context.Context) ([]AccountRecord, erro
+ 	}
+ 
+ 	records := make([]AccountRecord, 0, len(resp.Accounts.Account))
++	unreadable := 0
+ 
+ 	for _, a := range resp.Accounts.Account {
++		// The username is the account's only stable identifier. Dropping a
++		// blank row would hide an account the source still exposes and mark
++		// it removed on the next review, so a malformed list fails the sync.
+ 		username := strings.TrimSpace(a.Username)
+ 		if username == "" {
+-			return nil, fmt.Errorf("upcloud returned an account with an empty username")
++			return nil, fmt.Errorf("cannot list upcloud accounts: account with an empty username")
+ 		}
+ 
+-		fullName := username
+-
++		// The review keys accounts on email plus external ID, so a detail
++		// fetch that fails for a transient reason must abort rather than
++		// yield a record with a blank email: that record would land under a
++		// different key and read as one account removed and another added.
+ 		details, err := d.fetchAccountDetails(ctx, username)
+ 		if err != nil {
+-			if ctx.Err() != nil {
+-				return nil, fmt.Errorf("cannot list upcloud accounts: %w", ctx.Err())
+-			}
+-
+-			d.logger.WarnCtx(ctx, "cannot fetch upcloud account details, using list fields only", log.Error(err))
+-		} else {
+-			if name := strings.TrimSpace(details.FirstName + " " + details.LastName); name != "" {
+-				fullName = name
+-			}
++			return nil, fmt.Errorf("cannot list upcloud accounts: %w", err)
+ 		}
+ 
+ 		record := AccountRecord{
+-			FullName:    fullName,
++			FullName:    username,
+ 			Roles:       upcloudRoles(a.Roles.Role),
+ 			IsAdmin:     upcloudIsMainAccount(a.Type),
+ 			MFAStatus:   coredata.MFAStatusUnknown,
+@@ -147,18 +146,28 @@ func (d *UpCloudDriver) ListAccounts(ctx context.Context) ([]AccountRecord, erro
+ 			ExternalID:  username,
+ 		}
+ 
+-		if details != nil {
++		if details == nil {
++			unreadable++
++		} else {
+ 			record.Email = strings.TrimSpace(details.Email)
++
++			if name := strings.TrimSpace(details.FirstName + " " + details.LastName); name != "" {
++				record.FullName = name
++			}
+ 		}
+ 
+ 		records = append(records, record)
+ 	}
+ 
++	if unreadable > 0 {
++		d.logger.WarnCtx(ctx, "upcloud accounts listed without readable details", log.Int("count", unreadable))
++	}
++
+ 	return records, nil
+ }
+ 
+ func (d *UpCloudDriver) fetchAccountDetails(ctx context.Context, username string) (*upcloudAccountDetails, error) {
+-	endpoint, err := url.JoinPath("https://api.upcloud.com", "1.3", "account", "details", url.PathEscape(username))
++	endpoint, err := url.JoinPath(upcloudAPIBaseURL, "account", "details", url.PathEscape(username))
+ 	if err != nil {
+ 		return nil, fmt.Errorf("cannot build upcloud account details URL: %w", err)
+ 	}
+@@ -177,8 +186,12 @@ func (d *UpCloudDriver) fetchAccountDetails(ctx context.Context, username string
+ 
+ 	defer func() { _ = httpResp.Body.Close() }()
+ 
+-	if httpResp.StatusCode == http.StatusNotFound {
+-		return &upcloudAccountDetails{}, nil
++	// 403 ACCOUNT_FORBIDDEN (out of the token's reach) and 404 (gone) are
++	// stable answers, not failures: the list call already proved the
++	// credential, and both give the same blank email on every run, so the
++	// account keeps a consistent key across campaigns.
++	if httpResp.StatusCode == http.StatusForbidden || httpResp.StatusCode == http.StatusNotFound {
++		return nil, nil
+ 	}
+ 
+ 	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
+@@ -202,9 +215,10 @@ func upcloudRoles(roles []string) []string {
+ 	return out
+ }
+ 
+-// upcloudIsMainAccount reports whether the account is the primary account on
+-// the contract ("mymain"), as opposed to a "sub" account. The main account
+-// holds full administrative access; sub-accounts are scoped by their roles.
++// upcloudIsMainAccount reports whether the account is the contract's primary
++// account, which holds full administrative access. The docs call it "mymain"
++// and the live API "main", so classify off "sub" — the only other kind, and
++// the one both agree on.
+ func upcloudIsMainAccount(accountType string) bool {
+-	return strings.EqualFold(strings.TrimSpace(accountType), "mymain")
++	return !strings.EqualFold(strings.TrimSpace(accountType), "sub")
+ }
+diff --git a/pkg/accessreview/drivers/upcloud_test.go b/pkg/accessreview/drivers/upcloud_test.go
+index 30f45a86c1..0d4e05f32b 100644
+--- a/pkg/accessreview/drivers/upcloud_test.go
++++ b/pkg/accessreview/drivers/upcloud_test.go
+@@ -65,8 +65,8 @@ func TestUpCloudDriver(t *testing.T) {
+ 	assert.Equal(t, []string{"technical"}, sub.Roles)
+ 	assert.False(t, sub.IsAdmin)
+ 
+-	// no roles assigned; details fetch fails (404), so the record falls back
+-	// to list-only fields rather than being dropped.
++	// no roles assigned; details answers 403, which is a stable "no details"
++	// rather than an error, so the record keeps its list-only fields.
+ 	temp := records[2]
+ 	assert.Equal(t, "my_temp_account", temp.ExternalID)
+ 	assert.Equal(t, "my_temp_account", temp.FullName)
+@@ -82,13 +82,6 @@ func TestUpCloudDriver(t *testing.T) {
+ 	assert.False(t, billing.IsAdmin)
+ }
+ 
+-// upcloudRoundTripFunc adapts a function to http.RoundTripper.
+-type upcloudRoundTripFunc func(*http.Request) (*http.Response, error)
+-
+-func (f upcloudRoundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+-	return f(req)
+-}
+-
+ // TestUpCloudDriverContextCancellation verifies that a context canceled
+ // mid-run aborts ListAccounts with the cancellation error instead of being
+ // swallowed as a best-effort per-account detail failure, which would let a
+@@ -99,7 +92,7 @@ func TestUpCloudDriverContextCancellation(t *testing.T) {
+ 	ctx, cancel := context.WithCancel(context.Background())
+ 
+ 	client := &http.Client{
+-		Transport: upcloudRoundTripFunc(func(req *http.Request) (*http.Response, error) {
++		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+ 			if strings.Contains(req.URL.Path, "/account/details/") {
+ 				cancel()
+ 
+@@ -122,3 +115,124 @@ func TestUpCloudDriverContextCancellation(t *testing.T) {
+ 	assert.True(t, errors.Is(err, context.Canceled))
+ 	assert.Nil(t, records)
+ }
++
++func TestUpCloudIsMainAccount(t *testing.T) {
++	t.Parallel()
++
++	cases := []struct {
++		accountType string
++		want        bool
++	}{
++		{accountType: "main", want: true},   // live API
++		{accountType: "mymain", want: true}, // published docs example
++		{accountType: "MAIN", want: true},
++		{accountType: "sub", want: false},
++		{accountType: "SUB", want: false},
++		{accountType: " sub ", want: false},
++		{accountType: "", want: true},
++	}
++
++	for _, tc := range cases {
++		t.Run(tc.accountType, func(t *testing.T) {
++			t.Parallel()
++
++			assert.Equal(t, tc.want, upcloudIsMainAccount(tc.accountType))
++		})
++	}
++}
++
++func TestUpCloudFetchAccountDetails(t *testing.T) {
++	t.Parallel()
++
++	cases := []struct {
++		name      string
++		status    int
++		wantNil   bool
++		wantError bool
++	}{
++		{name: "forbidden yields no details", status: http.StatusForbidden, wantNil: true},
++		{name: "not found yields no details", status: http.StatusNotFound, wantNil: true},
++		{name: "server error is fatal", status: http.StatusInternalServerError, wantError: true},
++		{name: "rate limited is fatal", status: http.StatusTooManyRequests, wantError: true},
++	}
++
++	for _, tc := range cases {
++		t.Run(tc.name, func(t *testing.T) {
++			t.Parallel()
++
++			client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
++				return &http.Response{
++					StatusCode: tc.status,
++					Body:       io.NopCloser(strings.NewReader(`{"error":{"error_code":"X"}}`)),
++					Header:     http.Header{"Content-Type": []string{"application/json"}},
++				}, nil
++			})}
++
++			driver := NewUpCloudDriver(client, log.NewLogger(log.WithName("test")))
++
++			details, err := driver.fetchAccountDetails(context.Background(), "someone")
++			if tc.wantError {
++				require.Error(t, err)
++
++				return
++			}
++
++			require.NoError(t, err)
++			assert.Equal(t, tc.wantNil, details == nil)
++		})
++	}
++}
++
++// TestUpCloudDriverTransientDetailFailureAborts pins the identity guarantee:
++// the review keys accounts on email plus external ID, so a record emitted
++// with a blank email after a transient failure would read as one account
++// removed and another added.
++func TestUpCloudDriverTransientDetailFailureAborts(t *testing.T) {
++	t.Parallel()
++
++	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
++		body := `{"accounts":{"account":[{"roles":{"role":["technical"]},"type":"main","username":"test"}]}}`
++		status := http.StatusOK
++
++		if strings.Contains(req.URL.Path, "/account/details/") {
++			body = `{"error":{"error_code":"INTERNAL"}}`
++			status = http.StatusInternalServerError
++		}
++
++		return &http.Response{
++			StatusCode: status,
++			Body:       io.NopCloser(strings.NewReader(body)),
++			Header:     http.Header{"Content-Type": []string{"application/json"}},
++		}, nil
++	})}
++
++	records, err := NewUpCloudDriver(client, log.NewLogger(log.WithName("test"))).ListAccounts(context.Background())
++	require.Error(t, err)
++	assert.Nil(t, records)
++}
++
++// TestUpCloudDriverBlankUsernameAborts pins the malformed-list guarantee:
++// username is the only stable identifier, so silently dropping a blank row
++// would hide an account the source still exposes and mark it removed on the
++// next review.
++func TestUpCloudDriverBlankUsernameAborts(t *testing.T) {
++	t.Parallel()
++
++	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
++		if strings.Contains(req.URL.Path, "/account/details/") {
++			t.Errorf("driver must not fetch details after a malformed list row")
++		}
++
++		body := `{"accounts":{"account":[{"roles":{"role":[]},"type":"sub","username":"  "}]}}`
++
++		return &http.Response{
++			StatusCode: http.StatusOK,
++			Body:       io.NopCloser(strings.NewReader(body)),
++			Header:     http.Header{"Content-Type": []string{"application/json"}},
++		}, nil
++	})}
++
++	records, err := NewUpCloudDriver(client, log.NewLogger(log.WithName("test"))).ListAccounts(context.Background())
++	require.Error(t, err)
++	assert.Nil(t, records)
++}
+diff --git a/pkg/connector/provider/upcloud.go b/pkg/connector/provider/upcloud.go
+index 61828f8442..731fac7479 100644
+--- a/pkg/connector/provider/upcloud.go
++++ b/pkg/connector/provider/upcloud.go
+@@ -31,24 +31,29 @@ import (
+ 
+ func upcloudRegistration() *Registration {
+ 	return &Registration{
+-		Provider:       coredata.ConnectorProviderUpCloud,
+-		DisplayName:    "UpCloud",
+-		SupportsAPIKey: true,
+-		// UpCloud's newer API tokens (the "ucat_..." personal access tokens
+-		// created under People > API access) authenticate as a standard
+-		// Bearer token, so the default APIKeyConnection mode (Authorization:
+-		// Bearer <key>) applies; no Header/Scheme/BasicAuth override is
+-		// needed. There is no OAuth2 flow; account/list already returns the
+-		// main account plus every sub-account reachable with the token, so
+-		// there is nothing to pick or configure: no settings struct, no
++		Provider:         coredata.ConnectorProviderUpCloud,
++		DisplayName:      "UpCloud",
++		DocumentationURL: accessReviewDocsURL("upcloud"),
++		SupportsAPIKey:   true,
++		// UpCloud API tokens ("ucat_...", created under Account > API
++		// tokens) authenticate as a standard Bearer token, so the default
++		// APIKeyConnection mode applies; no Header/Scheme/BasicAuth
++		// override is needed. There is no OAuth2 flow, and account/list
++		// already returns the main account plus every sub-account the token
++		// reaches, so there is nothing to pick: no settings struct, no
+ 		// picker.
+ 		//
+ 		// ProbeURL lets the connection-status check confirm the token with
+-		// the same lightweight GET the driver uses; an invalid token returns
+-		// 401.
++		// the same lightweight GET the driver uses; a bad token returns 401.
++		// account/list is main-account-only, so it also rejects a
++		// sub-account token, which authenticates but sees nothing.
+ 		ProbeURL: "https://api.upcloud.com/1.3/account/list",
+ 		NewDriver: func(_ context.Context, c *http.Client, _ *coredata.Connector, logger *log.Logger) (drivers.Driver, error) {
+-			return drivers.NewUpCloudDriver(c, logger), nil
++			return drivers.NewUpCloudDriver(c, logger.Named("upcloud")), nil
++		},
++		// GET /1.3/account names the source after the token's own account.
++		NewNameResolver: func(_ context.Context, c *http.Client, _ *coredata.Connector, _ *log.Logger) drivers.NameResolver {
++			return drivers.NewUpCloudNameResolver(c)
+ 		},
+ 	}
+ }

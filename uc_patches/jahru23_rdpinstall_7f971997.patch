@@ -1,0 +1,1597 @@
+From 7f9719978d42fdbb6b6356a75080122284039991 Mon Sep 17 00:00:00 2001
+From: jahru23 <jahru23@users.noreply.github.com>
+Date: Sun, 18 Oct 2026 09:29:14 +0700
+Subject: [PATCH] F3: wizard install mode template UpCloud + worker + progres
+ live (SSE)
+
+- upcloud.rs: CreateSpec/to_body sesuai bentuk dokumentasi, Server (uuid/state/IP publik/password), create/get/delete server, hostname aman
+- jobs.rs: runner polling state API + port 3389 (konfirmasi 2x), fase & progres disimpan, job_events, janitor hapus kredensial kedaluwarsa
+- routes/install.rs: wizard (validasi zone/plan/template terhadap API live), potong saldo + ledger dalam satu transaksi, batalkan server kalau transaksi gagal, halaman job + SSE, tombol hancurkan server
+- migrasi 0002: cloud_account_id, storage_size pada jobs
+- 21 tes hijau, clippy -D warnings bersih
+---
+ Cargo.lock                    |   2 +
+ Cargo.toml                    |   1 +
+ migrations/0002_job_cloud.sql |   5 +
+ src/jobs.rs                   | 213 +++++++++++++
+ src/main.rs                   |   3 +
+ src/models.rs                 |   8 +
+ src/routes/install.rs         | 551 ++++++++++++++++++++++++++++++++++
+ src/routes/mod.rs             |   5 +
+ src/routes/pages.rs           |   2 +-
+ src/upcloud.rs                | 312 +++++++++++++++++++
+ src/views.rs                  |  43 ++-
+ static/style.css              |  21 ++
+ templates/dashboard.html      |   4 +-
+ templates/install.html        |  90 ++++++
+ templates/job.html            |  51 ++++
+ templates/job_card.html       |  63 ++++
+ 16 files changed, 1370 insertions(+), 4 deletions(-)
+ create mode 100644 migrations/0002_job_cloud.sql
+ create mode 100644 src/jobs.rs
+ create mode 100644 src/routes/install.rs
+ create mode 100644 templates/install.html
+ create mode 100644 templates/job.html
+ create mode 100644 templates/job_card.html
+
+diff --git a/Cargo.lock b/Cargo.lock
+index 22fcc1c..0a9a8bc 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -1574,6 +1574,7 @@ dependencies = [
+  "thiserror 2.0.21",
+  "time",
+  "tokio",
++ "tokio-stream",
+  "tower-http 0.7.1",
+  "tracing",
+  "tracing-subscriber",
+@@ -2346,6 +2347,7 @@ dependencies = [
+  "futures-core",
+  "pin-project-lite",
+  "tokio",
++ "tokio-util",
+ ]
+ 
+ [[package]]
+diff --git a/Cargo.toml b/Cargo.toml
+index 7ca5bb1..0e8df93 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -10,6 +10,7 @@ license = "MIT"
+ axum = { version = "0.8", features = ["macros"] }
+ axum-extra = { version = "0.12", features = ["cookie"] }
+ tokio = { version = "1", features = ["full"] }
++tokio-stream = { version = "0.1", features = ["sync"] }
+ sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "sqlite", "chrono", "migrate", "macros"] }
+ askama = "0.16"
+ serde = { version = "1", features = ["derive"] }
+diff --git a/migrations/0002_job_cloud.sql b/migrations/0002_job_cloud.sql
+new file mode 100644
+index 0000000..e0fe83d
+--- /dev/null
++++ b/migrations/0002_job_cloud.sql
+@@ -0,0 +1,5 @@
++
++-- F3: job dibuat dari akun cloud (mode template), bukan dari VPS existing.
++ALTER TABLE jobs ADD COLUMN cloud_account_id INTEGER NOT NULL DEFAULT 0;
++ALTER TABLE jobs ADD COLUMN storage_size INTEGER NOT NULL DEFAULT 0;
++CREATE INDEX IF NOT EXISTS idx_jobs_provider_ref ON jobs(provider_ref);
+diff --git a/src/jobs.rs b/src/jobs.rs
+new file mode 100644
+index 0000000..1016c0a
+--- /dev/null
++++ b/src/jobs.rs
+@@ -0,0 +1,213 @@
++//! Runner job: pantau server UpCloud sampai RDP menjawab, lalu simpan kredensial.
++//!
++//! Hanya polling: status server lewat API (setiap 10 s) dan port 3389 lewat TCP
++//! (setiap 15 s). Tidak menahan koneksi apa pun ke server target.
++
++use std::time::Duration;
++
++use crate::db::now;
++use crate::models::Job;
++use crate::upcloud;
++use crate::SharedState;
++
++const POLL_STATE: Duration = Duration::from_secs(10);
++const POLL_RDP: Duration = Duration::from_secs(15);
++/// Template Windows biasanya siap RDP dalam 2-5 menit; 25 menit sudah longgar.
++const DEADLINE: Duration = Duration::from_secs(25 * 60);
++
++pub async fn tcp_open(host: &str, port: u16, timeout: Duration) -> bool {
++    let target = format!("{host}:{port}");
++    matches!(
++        tokio::time::timeout(timeout, tokio::net::TcpStream::connect(&target)).await,
++        Ok(Ok(_))
++    )
++}
++
++pub fn spawn(state: SharedState, job_id: i64) {
++    tokio::spawn(async move {
++        if let Err(e) = run(state.clone(), job_id).await {
++            tracing::warn!("job {job_id} gagal: {e}");
++            let _ = finish_failed(&state, job_id, &e.to_string()).await;
++        }
++    });
++}
++
++async fn load_job(state: &SharedState, job_id: i64) -> anyhow::Result<Job> {
++    let job = sqlx::query_as::<_, Job>(
++        "SELECT id, user_id, mode, provider, status, phase, progress, os_label, zone, plan,
++                host, rdp_port, rdp_user, provider_ref, error, created_at, updated_at, done_at, expires_at, wiped
++         FROM jobs WHERE id = ?",
++    )
++    .bind(job_id)
++    .fetch_optional(&state.pool)
++    .await?
++    .ok_or_else(|| anyhow::anyhow!("job {job_id} tidak ada"))?;
++    Ok(job)
++}
++
++async fn token_for_job(state: &SharedState, job_id: i64) -> anyhow::Result<String> {
++    let enc: Option<String> = sqlx::query_scalar(
++        "SELECT c.token_enc FROM jobs j JOIN cloud_accounts c ON c.id = j.cloud_account_id
++         WHERE j.id = ?",
++    )
++    .bind(job_id)
++    .fetch_optional(&state.pool)
++    .await?;
++    let enc = enc.ok_or_else(|| anyhow::anyhow!("akun cloud untuk job ini tidak ditemukan"))?;
++    crate::crypto::open(&state.cfg.master_key, &enc)
++}
++
++async fn phase(
++    state: &SharedState,
++    job_id: i64,
++    phase: &str,
++    progress: i64,
++    message: &str,
++) -> anyhow::Result<()> {
++    sqlx::query("UPDATE jobs SET phase = ?, progress = ?, updated_at = ? WHERE id = ?")
++        .bind(phase)
++        .bind(progress)
++        .bind(now())
++        .bind(job_id)
++        .execute(&state.pool)
++        .await?;
++    event(state, job_id, phase, message).await?;
++    tracing::info!("job {job_id}: {phase} ({progress}%)");
++    Ok(())
++}
++
++async fn event(state: &SharedState, job_id: i64, phase: &str, message: &str) -> anyhow::Result<()> {
++    sqlx::query("INSERT INTO job_events(job_id, ts, phase, message) VALUES(?,?,?,?)")
++        .bind(job_id)
++        .bind(now())
++        .bind(phase)
++        .bind(message)
++        .execute(&state.pool)
++        .await?;
++    Ok(())
++}
++
++async fn run(state: SharedState, job_id: i64) -> anyhow::Result<()> {
++    let job = load_job(&state, job_id).await?;
++    if job.provider_ref.is_empty() {
++        anyhow::bail!("job tanpa server uuid — dibuat lewat mode template?");
++    }
++    let token = token_for_job(&state, job_id).await?;
++    let client = upcloud::Client::new(&token)?;
++    let started = std::time::Instant::now();
++
++    phase(
++        &state,
++        job_id,
++        "server dibuat, menunggu start UpCloud...",
++        15,
++        "API create diterima",
++    )
++    .await?;
++    let mut server = loop {
++        if started.elapsed() > DEADLINE {
++            anyhow::bail!("timeout: server tidak mencapai state started");
++        }
++        let s = client.server(&job.provider_ref).await?;
++        if s.is_started() {
++            break s;
++        }
++        if s.is_failed_state() {
++            anyhow::bail!("UpCloud melaporkan state server: {}", s.state);
++        }
++        tokio::time::sleep(POLL_STATE).await;
++    };
++
++    let mut host = server.public_ipv4().unwrap_or_default();
++    phase(
++        &state,
++        job_id,
++        "Windows booting, menunggu RDP 3389...",
++        45,
++        &format!(
++            "state started, IP {}",
++            if host.is_empty() { "-" } else { &host }
++        ),
++    )
++    .await?;
++
++    let mut hits = 0;
++    loop {
++        if started.elapsed() > DEADLINE {
++            anyhow::bail!("timeout: RDP belum menjawab setelah 25 menit");
++        }
++        if host.is_empty() {
++            server = client.server(&job.provider_ref).await?;
++            host = server.public_ipv4().unwrap_or_default();
++        }
++        if !host.is_empty() && tcp_open(&host, job.rdp_port as u16, Duration::from_secs(8)).await {
++            hits += 1;
++            if hits >= 2 {
++                break;
++            }
++            tokio::time::sleep(Duration::from_secs(10)).await;
++        } else {
++            hits = 0;
++            tokio::time::sleep(POLL_RDP).await;
++        }
++    }
++
++    let ts = now();
++    let expires = ts + state.cfg.job_ttl_hours * 3600;
++    sqlx::query(
++        "UPDATE jobs SET status='done', phase='RDP siap', progress=100, host=?, done_at=?, updated_at=?, expires_at=?
++         WHERE id=?",
++    )
++    .bind(&host)
++    .bind(ts)
++    .bind(ts)
++    .bind(expires)
++    .bind(job_id)
++    .execute(&state.pool)
++    .await?;
++    event(
++        &state,
++        job_id,
++        "RDP siap",
++        &format!("{host}:{}", job.rdp_port),
++    )
++    .await?;
++    tracing::info!("job {job_id} selesai: {host}:{}", job.rdp_port);
++    Ok(())
++}
++
++pub async fn finish_failed(state: &SharedState, job_id: i64, reason: &str) -> anyhow::Result<()> {
++    sqlx::query("UPDATE jobs SET status='failed', phase='gagal', error=?, updated_at=? WHERE id=?")
++        .bind(reason.chars().take(300).collect::<String>())
++        .bind(now())
++        .bind(job_id)
++        .execute(&state.pool)
++        .await?;
++    event(state, job_id, "gagal", reason).await?;
++    Ok(())
++}
++
++/// Tugas latar: hapus kredensial yang sudah lewat masa simpan.
++pub fn spawn_janitor(state: SharedState) {
++    tokio::spawn(async move {
++        loop {
++            let ts = now();
++            match sqlx::query(
++                "UPDATE jobs SET rdp_pass_enc='', wiped=1, updated_at=?
++                 WHERE wiped=0 AND expires_at > 0 AND expires_at < ?",
++            )
++            .bind(ts)
++            .bind(ts)
++            .execute(&state.pool)
++            .await
++            {
++                Ok(r) if r.rows_affected() > 0 => {
++                    tracing::info!("janitor: {} kredensial dihapus", r.rows_affected())
++                }
++                Ok(_) => {}
++                Err(e) => tracing::warn!("janitor gagal: {e}"),
++            }
++            tokio::time::sleep(Duration::from_secs(600)).await;
++        }
++    });
++}
+diff --git a/src/main.rs b/src/main.rs
+index ee3ee89..8b73075 100644
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -6,6 +6,7 @@ mod config;
+ mod crypto;
+ mod db;
+ mod error;
++mod jobs;
+ mod models;
+ mod routes;
+ mod upcloud;
+@@ -56,6 +57,8 @@ async fn main() -> Result<()> {
+         .layer(RequestBodyLimitLayer::new(64 * 1024))
+         .layer(TraceLayer::new_for_http());
+ 
++    jobs::spawn_janitor(state.clone());
++
+     let listener = tokio::net::TcpListener::bind(&cfg.bind).await?;
+     tracing::info!(
+         "rdpinstall v{} listening on {} (env={})",
+diff --git a/src/models.rs b/src/models.rs
+index 7987653..5a4e0a6 100644
+--- a/src/models.rs
++++ b/src/models.rs
+@@ -57,6 +57,7 @@ pub struct Job {
+     pub host: String,
+     pub rdp_port: i64,
+     pub rdp_user: String,
++    pub provider_ref: String,
+     pub error: String,
+     pub created_at: i64,
+     pub updated_at: i64,
+@@ -80,6 +81,13 @@ impl Job {
+     }
+ }
+ 
++#[derive(Debug, Clone, FromRow)]
++pub struct JobEvent {
++    pub ts: i64,
++    pub phase: String,
++    pub message: String,
++}
++
+ #[derive(Debug, Clone, FromRow)]
+ pub struct CloudAccount {
+     pub id: i64,
+diff --git a/src/routes/install.rs b/src/routes/install.rs
+new file mode 100644
+index 0000000..1690387
+--- /dev/null
++++ b/src/routes/install.rs
+@@ -0,0 +1,551 @@
++//! Wizard install (mode template UpCloud) + halaman job dengan progres live.
++
++use askama::Template;
++use axum::extract::{Form, Path, State};
++use axum::response::sse::{Event, Sse};
++use axum::response::{IntoResponse, Redirect, Response};
++use serde::Deserialize;
++use tokio_stream::wrappers::ReceiverStream;
++
++use crate::auth::{CurrentUser, MaybeUser};
++use crate::db::now;
++use crate::error::{AppError, AppResult};
++use crate::jobs;
++use crate::models::{CloudAccount, User};
++use crate::routes::pages::render;
++use crate::upcloud;
++use crate::views::{InstallPage, JobCard, JobPage};
++use crate::SharedState;
++
++const MAX_ACTIVE_JOBS: i64 = 2;
++
++#[derive(Debug, Deserialize)]
++pub struct InstallForm {
++    #[serde(default)]
++    pub account_id: i64,
++    #[serde(default)]
++    pub template_uuid: String,
++    #[serde(default)]
++    pub zone: String,
++    #[serde(default)]
++    pub plan: String,
++    #[serde(default)]
++    pub title: String,
++    #[serde(default)]
++    pub storage_gb: i64,
++}
++
++async fn accounts(state: &SharedState, user_id: i64) -> AppResult<Vec<CloudAccount>> {
++    Ok(sqlx::query_as::<_, CloudAccount>(
++        "SELECT id, user_id, provider, label, status, credit, last_checked, last_error, created_at
++         FROM cloud_accounts WHERE user_id = ? ORDER BY id DESC",
++    )
++    .bind(user_id)
++    .fetch_all(&state.pool)
++    .await?)
++}
++
++pub async fn wizard(State(state): State<SharedState>, user: MaybeUser) -> Response {
++    let MaybeUser(Some(user)) = user else {
++        return Redirect::to("/login").into_response();
++    };
++    let accounts = match accounts(&state, user.id).await {
++        Ok(a) => a,
++        Err(e) => return e.into_response(),
++    };
++    let usable: Vec<CloudAccount> = accounts.into_iter().filter(|a| a.status == "ok").collect();
++
++    if usable.is_empty() {
++        return finish_err(
++            &state,
++            user,
++            "Belum ada akun cloud yang valid. Tambahkan API token UpCloud dulu di halaman Akun Cloud.",
++        )
++        .await;
++    }
++
++    // Data zone/plan/template selalu diambil saat request.
++    let token = match token_of(&state, usable[0].id, user.id).await {
++        Ok(t) => t,
++        Err(e) => return e.into_response(),
++    };
++    let client = match upcloud::Client::new(&token) {
++        Ok(c) => c,
++        Err(e) => return err_page(&state, user, &e.to_string()).await,
++    };
++    let (zones, plans, templates) = match tokio::try_join!(
++        client.public_zones(),
++        client.plans(),
++        client.windows_templates()
++    ) {
++        Ok(t) => t,
++        Err(e) => return err_page(&state, user, &e.to_string()).await,
++    };
++
++    let balance = balance_of(&state, user.id).await.unwrap_or(0);
++    let page = InstallPage {
++        user,
++        accounts: usable,
++        zones,
++        plans,
++        templates,
++        balance,
++        price: state.cfg.price_per_install,
++        error: String::new(),
++    };
++    render(&page)
++}
++
++pub async fn create(
++    State(state): State<SharedState>,
++    CurrentUser(user): CurrentUser,
++    Form(form): Form<InstallForm>,
++) -> Response {
++    let active: i64 = sqlx::query_scalar(
++        "SELECT COUNT(*) FROM jobs WHERE user_id = ? AND status IN ('queued','running')",
++    )
++    .bind(user.id)
++    .fetch_one(&state.pool)
++    .await
++    .unwrap_or(0);
++    if active >= MAX_ACTIVE_JOBS {
++        return err_page(
++            &state,
++            user,
++            "Masih ada instalasi berjalan. Tunggu selesai dulu.",
++        )
++        .await;
++    }
++
++    let balance = balance_of(&state, user.id).await.unwrap_or(0);
++    if balance < state.cfg.price_per_install {
++        return err_page(
++            &state,
++            user,
++            &format!(
++                "Saldo tidak cukup. Tarif per install Rp{}, saldo Anda Rp{}. Topup dulu.",
++                state.cfg.price_per_install, balance
++            ),
++        )
++        .await;
++    }
++
++    let token = match token_of(&state, form.account_id, user.id).await {
++        Ok(t) => t,
++        Err(e) => return e.into_response(),
++    };
++    let client = match upcloud::Client::new(&token) {
++        Ok(c) => c,
++        Err(e) => return err_page(&state, user, &e.to_string()).await,
++    };
++
++    // Semua pilihan divalidasi terhadap daftar yang baru diambil dari API,
++    // supaya UUID/kode plan palsu tidak bisa disuntikkan lewat form.
++    let (zones, plans, templates) = match tokio::try_join!(
++        client.public_zones(),
++        client.plans(),
++        client.windows_templates()
++    ) {
++        Ok(t) => t,
++        Err(e) => return err_page(&state, user, &e.to_string()).await,
++    };
++    let zone = match zones.iter().find(|z| z.id == form.zone) {
++        Some(z) => z.clone(),
++        None => return err_page(&state, user, "Zone tidak dikenal / tidak publik.").await,
++    };
++    let plan = match plans.iter().find(|p| p.name == form.plan) {
++        Some(p) => p.clone(),
++        None => return err_page(&state, user, "Plan tidak tersedia.").await,
++    };
++    let template = match templates.iter().find(|t| t.uuid == form.template_uuid) {
++        Some(t) => t.clone(),
++        None => {
++            return err_page(
++                &state,
++                user,
++                "Template Windows tidak ditemukan di akun itu.",
++            )
++            .await
++        }
++    };
++    if form.storage_gb > 0 && form.storage_gb < template.size {
++        return err_page(
++            &state,
++            user,
++            &format!(
++                "Ukuran disk minimal {} GB untuk template ini.",
++                template.size
++            ),
++        )
++        .await;
++    }
++
++    let title = if form.title.trim().is_empty() {
++        format!("RDP {}", template.title)
++    } else {
++        form.title.trim().to_string()
++    };
++    let spec = upcloud::CreateSpec {
++        zone: zone.id.clone(),
++        title: title.clone(),
++        hostname: upcloud::safe_hostname(&title),
++        plan: plan.name.clone(),
++        template_uuid: template.uuid.clone(),
++        storage_title: template.title.clone(),
++        storage_size_gb: form.storage_gb.max(template.size),
++        storage_tier: template.tier_hint(),
++    };
++
++    let server = match client.create_server(&spec).await {
++        Ok(s) => s,
++        Err(e) => return err_page(&state, user, &e.to_string()).await,
++    };
++
++    // Password Windows hanya ada di respons create ini.
++    let rdp_pass_enc = match server.password.as_deref() {
++        Some(pw) if !pw.is_empty() => match crate::crypto::seal(&state.cfg.master_key, pw) {
++            Ok(s) => s,
++            Err(e) => {
++                let _ = client.delete_server(&server.uuid).await;
++                return AppError::Any(e).into_response();
++            }
++        },
++        _ => String::new(),
++    };
++
++    let ts = now();
++    let mut tx = match state.pool.begin().await {
++        Ok(t) => t,
++        Err(e) => return AppError::Db(e).into_response(),
++    };
++    let charged = sqlx::query(
++        "UPDATE balances SET amount = amount - ?, updated_at = ? WHERE user_id = ? AND amount >= ?",
++    )
++    .bind(state.cfg.price_per_install)
++    .bind(ts)
++    .bind(user.id)
++    .bind(state.cfg.price_per_install)
++    .execute(&mut *tx)
++    .await;
++
++    match charged {
++        Ok(r) if r.rows_affected() == 1 => {}
++        Ok(_) => {
++            let _ = tx.rollback().await;
++            let _ = client.delete_server(&server.uuid).await;
++            return err_page(
++                &state,
++                user,
++                "Saldo berubah saat proses; server dibatalkan.",
++            )
++            .await;
++        }
++        Err(e) => return AppError::Db(e).into_response(),
++    }
++
++    let inserted = sqlx::query(
++        "INSERT INTO jobs(user_id, mode, provider, status, phase, progress, os_label, zone, plan,
++                          host, rdp_port, rdp_user, rdp_pass_enc, provider_ref, cloud_account_id,
++                          storage_size, created_at, updated_at)
++         VALUES(?, 'template', 'upcloud', 'queued', 'menunggu', 5, ?, ?, ?, ?, 3389, 'Administrator', ?, ?, ?, ?, ?, ?)",
++    )
++    .bind(user.id)
++    .bind(&template.title)
++    .bind(&zone.id)
++    .bind(&plan.name)
++    .bind(server.public_ipv4().unwrap_or_default())
++    .bind(&rdp_pass_enc)
++    .bind(&server.uuid)
++    .bind(form.account_id)
++    .bind(spec.storage_size_gb)
++    .bind(ts)
++    .bind(ts)
++    .execute(&mut *tx)
++    .await;
++
++    let job_id = match inserted {
++        Ok(r) => r.last_insert_rowid(),
++        Err(e) => {
++            let _ = tx.rollback().await;
++            let _ = client.delete_server(&server.uuid).await;
++            return AppError::Db(e).into_response();
++        }
++    };
++
++    let ledger = sqlx::query(
++        "INSERT INTO ledger(user_id, delta, kind, ref, note, created_at) VALUES(?,?, 'charge', ?, ?, ?)",
++    )
++    .bind(user.id)
++    .bind(-state.cfg.price_per_install)
++    .bind(job_id.to_string())
++    .bind(format!("install {}", template.title))
++    .bind(ts)
++    .execute(&mut *tx)
++    .await;
++    if let Err(e) = ledger {
++        let _ = tx.rollback().await;
++        let _ = client.delete_server(&server.uuid).await;
++        return AppError::Db(e).into_response();
++    }
++
++    if let Err(e) = tx.commit().await {
++        let _ = client.delete_server(&server.uuid).await;
++        return AppError::Db(e).into_response();
++    }
++
++    tracing::info!(
++        "job {job_id} dibuat: {} {} {} server={}",
++        template.title,
++        zone.id,
++        plan.name,
++        server.uuid
++    );
++    jobs::spawn(state.clone(), job_id);
++    Redirect::to(&format!("/jobs/{job_id}")).into_response()
++}
++
++pub async fn card_fragment(
++    state: &SharedState,
++    user_id: i64,
++    job_id: i64,
++) -> AppResult<Option<String>> {
++    let row = sqlx::query_as::<_, (i64, i64)>("SELECT user_id, id FROM jobs WHERE id = ?")
++        .bind(job_id)
++        .fetch_optional(&state.pool)
++        .await?;
++    let Some((owner, id)) = row else {
++        return Ok(None);
++    };
++    if owner != user_id {
++        return Ok(None);
++    }
++    let view = build_card(state, id).await?;
++    Ok(Some(view.render()?))
++}
++
++async fn build_card(state: &SharedState, job_id: i64) -> AppResult<JobCard> {
++    let job = sqlx::query_as::<_, crate::models::Job>(
++        "SELECT id, user_id, mode, provider, status, phase, progress, os_label, zone, plan,
++                host, rdp_port, rdp_user, provider_ref, error, created_at, updated_at, done_at, expires_at, wiped
++         FROM jobs WHERE id = ?",
++    )
++    .bind(job_id)
++    .fetch_one(&state.pool)
++    .await?;
++
++    let password = if job.wiped == 0 && job.status == "done" {
++        sqlx::query_scalar::<_, String>("SELECT rdp_pass_enc FROM jobs WHERE id = ?")
++            .bind(job_id)
++            .fetch_one(&state.pool)
++            .await
++            .ok()
++            .filter(|e| !e.is_empty())
++            .and_then(|e| crate::crypto::open(&state.cfg.master_key, &e).ok())
++    } else {
++        None
++    };
++
++    let events = sqlx::query_as::<_, crate::models::JobEvent>(
++        "SELECT ts, phase, message FROM job_events WHERE job_id = ? ORDER BY id DESC LIMIT 8",
++    )
++    .bind(job_id)
++    .fetch_all(&state.pool)
++    .await
++    .unwrap_or_default();
++
++    Ok(JobCard {
++        job,
++        password,
++        events,
++    })
++}
++
++pub async fn detail(
++    State(state): State<SharedState>,
++    user: MaybeUser,
++    Path(id): Path<i64>,
++) -> Response {
++    let MaybeUser(Some(user)) = user else {
++        return Redirect::to("/login").into_response();
++    };
++    let page = match build_page(&state, user, id).await {
++        Ok(Some(p)) => p,
++        Ok(None) => return AppError::NotFound.into_response(),
++        Err(e) => return e.into_response(),
++    };
++    render(&page)
++}
++
++/// SSE: kirim ulang kartu setiap kali isinya berubah.
++pub async fn events(
++    State(state): State<SharedState>,
++    user: MaybeUser,
++    Path(id): Path<i64>,
++) -> Response {
++    let MaybeUser(Some(user)) = user else {
++        return AppError::Unauthorized.into_response();
++    };
++    // tolak lebih awal kalau job bukan milik user ini
++    let owner: Option<i64> = match sqlx::query_scalar("SELECT user_id FROM jobs WHERE id = ?")
++        .bind(id)
++        .fetch_optional(&state.pool)
++        .await
++    {
++        Ok(o) => o,
++        Err(e) => return AppError::Db(e).into_response(),
++    };
++    if owner != Some(user.id) {
++        return AppError::NotFound.into_response();
++    }
++
++    let (tx, rx) = tokio::sync::mpsc::channel::<Result<Event, std::convert::Infallible>>(8);
++    let state2 = state.clone();
++    tokio::spawn(async move {
++        let mut last = String::new();
++        let started = std::time::Instant::now();
++        loop {
++            match card_fragment(&state2, user.id, id).await {
++                Ok(Some(html)) => {
++                    let flat = html.replace('\n', "");
++                    if flat != last {
++                        last = flat.clone();
++                        if tx
++                            .send(Ok(Event::default().event("card").data(flat)))
++                            .await
++                            .is_err()
++                        {
++                            break;
++                        }
++                    }
++                }
++                _ => break,
++            }
++            // berhenti kalau job sudah final dan tidak berubah lagi
++            if started.elapsed().as_secs() > 30
++                && (last.contains("badge ok") || last.contains("badge bad"))
++            {
++                break;
++            }
++            if started.elapsed().as_secs() > 3600 {
++                break;
++            }
++            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
++        }
++    });
++    Sse::new(ReceiverStream::new(rx)).into_response()
++}
++
++pub async fn destroy(
++    State(state): State<SharedState>,
++    CurrentUser(user): CurrentUser,
++    Path(id): Path<i64>,
++) -> Response {
++    let row = sqlx::query_as::<_, (String, String, i64)>(
++        "SELECT provider_ref, status, cloud_account_id FROM jobs WHERE id = ? AND user_id = ?",
++    )
++    .bind(id)
++    .bind(user.id)
++    .fetch_optional(&state.pool)
++    .await;
++    let (uuid, status, account_id) = match row {
++        Ok(Some(r)) => r,
++        Ok(None) => return AppError::NotFound.into_response(),
++        Err(e) => return AppError::Db(e).into_response(),
++    };
++    if status == "cancelled" {
++        return Redirect::to(&format!("/jobs/{id}")).into_response();
++    }
++
++    let token = match token_of(&state, account_id, user.id).await {
++        Ok(t) => t,
++        Err(e) => return e.into_response(),
++    };
++    if let Ok(client) = upcloud::Client::new(&token) {
++        if let Err(e) = client.delete_server(&uuid).await {
++            tracing::warn!("hapus server {uuid} gagal: {e}");
++        }
++    }
++    let ts = now();
++    let _ = sqlx::query(
++        "UPDATE jobs SET status='cancelled', phase='server dihapus', progress=100,
++                rdp_pass_enc='', wiped=1, updated_at=? WHERE id=?",
++    )
++    .bind(ts)
++    .bind(id)
++    .execute(&state.pool)
++    .await;
++    let _ = sqlx::query("INSERT INTO job_events(job_id, ts, phase, message) VALUES(?,?,'dibatalkan','server dihapus lewat panel')")
++        .bind(id)
++        .bind(ts)
++        .execute(&state.pool)
++        .await;
++    Redirect::to(&format!("/jobs/{id}")).into_response()
++}
++
++async fn token_of(state: &SharedState, account_id: i64, user_id: i64) -> AppResult<String> {
++    let enc: Option<String> =
++        sqlx::query_scalar("SELECT token_enc FROM cloud_accounts WHERE id = ? AND user_id = ?")
++            .bind(account_id)
++            .bind(user_id)
++            .fetch_optional(&state.pool)
++            .await?;
++    let enc = enc.ok_or_else(|| AppError::bad("Akun cloud tidak ditemukan."))?;
++    Ok(crate::crypto::open(&state.cfg.master_key, &enc)?)
++}
++
++async fn balance_of(state: &SharedState, user_id: i64) -> AppResult<i64> {
++    let b: Option<i64> = sqlx::query_scalar("SELECT amount FROM balances WHERE user_id = ?")
++        .bind(user_id)
++        .fetch_optional(&state.pool)
++        .await?;
++    Ok(b.unwrap_or(0))
++}
++
++async fn build_page(state: &SharedState, user: User, id: i64) -> AppResult<Option<JobPage>> {
++    let owner: Option<i64> = sqlx::query_scalar("SELECT user_id FROM jobs WHERE id = ?")
++        .bind(id)
++        .fetch_optional(&state.pool)
++        .await?;
++    if owner != Some(user.id) {
++        return Ok(None);
++    }
++    let card = build_card(state, id).await?;
++    Ok(Some(JobPage { user, card }))
++}
++
++async fn err_page(state: &SharedState, user: User, msg: &str) -> Response {
++    finish_err(state, user, msg).await
++}
++
++/// Halaman wizard dengan pesan galat di atas form; pilihan tetap ditawarkan
++/// supaya user bisa langsung memperbaiki tanpa kehilangan konteks.
++async fn finish_err(state: &SharedState, user: User, msg: &str) -> Response {
++    let accounts = accounts(state, user.id).await.unwrap_or_default();
++    let usable: Vec<CloudAccount> = accounts.into_iter().filter(|a| a.status == "ok").collect();
++    let balance = balance_of(state, user.id).await.unwrap_or(0);
++
++    let (zones, plans, templates) = if let Some(first) = usable.first() {
++        match token_of(state, first.id, user.id).await {
++            Ok(token) => match upcloud::Client::new(&token) {
++                Ok(c) => tokio::try_join!(c.public_zones(), c.plans(), c.windows_templates())
++                    .unwrap_or_default(),
++                Err(_) => Default::default(),
++            },
++            Err(_) => Default::default(),
++        }
++    } else {
++        Default::default()
++    };
++
++    let page = InstallPage {
++        user,
++        accounts: usable,
++        zones,
++        plans,
++        templates,
++        balance,
++        price: state.cfg.price_per_install,
++        error: msg.to_string(),
++    };
++    render(&page)
++}
+diff --git a/src/routes/mod.rs b/src/routes/mod.rs
+index 468bbb7..c17e3d5 100644
+--- a/src/routes/mod.rs
++++ b/src/routes/mod.rs
+@@ -1,5 +1,6 @@
+ pub mod assets;
+ pub mod cloud;
++pub mod install;
+ pub mod pages;
+ pub mod telegram;
+ 
+@@ -18,6 +19,10 @@ pub fn router(state: SharedState) -> Router {
+         .route("/cloud", get(cloud::index).post(cloud::add))
+         .route("/cloud/{id}/check", post(cloud::check))
+         .route("/cloud/{id}/delete", post(cloud::delete))
++        .route("/install", get(install::wizard).post(install::create))
++        .route("/jobs/{id}", get(install::detail))
++        .route("/jobs/{id}/events", get(install::events))
++        .route("/jobs/{id}/destroy", post(install::destroy))
+         .route("/healthz", get(|| async { "ok" }))
+         .route("/static/style.css", get(assets::css))
+         .route("/favicon.svg", get(assets::favicon))
+diff --git a/src/routes/pages.rs b/src/routes/pages.rs
+index 76ce5f5..6bf3f29 100644
+--- a/src/routes/pages.rs
++++ b/src/routes/pages.rs
+@@ -47,7 +47,7 @@ pub async fn dashboard(state: &SharedState, user: User) -> AppResult<Response> {
+ 
+     let jobs = sqlx::query_as::<_, Job>(
+         "SELECT id, user_id, mode, provider, status, phase, progress, os_label, zone, plan,
+-                host, rdp_port, rdp_user, error, created_at, updated_at, done_at, expires_at, wiped
++                host, rdp_port, rdp_user, provider_ref, error, created_at, updated_at, done_at, expires_at, wiped
+          FROM jobs WHERE user_id = ? ORDER BY id DESC LIMIT 10",
+     )
+     .bind(user.id)
+diff --git a/src/upcloud.rs b/src/upcloud.rs
+index 30e6944..b6eca5d 100644
+--- a/src/upcloud.rs
++++ b/src/upcloud.rs
+@@ -136,9 +136,16 @@ pub struct Template {
+     pub access: String,
+     #[serde(default)]
+     pub template_type: String,
++    #[serde(default)]
++    pub tier: Option<String>,
+ }
+ 
+ impl Template {
++    /// Tier (maxiops/hdd) dari template, kalau API menyebutkannya.
++    pub fn tier_hint(&self) -> Option<String> {
++        self.tier.clone().filter(|t| !t.is_empty())
++    }
++
+     pub fn is_windows(&self) -> bool {
+         let t = self.title.to_lowercase();
+         t.contains("windows") || t.contains("server 20")
+@@ -386,3 +393,308 @@ mod tests {
+         assert!(e.to_string().starts_with("Token ditolak UpCloud"));
+     }
+ }
++
++// ---------------------------------------------------------------- servers
++
++#[derive(Debug, Clone, Deserialize)]
++pub struct ServerIp {
++    #[serde(default)]
++    pub access: String,
++    #[serde(default)]
++    pub address: String,
++    #[serde(default)]
++    pub family: String,
++}
++
++#[derive(Debug, Clone, Deserialize, Default)]
++pub struct Server {
++    #[serde(default)]
++    pub uuid: String,
++    #[serde(default)]
++    pub state: String,
++    #[serde(default)]
++    pub title: String,
++    #[serde(default)]
++    pub hostname: String,
++    #[serde(default)]
++    pub zone: String,
++    #[serde(default)]
++    pub plan: String,
++    /// Hanya ada di respons pembuatan server Windows.
++    #[serde(default)]
++    pub password: Option<String>,
++    #[serde(default)]
++    pub ip_addresses: Option<ServerIps>,
++}
++
++#[derive(Debug, Clone, Deserialize, Default)]
++pub struct ServerIps {
++    #[serde(default)]
++    pub ip_address: Vec<ServerIp>,
++}
++
++impl Server {
++    pub fn public_ipv4(&self) -> Option<String> {
++        self.ip_addresses
++            .as_ref()?
++            .ip_address
++            .iter()
++            .find(|i| {
++                i.access.eq_ignore_ascii_case("public") && i.family.eq_ignore_ascii_case("IPv4")
++            })
++            .map(|i| i.address.clone())
++            .filter(|a| !a.is_empty())
++    }
++
++    pub fn is_started(&self) -> bool {
++        self.state.eq_ignore_ascii_case("started")
++    }
++
++    pub fn is_failed_state(&self) -> bool {
++        matches!(
++            self.state.to_ascii_lowercase().as_str(),
++            "error" | "maintenance" | "unknown"
++        )
++    }
++}
++
++/// Permintaan pembuatan server: clone template publik + satu interface publik.
++#[derive(Debug, Clone)]
++pub struct CreateSpec {
++    pub zone: String,
++    pub title: String,
++    pub hostname: String,
++    pub plan: String,
++    pub template_uuid: String,
++    pub storage_title: String,
++    pub storage_size_gb: i64,
++    pub storage_tier: Option<String>,
++}
++
++/// Hostname UpCloud: huruf/angka/strip, maksimum 63, tanpa titik di ujung.
++pub fn safe_hostname(raw: &str) -> String {
++    let mut h: String = raw
++        .to_lowercase()
++        .chars()
++        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
++        .collect();
++    while h.contains("--") {
++        h = h.replace("--", "-");
++    }
++    let h = h.trim_matches('-').to_string();
++    let mut out = if h.is_empty() {
++        "win-rdp".to_string()
++    } else {
++        h
++    };
++    out.truncate(45);
++    format!("{out}-{}", crate::crypto::random_token(2))
++}
++
++impl CreateSpec {
++    pub fn to_body(&self) -> Value {
++        let mut device = serde_json::json!({
++            "action": "clone",
++            "storage": self.template_uuid,
++            "title": self.storage_title,
++        });
++        if self.storage_size_gb > 0 {
++            device["size"] = serde_json::json!(self.storage_size_gb);
++        }
++        if let Some(tier) = &self.storage_tier {
++            if !tier.is_empty() {
++                device["tier"] = serde_json::json!(tier);
++            }
++        }
++        serde_json::json!({
++            "server": {
++                "zone": self.zone,
++                "title": self.title,
++                "hostname": self.hostname,
++                "plan": self.plan,
++                "metadata": "yes",
++                "storage_devices": { "storage_device": [device] },
++                "networking": {
++                    "interfaces": {
++                        "interface": [
++                            { "type": "public", "ip_addresses": { "ip_address": [ { "family": "IPv4" } ] } },
++                            { "type": "utility", "ip_addresses": { "ip_address": [ { "family": "IPv4" } ] } }
++                        ]
++                    }
++                }
++            }
++        })
++    }
++}
++
++impl Client {
++    async fn post(&self, path: &str, body: &Value) -> Result<Value, Error> {
++        let url = format!("{}{}", self.base, path);
++        let res = self
++            .http
++            .post(&url)
++            .header("Authorization", format!("Bearer {}", self.token))
++            .header("Accept", "application/json")
++            .json(body)
++            .send()
++            .await
++            .map_err(|e| Error::Transport(e.to_string()))?;
++
++        let status = res.status();
++        let text = res.text().await.unwrap_or_default();
++        if status.as_u16() == 401 || status.as_u16() == 403 {
++            return Err(Error::Auth(format!("HTTP {}", status.as_u16())));
++        }
++        if !status.is_success() {
++            return Err(Error::Api {
++                status: status.as_u16(),
++                message: first_error_message(&text),
++            });
++        }
++        serde_json::from_str::<Value>(&text).map_err(|e| Error::Decode(e.to_string()))
++    }
++
++    async fn delete(&self, path: &str) -> Result<(), Error> {
++        let url = format!("{}{}", self.base, path);
++        let res = self
++            .http
++            .delete(&url)
++            .header("Authorization", format!("Bearer {}", self.token))
++            .send()
++            .await
++            .map_err(|e| Error::Transport(e.to_string()))?;
++        if res.status().is_success() || res.status().as_u16() == 404 {
++            return Ok(());
++        }
++        Err(Error::Api {
++            status: res.status().as_u16(),
++            message: first_error_message(&res.text().await.unwrap_or_default()),
++        })
++    }
++
++    /// Membuat server dari template. Untuk template Windows, UpCloud
++    /// mengembalikan password Administrator di respons ini — satu-satunya
++    /// kesempatan mengambilnya.
++    pub async fn create_server(&self, spec: &CreateSpec) -> Result<Server, Error> {
++        let v = self.post("/server", &spec.to_body()).await?;
++        let s = v
++            .get("server")
++            .ok_or_else(|| Error::Decode("respons tanpa objek server".into()))?;
++        serde_json::from_value(s.clone()).map_err(|e| Error::Decode(e.to_string()))
++    }
++
++    pub async fn server(&self, uuid: &str) -> Result<Server, Error> {
++        let v = self.get(&format!("/server/{uuid}")).await?;
++        let s = v
++            .get("server")
++            .ok_or_else(|| Error::Decode("respons tanpa objek server".into()))?;
++        serde_json::from_value(s.clone()).map_err(|e| Error::Decode(e.to_string()))
++    }
++
++    pub async fn delete_server(&self, uuid: &str) -> Result<(), Error> {
++        self.delete(&format!("/server/{uuid}")).await
++    }
++}
++
++#[cfg(test)]
++mod server_tests {
++    use super::*;
++
++    const CREATED: &str = r#"{"server":{
++        "boot_order":"disk","core_number":"2","firewall":"on","hostname":"win-rdp-ab12",
++        "ip_addresses":{"ip_address":[
++            {"access":"utility","address":"10.0.0.0","family":"IPv4"},
++            {"access":"public","address":"94.237.10.20","family":"IPv4"},
++            {"access":"public","address":"2a01:4f8::1","family":"IPv6"}]},
++        "license":0.05,"memory_amount":"4096","password":"Aa1!zzzzzzzzzz","plan":"2xCPU-4GB",
++        "state":"started","title":"Windows RDP","uuid":"00c78863-db86-44ea-af70-d6edc4d162bf",
++        "zone":"sg-sin1"}}"#;
++
++    #[test]
++    fn parses_created_server_with_windows_password() {
++        let v: Value = serde_json::from_str(CREATED).unwrap();
++        let s: Server = serde_json::from_value(v.get("server").unwrap().clone()).unwrap();
++        assert_eq!(s.uuid, "00c78863-db86-44ea-af70-d6edc4d162bf");
++        assert!(s.is_started());
++        assert_eq!(s.password.as_deref(), Some("Aa1!zzzzzzzzzz"));
++        assert_eq!(
++            s.public_ipv4().as_deref(),
++            Some("94.237.10.20"),
++            "harus IPv4 publik, bukan utility/IPv6"
++        );
++        assert!(!s.is_failed_state());
++    }
++
++    #[test]
++    fn server_without_password_or_ips_is_tolerated() {
++        let body = r#"{"server":{"uuid":"x","state":"maintenance"}}"#;
++        let v: Value = serde_json::from_str(body).unwrap();
++        let s: Server = serde_json::from_value(v.get("server").unwrap().clone()).unwrap();
++        assert!(s.password.is_none());
++        assert!(s.public_ipv4().is_none());
++        assert!(s.is_failed_state());
++    }
++
++    #[test]
++    fn create_body_matches_documented_shape() {
++        let spec = CreateSpec {
++            zone: "sg-sin1".into(),
++            title: "Windows RDP".into(),
++            hostname: "win-rdp-ab12".into(),
++            plan: "2xCPU-4GB".into(),
++            template_uuid: "01000000-0000-4000-8000-000030220400".into(),
++            storage_title: "Windows Server 2022".into(),
++            storage_size_gb: 40,
++            storage_tier: Some("maxiops".into()),
++        };
++        let b = spec.to_body();
++        assert_eq!(b["server"]["zone"], "sg-sin1");
++        assert_eq!(b["server"]["plan"], "2xCPU-4GB");
++        let dev = &b["server"]["storage_devices"]["storage_device"][0];
++        assert_eq!(dev["action"], "clone");
++        assert_eq!(dev["storage"], "01000000-0000-4000-8000-000030220400");
++        assert_eq!(dev["size"], 40);
++        assert_eq!(dev["tier"], "maxiops");
++        let ifaces = b["server"]["networking"]["interfaces"]["interface"]
++            .as_array()
++            .unwrap();
++        assert_eq!(ifaces[0]["type"], "public");
++        assert_eq!(ifaces[0]["ip_addresses"]["ip_address"][0]["family"], "IPv4");
++        // tanpa login_user: UpCloud membuat password Administrator sendiri
++        assert!(b["server"].get("login_user").is_none());
++    }
++
++    #[test]
++    fn create_body_without_size_or_tier() {
++        let spec = CreateSpec {
++            zone: "fi-hel1".into(),
++            title: "t".into(),
++            hostname: "h".into(),
++            plan: "1xCPU-2GB".into(),
++            template_uuid: "u".into(),
++            storage_title: "s".into(),
++            storage_size_gb: 0,
++            storage_tier: None,
++        };
++        let b = spec.to_body();
++        assert!(b["server"]["storage_devices"]["storage_device"][0]
++            .get("size")
++            .is_none());
++        assert!(b["server"]["storage_devices"]["storage_device"][0]
++            .get("tier")
++            .is_none());
++    }
++
++    #[test]
++    fn hostname_is_sanitized() {
++        let h = safe_hostname("Windows RDP #1 (SG)");
++        assert!(h.starts_with("windows-rdp-1-sg-"), "dapat: {h}");
++        assert!(h.len() <= 48);
++        assert!(h.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'));
++        assert_ne!(
++            safe_hostname("x"),
++            safe_hostname("x"),
++            "harus unik per panggilan"
++        );
++    }
++}
+diff --git a/src/views.rs b/src/views.rs
+index 66e6aaa..88d6212 100644
+--- a/src/views.rs
++++ b/src/views.rs
+@@ -1,6 +1,7 @@
+ use askama::Template;
+ 
+-use crate::models::{CloudAccount, Job, User};
++use crate::models::{CloudAccount, Job, JobEvent, User};
++use crate::upcloud::{Plan, Template as WinTemplate, Zone};
+ 
+ #[derive(Template)]
+ #[template(path = "login.html")]
+@@ -85,3 +86,43 @@ pub fn dt(ts: i64) -> String {
+         })
+         .unwrap_or_else(|| "-".into())
+ }
++
++#[derive(Template)]
++#[template(path = "install.html")]
++pub struct InstallPage {
++    pub user: User,
++    pub accounts: Vec<CloudAccount>,
++    pub zones: Vec<Zone>,
++    pub plans: Vec<Plan>,
++    pub templates: Vec<WinTemplate>,
++    pub balance: i64,
++    pub price: i64,
++    pub error: String,
++}
++
++impl InstallPage {
++    pub fn rupiah(&self, n: &i64) -> String {
++        rupiah(*n)
++    }
++}
++
++#[derive(Template)]
++#[template(path = "job.html")]
++pub struct JobPage {
++    pub user: User,
++    pub card: JobCard,
++}
++
++#[derive(Template)]
++#[template(path = "job_card.html")]
++pub struct JobCard {
++    pub job: Job,
++    pub password: Option<String>,
++    pub events: Vec<JobEvent>,
++}
++
++impl JobCard {
++    pub fn dt(&self, ts: &i64) -> String {
++        dt(*ts)
++    }
++}
+diff --git a/static/style.css b/static/style.css
+index e7ded69..ceae876 100644
+--- a/static/style.css
++++ b/static/style.css
+@@ -166,3 +166,24 @@ tr:last-child td { border-bottom: 0; }
+ .err .card { width: 100%; max-width: 420px; text-align: center; }
+ .err-code { font-family: var(--mono); font-size: 30px; color: var(--accent); margin: 0 0 6px; }
+ .err-msg { color: var(--fg-dim); font-size: 14px; margin: 0 0 16px; }
++
++/* progres + kartu job */
++.bar { height: 6px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 4px; overflow: hidden; margin: 4px 0 10px; }
++.bar > span { display: block; height: 100%; background: var(--accent); transition: width .4s ease; }
++
++.kv { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px 18px; margin: 14px 0; }
++.kv > div { display: flex; flex-direction: column; gap: 3px; }
++.k { font-size: 11px; text-transform: uppercase; letter-spacing: .1em; color: var(--fg-mute); }
++.v { font-size: 14px; }
++
++.creds { border: 1px solid var(--line-2); border-radius: 8px; padding: 12px 14px; background: var(--panel-2); margin: 14px 0; }
++.cred { display: flex; align-items: center; gap: 10px; padding: 6px 0; }
++.cred .k { width: 74px; flex: none; }
++.cred .v { font-size: 14px; word-break: break-all; }
++.cred .btn { margin-left: auto; }
++
++.log { margin: 12px 0 4px; border-top: 1px solid var(--line); padding-top: 10px; }
++.logline { font-size: 12px; padding: 3px 0; display: flex; gap: 8px; flex-wrap: wrap; }
++
++.steps { margin: 0; padding-left: 20px; color: var(--fg-dim); font-size: 13px; }
++.steps li { padding: 3px 0; }
+diff --git a/templates/dashboard.html b/templates/dashboard.html
+index d665b3e..b632cac 100644
+--- a/templates/dashboard.html
++++ b/templates/dashboard.html
+@@ -23,7 +23,7 @@
+     <p class="label">Install baru</p>
+     <p class="big">{{ rupiah(price) }}<span class="unit">/install</span></p>
+     <p class="muted small">Buatan UpCloud dari template Windows resmi. Kredensial muncul otomatis setelah RDP siap.</p>
+-    <div class="row"><button class="btn" disabled title="segera">mulai</button></div>
++    <div class="row"><a class="btn" href="/install">mulai</a></div>
+   </div>
+ 
+   <div class="card">
+@@ -57,7 +57,7 @@ <h2>Job terakhir</h2>
+     <tbody>
+     {% for j in jobs %}
+       <tr>
+-        <td class="mono">{{ j.id }}</td>
++        <td class="mono"><a href="/jobs/{{ j.id }}">{{ j.id }}</a></td>
+         <td>{{ j.os_label }}{% if !j.zone.is_empty() %} <span class="dim">{{ j.zone }}</span>{% endif %}</td>
+         <td><span class="badge {{ j.status_class() }}">{{ j.status }}</span></td>
+         <td class="dim">{{ j.phase }}{% if j.is_active() %} <span class="mono">{{ j.progress }}%</span>{% endif %}</td>
+diff --git a/templates/install.html b/templates/install.html
+new file mode 100644
+index 0000000..a956c02
+--- /dev/null
++++ b/templates/install.html
+@@ -0,0 +1,90 @@
++{% extends "base.html" %}
++{% block title %}Install baru — RDP Installer{% endblock %}
++
++{% block topnav %}
++<div class="topnav">
++  <a class="btn ghost small" href="/">dashboard</a>
++  <span class="who">{{ user.display_name() }}</span>
++</div>
++{% endblock %}
++
++{% block content %}
++<section class="card">
++  <div class="cardhead">
++    <h2>Install RDP baru</h2>
++    <span class="muted small">tarif {{ rupiah(price) }} · saldo {{ rupiah(balance) }}</span>
++  </div>
++
++  {% if !error.is_empty() %}<p class="alert">{{ error }}</p>{% endif %}
++
++  {% if accounts.is_empty() %}
++  <p class="empty">Belum ada akun cloud yang valid. <a href="/cloud">Tambahkan API token UpCloud</a> dulu.</p>
++  {% else %}
++  <p class="muted small">Server dibuat dari template Windows resmi UpCloud. UpCloud menyerahkan
++  password Administrator sekali di respons pembuatan — kami simpan terenkripsi dan menghapusnya
++  otomatis setelah 24 jam. Biaya lisensi Windows sudah termasuk di harga plan UpCloud dan
++  ditagih ke akun cloud Anda, bukan ke saldo di sini.</p>
++
++  <form method="post" action="/install" class="form">
++    <label>
++      <span class="label">Windows</span>
++      <select name="template_uuid" required>
++        {% for t in templates %}
++        <option value="{{ t.uuid }}">{{ t.title }}{% if t.size > 0 %} · min {{ t.size }} GB{% endif %}{% if t.license > 0.0 %} · lisensi {{ t.license }}{% endif %}</option>
++        {% endfor %}
++      </select>
++    </label>
++
++    <label>
++      <span class="label">Akun cloud</span>
++      <select name="account_id" required>
++        {% for a in accounts %}
++        <option value="{{ a.id }}">{{ a.label }} — {{ a.credit }}</option>
++        {% endfor %}
++      </select>
++    </label>
++
++    <label>
++      <span class="label">Lokasi</span>
++      <select name="zone" required>
++        {% for z in zones %}
++        <option value="{{ z.id }}">{{ z.id }} — {{ z.description }}</option>
++        {% endfor %}
++      </select>
++    </label>
++
++    <label>
++      <span class="label">Plan</span>
++      <select name="plan" required>
++        {% for p in plans %}
++        <option value="{{ p.name }}">{{ p.label() }}{% if !p.fits_windows_11() %} · di bawah 2 GB, pilih edisi ringan{% endif %}</option>
++        {% endfor %}
++      </select>
++    </label>
++
++    <label>
++      <span class="label">Ukuran disk (GB, opsional)</span>
++      <input type="number" name="storage_gb" min="0" max="500" placeholder="ikut template" inputmode="numeric">
++    </label>
++
++    <label>
++      <span class="label">Nama server (opsional)</span>
++      <input type="text" name="title" maxlength="60" placeholder="RDP Jay" autocomplete="off">
++    </label>
++
++    <div class="row"><button class="btn" type="submit">buat &amp; install</button>
++      <span class="muted small">saldo terpotong {{ rupiah(price) }} saat server berhasil dibuat</span></div>
++  </form>
++  {% endif %}
++</section>
++
++<section class="card">
++  <h2>Yang terjadi setelah ini</h2>
++  <ol class="steps">
++    <li>UpCloud membuat server dari template Windows (30-60 detik).</li>
++    <li>Kami pantau state server lewat API, lalu menunggu port 3389 benar-benar menjawab.</li>
++    <li>Kredensial muncul di halaman job — IP, user, password, tombol salin.</li>
++    <li>Ada tombol <span class="mono">hancurkan server</span> kalau sudah tidak dipakai.</li>
++  </ol>
++</section>
++{% endblock %}
+diff --git a/templates/job.html b/templates/job.html
+new file mode 100644
+index 0000000..bd7597a
+--- /dev/null
++++ b/templates/job.html
+@@ -0,0 +1,51 @@
++{% extends "base.html" %}
++{% block title %}Job #{{ card.job.id }} — RDP Installer{% endblock %}
++
++{% block topnav %}
++<div class="topnav">
++  <a class="btn ghost small" href="/">dashboard</a>
++  <a class="btn ghost small" href="/install">install baru</a>
++</div>
++{% endblock %}
++
++{% block content %}
++<noscript>
++  <p class="alert">JavaScript dimatikan — progres tidak akan berubah sendiri. Muat ulang halaman untuk memperbarui.</p>
++</noscript>
++
++<div id="jobcard">
++  <section class="card">
++    <div class="cardhead">
++      <h2>Job #{{ card.job.id }} · {{ card.job.os_label }}</h2>
++      <span class="badge {{ card.job.status_class() }}">{{ card.job.status }}</span>
++    </div>
++    <p class="muted">{{ card.job.phase }}</p>
++    {% if card.job.status == "done" %}
++    <p class="mono">{{ card.job.host }}:{{ card.job.rdp_port }} · {{ card.job.rdp_user }}</p>
++    {% endif %}
++  </section>
++</div>
++
++<script>
++(function () {
++  var box = document.getElementById("jobcard");
++  var es = new EventSource("/jobs/{{ card.job.id }}/events");
++  es.addEventListener("card", function (ev) {
++    box.innerHTML = ev.data;
++    var btn = box.querySelector("[data-copy]");
++    if (btn && !btn.dataset.bound) {
++      btn.dataset.bound = "1";
++      btn.addEventListener("click", function () {
++        var el = document.getElementById(btn.dataset.copy);
++        if (!el) return;
++        navigator.clipboard.writeText(el.textContent.trim()).then(function () {
++          btn.textContent = "tersalin";
++          setTimeout(function () { btn.textContent = "salin"; }, 1500);
++        });
++      });
++    }
++  });
++  es.onerror = function () { es.close(); };
++})();
++</script>
++{% endblock %}
+diff --git a/templates/job_card.html b/templates/job_card.html
+new file mode 100644
+index 0000000..b9a2a03
+--- /dev/null
++++ b/templates/job_card.html
+@@ -0,0 +1,63 @@
++<section class="card">
++  <div class="cardhead">
++    <h2>Job #{{ job.id }} · {{ job.os_label }}</h2>
++    <span class="badge {{ job.status_class() }}">{{ job.status }}</span>
++  </div>
++
++  <div class="bar"><span style="width: {{ job.progress }}%"></span></div>
++  <p class="muted">{{ job.phase }}{% if job.is_active() %} <span class="mono">{{ job.progress }}%</span>{% endif %}</p>
++
++  <div class="kv">
++    <div><span class="k">Lokasi</span><span class="v mono">{{ job.zone }}</span></div>
++    <div><span class="k">Plan</span><span class="v mono">{{ job.plan }}</span></div>
++    <div><span class="k">Dibuat</span><span class="v">{{ dt(job.created_at) }}</span></div>
++    {% if job.done_at > 0 %}<div><span class="k">RDP siap</span><span class="v">{{ dt(job.done_at) }}</span></div>{% endif %}
++  </div>
++
++  {% if !job.error.is_empty() %}
++  <p class="alert">{{ job.error }}</p>
++  {% endif %}
++
++  {% if job.status == "done" %}
++  <div class="creds">
++    <div class="cred"><span class="k">IP</span><span class="v mono" id="hv">{{ job.host }}</span><button class="btn ghost small" data-copy="hv">salin</button></div>
++    <div class="cred"><span class="k">Port</span><span class="v mono" id="pv">{{ job.rdp_port }}</span><button class="btn ghost small" data-copy="pv">salin</button></div>
++    <div class="cred"><span class="k">User</span><span class="v mono" id="uv">{{ job.rdp_user }}</span><button class="btn ghost small" data-copy="uv">salin</button></div>
++    {% if let Some(pw) = password %}
++    <div class="cred"><span class="k">Password</span><span class="v mono" id="pwv">{{ pw }}</span><button class="btn ghost small" data-copy="pwv">salin</button></div>
++    {% endif %}
++    {% if let Some(pw) = password %}
++    <p class="muted small">Password hilang otomatis {{ dt(job.expires_at) }}. Ganti setelah login pertama.</p>
++    {% else %}
++    {% if job.wiped == 1 %}
++    <p class="muted small">Password sudah dihapus karena masa simpan habis. Reset lewat panel UpCloud bila perlu.</p>
++    {% else %}
++    <p class="muted small">UpCloud tidak mengirim password di respons create — setel ulang lewat panel UpCloud.</p>
++    {% endif %}
++    {% endif %}
++  </div>
++  {% endif %}
++
++  {% if !events.is_empty() %}
++  <div class="log">
++    {% for e in events %}
++    <div class="logline"><span class="dim">{{ dt(e.ts) }}</span> <span class="mono">{{ e.phase }}</span>
++      {% if !e.message.is_empty() %}<span class="dim">{{ e.message }}</span>{% endif %}</div>
++    {% endfor %}
++  </div>
++  {% endif %}
++
++  <div class="row">
++    {% if job.status == "done" || job.status == "failed" %}
++    {% if job.status == "done" %}
++    <form method="post" action="/jobs/{{ job.id }}/destroy"
++          onsubmit="return confirm('Hapus server di UpCloud? Tindakan ini tidak bisa dibatalkan.');">
++      <button class="btn ghost small" type="submit">hancurkan server</button>
++    </form>
++    {% endif %}
++    <a class="btn ghost small" href="/install">install baru</a>
++    {% else %}
++    <span class="muted small">biarkan tab ini terbuka — status diperbarui otomatis.</span>
++    {% endif %}
++  </div>
++</section>

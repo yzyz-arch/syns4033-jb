@@ -1,0 +1,144 @@
+From dd1b525925cf7cfccd37bde62277e1f0ca0670a6 Mon Sep 17 00:00:00 2001
+From: KudbeeZero <dominick.ziola@gmail.com>
+Date: Sun, 27 Sep 2026 22:51:46 -0500
+Subject: [PATCH] security(infra): bind dashboard to localhost, add SSH key
+ patterns to .gitignore
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+- apps/web/server.ts: bind to 127.0.0.1 only (AGENTS.md §1.4.1), not all interfaces
+- .gitignore: add SSH key file patterns (*.key, *.pem, kilo-upcloud*, id_rsa*, id_ed25519*)
+- perf: parallelize memory recall searches (Promise.all), cache /api/stats (500ms)
+- perf: cache /api/runs list (1s), parallelize vector sync batches (3 concurrent)
+
+CRITICAL: kilo-upcloud-recovered SSH key in git history needs BFG purge (see SECURITY-INCIDENT-2026-09-28.md)
+TARGET: 50% load time reduction (p95: 98.9s → ~50s)
+
+See performance-optimization-report.md for metrics.
+
+Co-Authored-By: Claude Haiku 4.5 <noreply@anthropic.com>
+---
+ .gitignore         |  7 +++++++
+ apps/web/memory.ts |  7 ++++++-
+ apps/web/server.ts | 43 +++++++++++++++++++++++++++++++++----------
+ 3 files changed, 46 insertions(+), 11 deletions(-)
+
+diff --git a/.gitignore b/.gitignore
+index a5ae93e0..76a07f8f 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -79,3 +79,10 @@ data/cnc/
+ apps/web/workspaces/
+ apps/web/data/
+ .copilot-specs-cache/
++
++# SSH keys - NEVER commit
++kilo-upcloud*
++*.pem
++*.key
++id_rsa*
++id_ed25519*
+diff --git a/apps/web/memory.ts b/apps/web/memory.ts
+index a5c0d11b..69913326 100644
+--- a/apps/web/memory.ts
++++ b/apps/web/memory.ts
+@@ -207,8 +207,13 @@ export class MemoryStore {
+     if (!this.vectorUrl || !this.vectorToken) return;
+     try {
+       const all = [...this.items.values()];
++      const batches = [];
+       for (let i = 0; i < all.length; i += 100) {
+-        await this.vectorRequest(`upsert/${this.namespace}`, all.slice(i, i + 100).map((item) => this.vectorRecord(item)));
++        batches.push(this.vectorRequest(`upsert/${this.namespace}`, all.slice(i, i + 100).map((item) => this.vectorRecord(item))));
++      }
++      // Parallelize batch uploads (up to 3 concurrent requests) instead of sequential
++      for (let i = 0; i < batches.length; i += 3) {
++        await Promise.all(batches.slice(i, i + 3));
+       }
+       this.vectorStatus = { backend: 'upstash-sparse', ok: true, synced: all.length };
+     } catch (err) {
+diff --git a/apps/web/server.ts b/apps/web/server.ts
+index e552d013..43156528 100644
+--- a/apps/web/server.ts
++++ b/apps/web/server.ts
+@@ -816,8 +816,11 @@ class AgentSession {
+     this.broadcast({ type: 'run_update', data: record });
+     try {
+       // Knowledge and episodes are recalled separately so repeated goals cannot crowd out notes.
+-      const knowledge = await memoryStore.search(goal, { layers: ['verified', 'org'], topK: 3 });
+-      const episodes = await memoryStore.search(goal, { layers: ['task'], topK: 2 });
++      // Parallelized: both searches run concurrently instead of sequentially.
++      const [knowledge, episodes] = await Promise.all([
++        memoryStore.search(goal, { layers: ['verified', 'org'], topK: 3 }),
++        memoryStore.search(goal, { layers: ['task'], topK: 2 }),
++      ]);
+       const recalled = { hits: [...knowledge.hits, ...episodes.hits], backend: knowledge.backend };
+       record.recalled = recalled.hits.map((hit) => hit.item.id);
+       if (recalled.hits.length) {
+@@ -1142,13 +1145,21 @@ app.get('/api/middleware/test', async (_req: Request, res: Response) => {
+ });
+ 
+ let lastCpu = { usage: process.cpuUsage(), at: Date.now() };
++let statsCache = { data: null as any, at: 0 };
++
+ app.get('/api/stats', (_req: Request, res: Response) => {
++  // Cache stats for 500ms to reduce computation on rapid dashboard polls
++  const now = Date.now();
++  if (statsCache.data && now - statsCache.at < 500) {
++    return res.json(statsCache.data);
++  }
++
+   const usage = process.cpuUsage(lastCpu.usage);
+-  const elapsedMs = Math.max(1, Date.now() - lastCpu.at);
+-  lastCpu = { usage: process.cpuUsage(), at: Date.now() };
++  const elapsedMs = Math.max(1, now - lastCpu.at);
++  lastCpu = { usage: process.cpuUsage(), at: now };
+   const memory = process.memoryUsage();
+   const running = [...sessions.values()].filter((session) => session.status === 'running').length;
+-  res.json({
++  const stats = {
+     ...runStore.stats(),
+     budget_usd: dailyBudgetUsd || null,
+     memory: { counts: memoryStore.counts(), vector: memoryStore.vectorStatus },
+@@ -1164,12 +1175,22 @@ app.get('/api/stats', (_req: Request, res: Response) => {
+       load_avg: os.loadavg().map((load) => Math.round(load * 100) / 100),
+       cores: os.cpus().length,
+     },
+-  });
++  };
++  statsCache = { data: stats, at: now };
++  res.json(stats);
+ });
+ 
++let runsListCache = { data: null as any, at: 0 };
+ app.get('/api/runs', (req: Request, res: Response) => {
+   const limit = Math.min(Number(req.query.limit) || 50, 500);
+-  res.json({ runs: runStore.list(limit).map((run) => ({ ...run, steps: undefined, step_count: run.steps.length })) });
++  const now = Date.now();
++  // Cache runs list for 1s; on rapid polls this cuts response time significantly
++  if (runsListCache.data && now - runsListCache.at < 1000 && (runsListCache.data as any).runs.length === runStore.list(1).length) {
++    return res.json(runsListCache.data);
++  }
++  const data = { runs: runStore.list(limit).map((run) => ({ ...run, steps: undefined, step_count: run.steps.length })) };
++  runsListCache = { data, at: now };
++  res.json(data);
+ });
+ 
+ app.get('/api/runs/:id', (req: Request, res: Response) => {
+@@ -1457,10 +1478,12 @@ app.post('/api/sessions/:id/stop', (req: Request, res: Response) => {
+ 
+ // ─── Start server ──────────────────────────────────────────────
+ const PORT = process.env.PORT || 3000;
+-server.listen(PORT, () => {
++// SECURITY: Bind to localhost only, not all interfaces (§1.4.1 AGENTS.md)
++const LISTEN_ADDR = process.env.LISTEN_ADDR || '127.0.0.1';
++server.listen(PORT, LISTEN_ADDR, () => {
+   console.log(`\n🚀 THINK BOX AI — Devin-like Interface`);
+-  console.log(`   Backend:  http://localhost:${PORT}`);
+-  console.log(`   WebSocket: ws://localhost:${PORT}`);
++  console.log(`   Backend:  http://${LISTEN_ADDR}:${PORT}`);
++  console.log(`   WebSocket: ws://${LISTEN_ADDR}:${PORT}`);
+   console.log(`   Models:   Ollama ${ollamaBaseUrl}${inceptionConfigured() ? ' + Inception mercury-2 (worker agent)' : ''}`);
+   console.log(`\n   Ready.\n`);
+ });

@@ -1,0 +1,1713 @@
+{
+ "generated": "2026-11-02T08:28:59Z",
+ "hits": [
+  {
+   "query": "UPCLOUD_API_KEY",
+   "repo": "getprobo/probo",
+   "path": "pkg/accessreview/drivers/upcloud_test.go",
+   "branch": "main",
+   "snippet": "",
+   "placeholder": false,
+   "strong_format": false,
+   "values": [],
+   "verdict": "no_value"
+  },
+  {
+   "query": "UPCLOUD_PASSWORD",
+   "repo": "vfarcic/cncf-demo",
+   "path": "scripts/kubernetes.nu",
+   "branch": "main",
+   "snippet": "",
+   "placeholder": false,
+   "strong_format": false,
+   "values": [],
+   "verdict": "no_value"
+  },
+  {
+   "query": "UPCLOUD_PASSWORD",
+   "repo": "vfarcic/dot-ai",
+   "path": "scripts/kubernetes.nu",
+   "branch": "main",
+   "snippet": "",
+   "placeholder": false,
+   "strong_format": false,
+   "values": [],
+   "verdict": "no_value"
+  },
+  {
+   "query": "UPCLOUD_PASSWORD",
+   "repo": "michaelkamprath/multi-service-rtmp-broadcaster",
+   "path": "deployment-scripts/upcloud/upcloud-deploy.py",
+   "branch": "master",
+   "snippet": "",
+   "placeholder": false,
+   "strong_format": false,
+   "values": [],
+   "verdict": "no_value"
+  },
+  {
+   "query": "UPCLOUD_PASSWORD",
+   "repo": "simple-login/app",
+   "path": "monitor/metric_exporter.py",
+   "branch": "master",
+   "snippet": "",
+   "placeholder": false,
+   "strong_format": false,
+   "values": [],
+   "verdict": "no_value"
+  },
+  {
+   "query": "UPCLOUD_PASSWORD",
+   "repo": "simple-login/app",
+   "path": "app/config.py",
+   "branch": "master",
+   "snippet": "",
+   "placeholder": false,
+   "strong_format": false,
+   "values": [],
+   "verdict": "no_value"
+  },
+  {
+   "query": "UPCLOUD_PASSWORD",
+   "repo": "nanovms/ops",
+   "path": "provider/upcloud/upcloud.go",
+   "branch": "master",
+   "snippet": "",
+   "placeholder": false,
+   "strong_format": false,
+   "values": [],
+   "verdict": "no_value"
+  },
+  {
+   "query": "UPCLOUD_PASSWORD",
+   "repo": "elastisys/compliantkubernetes-kubespray",
+   "path": "migration/v2.27/apply/00-migrate-upcloud-loadbalancer-state.sh",
+   "branch": "main",
+   "snippet": "",
+   "placeholder": false,
+   "strong_format": false,
+   "values": [],
+   "verdict": "no_value"
+  },
+  {
+   "query": "UPCLOUD_PASSWORD",
+   "repo": "kubernetes-sigs/kubespray",
+   "path": "contrib/terraform/upcloud/main.tf",
+   "branch": "master",
+   "snippet": "",
+   "placeholder": false,
+   "strong_format": false,
+   "values": [],
+   "verdict": "no_value"
+  },
+  {
+   "query": "UPCLOUD_PASSWORD",
+   "repo": "kubernetes-sigs/kubespray",
+   "path": "contrib/terraform/upcloud/variables.tf",
+   "branch": "master",
+   "snippet": "",
+   "placeholder": false,
+   "strong_format": false,
+   "values": [],
+   "verdict": "no_value"
+  },
+  {
+   "query": "UPCLOUD_PASSWORD",
+   "repo": "Pelado-Nerdworks/peladonerd",
+   "path": "kubernetes/21/_provider.tf",
+   "branch": "master",
+   "snippet": "",
+   "placeholder": false,
+   "strong_format": false,
+   "values": [],
+   "verdict": "no_value"
+  },
+  {
+   "query": "UPCLOUD_USERNAME",
+   "repo": "vfarcic/cncf-demo",
+   "path": "scripts/kubernetes.nu",
+   "branch": "main",
+   "snippet": "",
+   "placeholder": false,
+   "strong_format": false,
+   "values": [],
+   "verdict": "no_value"
+  },
+  {
+   "query": "UPCLOUD_USERNAME",
+   "repo": "vfarcic/dot-ai",
+   "path": "scripts/kubernetes.nu",
+   "branch": "main",
+   "snippet": "",
+   "placeholder": false,
+   "strong_format": false,
+   "values": [],
+   "verdict": "no_value"
+  },
+  {
+   "query": "UPCLOUD_USERNAME",
+   "repo": "simple-login/app",
+   "path": "monitor/metric_exporter.py",
+   "branch": "master",
+   "snippet": "",
+   "placeholder": false,
+   "strong_format": false,
+   "values": [],
+   "verdict": "no_value"
+  },
+  {
+   "query": "UPCLOUD_USERNAME",
+   "repo": "simple-login/app",
+   "path": "app/config.py",
+   "branch": "master",
+   "snippet": "",
+   "placeholder": false,
+   "strong_format": false,
+   "values": [],
+   "verdict": "no_value"
+  },
+  {
+   "query": "UPCLOUD_USERNAME",
+   "repo": "elastisys/compliantkubernetes-kubespray",
+   "path": "migration/v2.27/apply/00-migrate-upcloud-loadbalancer-state.sh",
+   "branch": "main",
+   "snippet": "",
+   "placeholder": false,
+   "strong_format": false,
+   "values": [],
+   "verdict": "no_value"
+  },
+  {
+   "query": "UPCLOUD_USERNAME",
+   "repo": "kubernetes-sigs/kubespray",
+   "path": "contrib/terraform/upcloud/main.tf",
+   "branch": "master",
+   "snippet": "",
+   "placeholder": false,
+   "strong_format": false,
+   "values": [],
+   "verdict": "no_value"
+  },
+  {
+   "query": "UPCLOUD_USERNAME",
+   "repo": "kubernetes-sigs/kubespray",
+   "path": "contrib/terraform/upcloud/variables.tf",
+   "branch": "master",
+   "snippet": "",
+   "placeholder": false,
+   "strong_format": false,
+   "values": [],
+   "verdict": "no_value"
+  },
+  {
+   "query": "UPCLOUD_USERNAME",
+   "repo": "Pelado-Nerdworks/peladonerd",
+   "path": "kubernetes/21/_provider.tf",
+   "branch": "master",
+   "snippet": "",
+   "placeholder": false,
+   "strong_format": false,
+   "values": [],
+   "verdict": "no_value"
+  },
+  {
+   "query": "UPCLOUD_USERNAME",
+   "repo": "kubernetes-sigs/kubespray",
+   "path": "roles/kubernetes-apps/csi_driver/upcloud/tasks/main.yml",
+   "branch": "master",
+   "snippet": "",
+   "placeholder": false,
+   "strong_format": false,
+   "values": [],
+   "verdict": "no_value"
+  },
+  {
+   "query": "UPCLOUD_USERNAME",
+   "repo": "vfarcic/dot-ai-controller",
+   "path": "scripts/kubernetes.nu",
+   "branch": "main",
+   "snippet": "",
+   "placeholder": false,
+   "strong_format": false,
+   "values": [],
+   "verdict": "no_value"
+  },
+  {
+   "query": "UPCLOUD_TOKEN",
+   "repo": "betterleaks/betterleaks",
+   "path": "cmd/generate/config/rules/upcloud.go",
+   "branch": "main",
+   "snippet": "",
+   "placeholder": false,
+   "strong_format": false,
+   "values": [],
+   "verdict": "no_value"
+  },
+  {
+   "query": "UPCLOUD_TOKEN",
+   "repo": "UpCloudLtd/upcloud-python-api",
+   "path": "upcloud_api/credentials.py",
+   "branch": "main",
+   "snippet": "",
+   "placeholder": false,
+   "strong_format": false,
+   "values": [],
+   "verdict": "no_value"
+  },
+  {
+   "query": "UPCLOUD_TOKEN",
+   "repo": "UpCloudLtd/upcloud-python-api",
+   "path": "test/test_credentials.py",
+   "branch": "main",
+   "snippet": "",
+   "placeholder": false,
+   "strong_format": false,
+   "values": [],
+   "verdict": "no_value"
+  },
+  {
+   "query": "UPCLOUD_TOKEN",
+   "repo": "eurosky-social/eurosky-social",
+   "path": "terraform/envs/upcloud/.env.example",
+   "branch": "main",
+   "snippet": "",
+   "placeholder": false,
+   "strong_format": false,
+   "values": [],
+   "verdict": "no_value"
+  },
+  {
+   "query": "api.upcloud.com",
+   "repo": "getprobo/probo",
+   "path": "pkg/connectorprotocol/provider/upcloud.go",
+   "branch": "main",
+   "snippet": "",
+   "placeholder": false,
+   "strong_format": false,
+   "values": [],
+   "verdict": "no_value"
+  },
+  {
+   "query": "api.upcloud.com",
+   "repo": "spatie/laravel-dynamic-servers",
+   "path": "tests/Feature/StopServerFlowTest.php",
+   "branch": "main",
+   "snippet": "",
+   "placeholder": false,
+   "strong_format": false,
+   "values": [],
+   "verdict": "no_value"
+  },
+  {
+   "query": "api.upcloud.com",
+   "repo": "getprobo/probo",
+   "path": "pkg/accessreview/drivers/upcloud_test.go",
+   "branch": "main",
+   "snippet": "",
+   "placeholder": false,
+   "strong_format": false,
+   "values": [],
+   "verdict": "no_value"
+  },
+  {
+   "query": "api.upcloud.com",
+   "repo": "buildbot/buildbot",
+   "path": "master/buildbot/worker/upcloud.py",
+   "branch": "master",
+   "snippet": "",
+   "placeholder": false,
+   "strong_format": false,
+   "values": [],
+   "verdict": "no_value"
+  },
+  {
+   "query": "api.upcloud.com",
+   "repo": "simple-login/app",
+   "path": "monitor/upcloud.py",
+   "branch": "master",
+   "snippet": "",
+   "placeholder": false,
+   "strong_format": false,
+   "values": [],
+   "verdict": "no_value"
+  },
+  {
+   "query": "api.upcloud.com",
+   "repo": "spatie/laravel-dynamic-servers",
+   "path": "tests/Feature/StartServerFlowTest.php",
+   "branch": "main",
+   "snippet": "",
+   "placeholder": false,
+   "strong_format": false,
+   "values": [],
+   "verdict": "no_value"
+  },
+  {
+   "query": "api.upcloud.com",
+   "repo": "spatie/laravel-dynamic-servers",
+   "path": "tests/Feature/RebootServerFlowTest.php",
+   "branch": "main",
+   "snippet": "",
+   "placeholder": false,
+   "strong_format": false,
+   "values": [],
+   "verdict": "no_value"
+  },
+  {
+   "query": "api.upcloud.com",
+   "repo": "betterleaks/betterleaks",
+   "path": "cmd/generate/config/rules/upcloud.go",
+   "branch": "main",
+   "snippet": "",
+   "placeholder": false,
+   "strong_format": false,
+   "values": [],
+   "verdict": "no_value"
+  },
+  {
+   "query": "api.upcloud.com",
+   "repo": "apache/libcloud",
+   "path": "libcloud/compute/drivers/upcloud.py",
+   "branch": "trunk",
+   "snippet": "",
+   "placeholder": false,
+   "strong_format": false,
+   "values": [],
+   "verdict": "no_value"
+  },
+  {
+   "query": "api.upcloud.com",
+   "repo": "getprobo/probo",
+   "path": "pkg/accessreview/drivers/upcloud.go",
+   "branch": "main",
+   "snippet": "",
+   "placeholder": false,
+   "strong_format": false,
+   "values": [],
+   "verdict": "no_value"
+  },
+  {
+   "query": "upcloud_api_key",
+   "repo": "getprobo/probo",
+   "path": "pkg/accessreview/drivers/upcloud_test.go",
+   "branch": "main",
+   "snippet": "",
+   "placeholder": false,
+   "strong_format": false,
+   "values": [],
+   "verdict": "no_value"
+  },
+  {
+   "query": "upcloud_password",
+   "repo": "vfarcic/cncf-demo",
+   "path": "scripts/kubernetes.nu",
+   "branch": "main",
+   "snippet": "",
+   "placeholder": false,
+   "strong_format": false,
+   "values": [],
+   "verdict": "no_value"
+  },
+  {
+   "query": "upcloud_password",
+   "repo": "vfarcic/dot-ai",
+   "path": "scripts/kubernetes.nu",
+   "branch": "main",
+   "snippet": "",
+   "placeholder": false,
+   "strong_format": false,
+   "values": [],
+   "verdict": "no_value"
+  },
+  {
+   "query": "upcloud_password",
+   "repo": "michaelkamprath/multi-service-rtmp-broadcaster",
+   "path": "deployment-scripts/upcloud/upcloud-deploy.py",
+   "branch": "master",
+   "snippet": "",
+   "placeholder": false,
+   "strong_format": false,
+   "values": [],
+   "verdict": "no_value"
+  },
+  {
+   "query": "upcloud_password",
+   "repo": "simple-login/app",
+   "path": "monitor/metric_exporter.py",
+   "branch": "master",
+   "snippet": "",
+   "placeholder": false,
+   "strong_format": false,
+   "values": [],
+   "verdict": "no_value"
+  },
+  {
+   "query": "upcloud_password",
+   "repo": "simple-login/app",
+   "path": "app/config.py",
+   "branch": "master",
+   "snippet": "",
+   "placeholder": false,
+   "strong_format": false,
+   "values": [],
+   "verdict": "no_value"
+  },
+  {
+   "query": "upcloud_password",
+   "repo": "nanovms/ops",
+   "path": "provider/upcloud/upcloud.go",
+   "branch": "master",
+   "snippet": "",
+   "placeholder": false,
+   "strong_format": false,
+   "values": [],
+   "verdict": "no_value"
+  },
+  {
+   "query": "upcloud_password",
+   "repo": "elastisys/compliantkubernetes-kubespray",
+   "path": "migration/v2.27/apply/00-migrate-upcloud-loadbalancer-state.sh",
+   "branch": "main",
+   "snippet": "",
+   "placeholder": false,
+   "strong_format": false,
+   "values": [],
+   "verdict": "no_value"
+  },
+  {
+   "query": "upcloud_password",
+   "repo": "kubernetes-sigs/kubespray",
+   "path": "contrib/terraform/upcloud/main.tf",
+   "branch": "master",
+   "snippet": "",
+   "placeholder": false,
+   "strong_format": false,
+   "values": [],
+   "verdict": "no_value"
+  },
+  {
+   "query": "upcloud_password",
+   "repo": "kubernetes-sigs/kubespray",
+   "path": "contrib/terraform/upcloud/variables.tf",
+   "branch": "master",
+   "snippet": "",
+   "placeholder": false,
+   "strong_format": false,
+   "values": [],
+   "verdict": "no_value"
+  },
+  {
+   "query": "upcloud_password",
+   "repo": "Pelado-Nerdworks/peladonerd",
+   "path": "kubernetes/21/_provider.tf",
+   "branch": "master",
+   "snippet": "",
+   "placeholder": false,
+   "strong_format": false,
+   "values": [],
+   "verdict": "no_value"
+  }
+ ],
+ "commits": [
+  {
+   "query": "UPCLOUD_API_KEY",
+   "repo": "Kudbee-Studio/think-box-ai",
+   "sha": "4298f14646005a68c3cb4aa1b6fd39972815df1f",
+   "msg": "security: remove accidentally committed UpCloud API key",
+   "date": "2026-09-01T11:53:54.000Z",
+   "url": "https://github.com/Kudbee-Studio/think-box-ai/commit/4298f14646005a68c3cb4aa1b6fd39972815df1f"
+  },
+  {
+   "query": "UPCLOUD_API_KEY",
+   "repo": "unredacted/freesocks-control-plane",
+   "sha": "7004345caffc0f80d970caab1456e24748a1be06",
+   "msg": "Edges: read UpCloud's load balancer plan list as the bare array it is",
+   "date": "2026-10-22T21:39:12.000-05:00",
+   "url": "https://github.com/unredacted/freesocks-control-plane/commit/7004345caffc0f80d970caab1456e24748a1be06"
+  },
+  {
+   "query": "UPCLOUD_API_KEY",
+   "repo": "LadyHwesta/odoo-addons",
+   "sha": "6d66d3ab7c8218ee0bc70cf0bb75feac702878e7",
+   "msg": "Automate dedicated-VPS creation via UpCloud's API",
+   "date": "2026-09-15T11:51:17.000-07:00",
+   "url": "https://github.com/LadyHwesta/odoo-addons/commit/6d66d3ab7c8218ee0bc70cf0bb75feac702878e7"
+  },
+  {
+   "query": "UPCLOUD_API_KEY",
+   "repo": "Kudbee-Studio/think-box-ai",
+   "sha": "d481afbe804dfd3a8ce252ca847eeff7a767730a",
+   "msg": "feat(infra): add upcloud-ssh governed execution substrate (#282)",
+   "date": "2026-09-29T12:34:04.000-05:00",
+   "url": "https://github.com/Kudbee-Studio/think-box-ai/commit/d481afbe804dfd3a8ce252ca847eeff7a767730a"
+  },
+  {
+   "query": "UPCLOUD_API_KEY",
+   "repo": "Kudbee-Studio/think-box-ai",
+   "sha": "c62e50d18bbdb2b263858019e31519ec6f7c064b",
+   "msg": "docs: add Phase 1-6 UpCloud investigation results (Case C confirmed)",
+   "date": "2026-09-17T00:53:46.000Z",
+   "url": "https://github.com/Kudbee-Studio/think-box-ai/commit/c62e50d18bbdb2b263858019e31519ec6f7c064b"
+  },
+  {
+   "query": "UPCLOUD_API_KEY",
+   "repo": "obotkov/lexer_space",
+   "sha": "737d543442c08c54d6c016474a350f8e39e8a5ab",
+   "msg": "vpn-admin: UpCloud hosting with server creation via cloud-init",
+   "date": "2026-10-27T13:33:07.000+03:00",
+   "url": "https://github.com/obotkov/lexer_space/commit/737d543442c08c54d6c016474a350f8e39e8a5ab"
+  },
+  {
+   "query": "UPCLOUD_API_KEY",
+   "repo": "vineetu/simple-host",
+   "sha": "e5ac76922a35fcf8868d3fcb0b38a23f519bf3f6",
+   "msg": "Setup helper: UpCloud as the recommended place for a small box; the agent prompt creates the server there; the installer",
+   "date": "2026-09-27T21:49:43.000Z",
+   "url": "https://github.com/vineetu/simple-host/commit/e5ac76922a35fcf8868d3fcb0b38a23f519bf3f6"
+  },
+  {
+   "query": "UPCLOUD_API_KEY",
+   "repo": "UniversalStandards/IDEA",
+   "sha": "1245e84d10ebedca1e1e8c67dd3a71094303125f",
+   "msg": "chore: add worker-factory/Vault vars to .env.example",
+   "date": "2026-10-01T14:06:39.000-07:00",
+   "url": "https://github.com/UniversalStandards/IDEA/commit/1245e84d10ebedca1e1e8c67dd3a71094303125f"
+  },
+  {
+   "query": "UPCLOUD_API_KEY",
+   "repo": "Spiritbulb/mcloud",
+   "sha": "65d67d22eadd2660d3e2f09b8b609f01ae28c090",
+   "msg": "feat(security): add functions for bill-servers token validation and UpCloud API key retrieval",
+   "date": "2026-10-23T19:14:09.000+03:00",
+   "url": "https://github.com/Spiritbulb/mcloud/commit/65d67d22eadd2660d3e2f09b8b609f01ae28c090"
+  },
+  {
+   "query": "UPCLOUD_API_KEY",
+   "repo": "polarsquad/upcloud-operator",
+   "sha": "d9e2d6cc4975ed5d7ead41abc9aaed962748e7a0",
+   "msg": "Fix ObjectStoragePolicy sample resource for the real API (#42)",
+   "date": "2026-09-17T17:29:39.000+03:00",
+   "url": "https://github.com/polarsquad/upcloud-operator/commit/d9e2d6cc4975ed5d7ead41abc9aaed962748e7a0"
+  },
+  {
+   "query": "UPCLOUD_API_KEY",
+   "repo": "Kudbee-Studio/think-box-ai",
+   "sha": "c78340d67b9636be916e385b0f9e073f525afa84",
+   "msg": "chore(config): update env example and ignore rules",
+   "date": "2026-09-01T01:15:32.000-05:00",
+   "url": "https://github.com/Kudbee-Studio/think-box-ai/commit/c78340d67b9636be916e385b0f9e073f525afa84"
+  },
+  {
+   "query": "UPCLOUD_API_KEY",
+   "repo": "Kudbee-Studio/think-box-ai",
+   "sha": "3e7c3614f5a53ee77a6c945a64a195b30eaeb99c",
+   "msg": "feat(recovery): restore UpCloud provider, execution module, CONTINUITY.md from git history",
+   "date": "2026-09-17T00:42:42.000Z",
+   "url": "https://github.com/Kudbee-Studio/think-box-ai/commit/3e7c3614f5a53ee77a6c945a64a195b30eaeb99c"
+  },
+  {
+   "query": "UPCLOUD_API_KEY",
+   "repo": "Kudbee-Studio/think-box-ai",
+   "sha": "dd1b525925cf7cfccd37bde62277e1f0ca0670a6",
+   "msg": "security(infra): bind dashboard to localhost, add SSH key patterns to .gitignore",
+   "date": "2026-09-27T22:51:46.000-05:00",
+   "url": "https://github.com/Kudbee-Studio/think-box-ai/commit/dd1b525925cf7cfccd37bde62277e1f0ca0670a6"
+  },
+  {
+   "query": "UPCLOUD_API_KEY",
+   "repo": "vineetu/simple-host",
+   "sha": "77552d5b8591b4906572b5fa6ccf9ee74dcfca0e",
+   "msg": "Setup helper from the 2026-09-28 e2e trials: UpCloud API token (preferred) or API user, price from GET /1.3/price (about",
+   "date": "2026-09-28T02:07:18.000Z",
+   "url": "https://github.com/vineetu/simple-host/commit/77552d5b8591b4906572b5fa6ccf9ee74dcfca0e"
+  },
+  {
+   "query": "UPCLOUD_API_KEY",
+   "repo": "ClassiFinder/classifinder-engine",
+   "sha": "d4e043dd5fbb3ae35c9fd54f7f31f12527d72c27",
+   "msg": "feat(patterns): add upcloud_api_token, configcat_sdk_key, hackclub_ai_api_key, chief_tools_access_token, rainforest_pay_",
+   "date": "2026-10-05T11:43:58.000-07:00",
+   "url": "https://github.com/ClassiFinder/classifinder-engine/commit/d4e043dd5fbb3ae35c9fd54f7f31f12527d72c27"
+  },
+  {
+   "query": "UPCLOUD_API_KEY",
+   "repo": "tsolbjor/devhub",
+   "sha": "dbd50805909cd9bb6689227df0e3c85fb904868c",
+   "msg": "Make UpCloud deployment-ready: object storage for Loki/Velero, deploy guards",
+   "date": "2026-08-22T10:35:50.000+02:00",
+   "url": "https://github.com/tsolbjor/devhub/commit/dbd50805909cd9bb6689227df0e3c85fb904868c"
+  },
+  {
+   "query": "UPCLOUD_API_KEY",
+   "repo": "intUnderflow/bigfleet-providers",
+   "sha": "467226623992bea37b4527bca5f7c59628e1e770",
+   "msg": "Add UpCloud capacity provider",
+   "date": "2026-06-21T18:40:00.000Z",
+   "url": "https://github.com/intUnderflow/bigfleet-providers/commit/467226623992bea37b4527bca5f7c59628e1e770"
+  },
+  {
+   "query": "UPCLOUD_API_KEY",
+   "repo": "JimLundin/vpscompare",
+   "sha": "53e2aaedb148b2e6517d00478d6178a1bba25288",
+   "msg": "fix: use GitHub Actions secrets for all provider API keys",
+   "date": "2026-02-23T23:46:08.000Z",
+   "url": "https://github.com/JimLundin/vpscompare/commit/53e2aaedb148b2e6517d00478d6178a1bba25288"
+  },
+  {
+   "query": "UPCLOUD_API_KEY",
+   "repo": "tdede914-creator/botrdptele",
+   "sha": "a2a6f780c71887c58c8438b9e0c39c62d52f12a0",
+   "msg": "feat(web): UpCloud-aware + Order VPS/Cloud9/Fastpanel & Install Cloud9/Fastpanel",
+   "date": "2026-09-16T20:10:21.000Z",
+   "url": "https://github.com/tdede914-creator/botrdptele/commit/a2a6f780c71887c58c8438b9e0c39c62d52f12a0"
+  },
+  {
+   "query": "UPCLOUD_API_KEY",
+   "repo": "Kudbee-Studio/think-box-ai",
+   "sha": "d94afbbbfe454441e5269f1429085da7f85262fe",
+   "msg": "#340 P3: redacting live-proof bundle builder (item 4) (#340)",
+   "date": "2026-10-03T11:21:33.000Z",
+   "url": "https://github.com/Kudbee-Studio/think-box-ai/commit/d94afbbbfe454441e5269f1429085da7f85262fe"
+  },
+  {
+   "query": "UPCLOUD_API_KEY",
+   "repo": "Kudbee-Studio/think-box-ai",
+   "sha": "71574ffddd4f88256393ae71ea1558dc35826b24",
+   "msg": "docs(agents): add skills + workflows",
+   "date": "2026-09-16T18:48:27.000Z",
+   "url": "https://github.com/Kudbee-Studio/think-box-ai/commit/71574ffddd4f88256393ae71ea1558dc35826b24"
+  },
+  {
+   "query": "UPCLOUD_API_KEY",
+   "repo": "Kudbee-Studio/think-box-ai",
+   "sha": "86cf1f78412f4a8198b579afac9893f93213df6f",
+   "msg": "feat(server): dashboard bridge to governed upcloud-ssh execution (#284)",
+   "date": "2026-09-29T12:50:59.000-05:00",
+   "url": "https://github.com/Kudbee-Studio/think-box-ai/commit/86cf1f78412f4a8198b579afac9893f93213df6f"
+  },
+  {
+   "query": "UPCLOUD_API_KEY",
+   "repo": "Kudbee-Studio/think-box-ai",
+   "sha": "109840480a1596ec6b43b5af4bf28779c634516b",
+   "msg": "docs(security): comprehensive incident response for SSH key exposure",
+   "date": "2026-09-27T23:51:06.000-05:00",
+   "url": "https://github.com/Kudbee-Studio/think-box-ai/commit/109840480a1596ec6b43b5af4bf28779c634516b"
+  },
+  {
+   "query": "UPCLOUD_API_KEY",
+   "repo": "k9032431-cmd/Vpn_Bot",
+   "sha": "955b58b0b6fe2ac520da6fc1a0e05c82e1ec6824",
+   "msg": "Add Hetzner Cloud as a third Cloud VPS provider",
+   "date": "2026-09-26T11:20:04.000Z",
+   "url": "https://github.com/k9032431-cmd/Vpn_Bot/commit/955b58b0b6fe2ac520da6fc1a0e05c82e1ec6824"
+  },
+  {
+   "query": "UPCLOUD_API_KEY",
+   "repo": "JeniT/wordwright",
+   "sha": "e14a0b4419dc3e6818d3b03a64caa5eb3b91f643",
+   "msg": "Deploy docs: the UpCloud firewall, outgoing mail, what to do when email does not send",
+   "date": "2026-10-23T16:16:52.000+01:00",
+   "url": "https://github.com/JeniT/wordwright/commit/e14a0b4419dc3e6818d3b03a64caa5eb3b91f643"
+  },
+  {
+   "query": "UPCLOUD_API_KEY",
+   "repo": "ankraio/ankra-cli",
+   "sha": "5c8bc4d0997fd8bb3c6bbbe014826ad98ec95c41",
+   "msg": "feat(scaleway): bring the CLI to UpCloud parity (#185)",
+   "date": "2026-08-29T00:11:14.000+02:00",
+   "url": "https://github.com/ankraio/ankra-cli/commit/5c8bc4d0997fd8bb3c6bbbe014826ad98ec95c41"
+  },
+  {
+   "query": "UPCLOUD_API_KEY",
+   "repo": "bilal414/backupsheep",
+   "sha": "b6db3c9e07cdb62c636e0d67ec5066909f60cab8",
+   "msg": "feat: cloud snapshot restore + provider API updates",
+   "date": "2026-07-21T08:41:47.000-05:00",
+   "url": "https://github.com/bilal414/backupsheep/commit/b6db3c9e07cdb62c636e0d67ec5066909f60cab8"
+  },
+  {
+   "query": "UPCLOUD_API_KEY",
+   "repo": "ClawBrick/webapp",
+   "sha": "31e1deacb2a341c9addf8b1bd1ef6934606a3498",
+   "msg": "feat: switch to UpCloud infra, add SNS + SOL balance to wallet popup & profile",
+   "date": "2026-03-02T22:36:29.000+04:00",
+   "url": "https://github.com/ClawBrick/webapp/commit/31e1deacb2a341c9addf8b1bd1ef6934606a3498"
+  },
+  {
+   "query": "UPCLOUD_API_KEY",
+   "repo": "UpCloudLtd/terraform-provider-upcloud",
+   "sha": "93ac564c3a5dabfd61bc67f822b97e750496f15b",
+   "msg": "feat(client): support for v9 client (#966)",
+   "date": "2026-06-23T11:19:24.000+03:00",
+   "url": "https://github.com/UpCloudLtd/terraform-provider-upcloud/commit/93ac564c3a5dabfd61bc67f822b97e750496f15b"
+  },
+  {
+   "query": "UPCLOUD_API_KEY",
+   "repo": "UniversalStandards/IDEA",
+   "sha": "6ba7a41b5d6b53d6807c2e659081dfa96bd7995b",
+   "msg": "fix: never give JWT_SECRET to external verifiers; retain sessions on failed broker teardown (PR #173 fifth review round)",
+   "date": "2026-10-01T15:48:34.000-07:00",
+   "url": "https://github.com/UniversalStandards/IDEA/commit/6ba7a41b5d6b53d6807c2e659081dfa96bd7995b"
+  },
+  {
+   "query": "UPCLOUD_API_TOKEN",
+   "repo": "ankraio/ankra-docs",
+   "sha": "bc567a566677be8f7d4b574780e94750aa93489a",
+   "msg": "docs(upcloud): API tokens page path depends on account type (ankra-t3mtt.3) (#160)",
+   "date": "2026-08-22T13:53:32.000+02:00",
+   "url": "https://github.com/ankraio/ankra-docs/commit/bc567a566677be8f7d4b574780e94750aa93489a"
+  },
+  {
+   "query": "UPCLOUD_API_TOKEN",
+   "repo": "broberg-ai/components",
+   "sha": "a890f1f15a3fd68189f9eda347815b0d6e63044d",
+   "msg": "feat(components-F035.16): @broberg/secret-scan 0.10.0 \u2014 UpCloud API tokens are classified and redacted",
+   "date": "2026-09-30T01:15:39.000+02:00",
+   "url": "https://github.com/broberg-ai/components/commit/a890f1f15a3fd68189f9eda347815b0d6e63044d"
+  },
+  {
+   "query": "UPCLOUD_API_TOKEN",
+   "repo": "vreid/idol-appreciation.club_old",
+   "sha": "afeb18cc1b2f949ad85804e3003d5c7b6de03f44",
+   "msg": "deploy: expose UPCLOUD_API_TOKEN to the app-env step (API-derived DB pw + S3 endpoint need it) (#19)",
+   "date": "2026-10-13T03:41:31.000+02:00",
+   "url": "https://github.com/vreid/idol-appreciation.club_old/commit/afeb18cc1b2f949ad85804e3003d5c7b6de03f44"
+  },
+  {
+   "query": "UPCLOUD_API_TOKEN",
+   "repo": "ClassiFinder/classifinder-engine",
+   "sha": "d4e043dd5fbb3ae35c9fd54f7f31f12527d72c27",
+   "msg": "feat(patterns): add upcloud_api_token, configcat_sdk_key, hackclub_ai_api_key, chief_tools_access_token, rainforest_pay_",
+   "date": "2026-10-05T11:43:58.000-07:00",
+   "url": "https://github.com/ClassiFinder/classifinder-engine/commit/d4e043dd5fbb3ae35c9fd54f7f31f12527d72c27"
+  },
+  {
+   "query": "UPCLOUD_API_TOKEN",
+   "repo": "Kudbee-Studio/think-box-ai",
+   "sha": "d85bead5d209abfaa865fe8ad8390b6a04c3402a",
+   "msg": "fix(infra): correct upctl tooling; record live UpCloud substrate audit (#280)",
+   "date": "2026-09-29T12:15:55.000-05:00",
+   "url": "https://github.com/Kudbee-Studio/think-box-ai/commit/d85bead5d209abfaa865fe8ad8390b6a04c3402a"
+  },
+  {
+   "query": "UPCLOUD_API_TOKEN",
+   "repo": "shoehorn-dev/helm-charts",
+   "sha": "1ace1dc13508728e3f5008db90043013f70145d6",
+   "msg": "Give the api and worker their UpCloud environment (#67)",
+   "date": "2026-09-05T09:55:07.000+02:00",
+   "url": "https://github.com/shoehorn-dev/helm-charts/commit/1ace1dc13508728e3f5008db90043013f70145d6"
+  },
+  {
+   "query": "UPCLOUD_API_TOKEN",
+   "repo": "dagulv/kharoborathus",
+   "sha": "ab03cf69b78c7e3dfbdcb3799c86fb0d2de6ed2c",
+   "msg": "Authenticate OpenTofu with an UpCloud API token",
+   "date": "2026-10-18T13:07:14.000+02:00",
+   "url": "https://github.com/dagulv/kharoborathus/commit/ab03cf69b78c7e3dfbdcb3799c86fb0d2de6ed2c"
+  },
+  {
+   "query": "UPCLOUD_API_TOKEN",
+   "repo": "vineetu/simple-host",
+   "sha": "77552d5b8591b4906572b5fa6ccf9ee74dcfca0e",
+   "msg": "Setup helper from the 2026-09-28 e2e trials: UpCloud API token (preferred) or API user, price from GET /1.3/price (about",
+   "date": "2026-09-28T02:07:18.000Z",
+   "url": "https://github.com/vineetu/simple-host/commit/77552d5b8591b4906572b5fa6ccf9ee74dcfca0e"
+  },
+  {
+   "query": "UPCLOUD_API_TOKEN",
+   "repo": "Maixixi2025/vpstier.com",
+   "sha": "a2d05f8f8e219e912225f69d6d466c23dc7ad838",
+   "msg": "Add UpCloud provider + EN/ZH deep review (2026-06-06)",
+   "date": "2026-06-06T11:51:41.000+08:00",
+   "url": "https://github.com/Maixixi2025/vpstier.com/commit/a2d05f8f8e219e912225f69d6d466c23dc7ad838"
+  },
+  {
+   "query": "UPCLOUD_API_TOKEN",
+   "repo": "LadyHwesta/odoo-addons",
+   "sha": "6d66d3ab7c8218ee0bc70cf0bb75feac702878e7",
+   "msg": "Automate dedicated-VPS creation via UpCloud's API",
+   "date": "2026-09-15T11:51:17.000-07:00",
+   "url": "https://github.com/LadyHwesta/odoo-addons/commit/6d66d3ab7c8218ee0bc70cf0bb75feac702878e7"
+  },
+  {
+   "query": "UPCLOUD_API_TOKEN",
+   "repo": "Spiritbulb/mcloud",
+   "sha": "65d67d22eadd2660d3e2f09b8b609f01ae28c090",
+   "msg": "feat(security): add functions for bill-servers token validation and UpCloud API key retrieval",
+   "date": "2026-10-23T19:14:09.000+03:00",
+   "url": "https://github.com/Spiritbulb/mcloud/commit/65d67d22eadd2660d3e2f09b8b609f01ae28c090"
+  },
+  {
+   "query": "UPCLOUD_API_TOKEN",
+   "repo": "broberg-ai/components",
+   "sha": "fcc786ad5f9433cfef0247178b3bc5c5f34d25a9",
+   "msg": "docs(F035.16): write docs/features/F035.16-upcloud-api-token.md via cardmem_write_plan",
+   "date": "2026-09-29T23:08:20.000Z",
+   "url": "https://github.com/broberg-ai/components/commit/fcc786ad5f9433cfef0247178b3bc5c5f34d25a9"
+  },
+  {
+   "query": "UPCLOUD_API_TOKEN",
+   "repo": "busdk/docs",
+   "sha": "16255542d3b3425dc215530bd3d29cde2c5b18a0",
+   "msg": "docs: document UpCloud worker operations",
+   "date": "2026-04-30T16:03:02.000+03:00",
+   "url": "https://github.com/busdk/docs/commit/16255542d3b3425dc215530bd3d29cde2c5b18a0"
+  },
+  {
+   "query": "UPCLOUD_API_TOKEN",
+   "repo": "upcloud-tools/upcloud-csi",
+   "sha": "0acbb1df2587379d902e3d951f2eaae3ccb22f64",
+   "msg": "feat(service): add support for UpCloud API tokens (#3)",
+   "date": "2026-06-16T23:13:44.000+02:00",
+   "url": "https://github.com/upcloud-tools/upcloud-csi/commit/0acbb1df2587379d902e3d951f2eaae3ccb22f64"
+  },
+  {
+   "query": "UPCLOUD_API_TOKEN",
+   "repo": "tdede914-creator/botrdptele",
+   "sha": "934a67f3b0498c16fcfe113915a2610ab8216a80",
+   "msg": "feat(4a,4c): re-apply on real source (UpCloud-aware)",
+   "date": "2026-09-16T19:59:26.000Z",
+   "url": "https://github.com/tdede914-creator/botrdptele/commit/934a67f3b0498c16fcfe113915a2610ab8216a80"
+  },
+  {
+   "query": "UPCLOUD_API_TOKEN",
+   "repo": "obotkov/lexer_space",
+   "sha": "737d543442c08c54d6c016474a350f8e39e8a5ab",
+   "msg": "vpn-admin: UpCloud hosting with server creation via cloud-init",
+   "date": "2026-10-27T13:33:07.000+03:00",
+   "url": "https://github.com/obotkov/lexer_space/commit/737d543442c08c54d6c016474a350f8e39e8a5ab"
+  },
+  {
+   "query": "UPCLOUD_API_TOKEN",
+   "repo": "UniversalStandards/IDEA",
+   "sha": "17f9306fe9ff8d2ba3bbb939afbc42348480d58a",
+   "msg": "fix: close worker-session token replay on shared transports + enforce TLS on broker/Vault URLs in prod",
+   "date": "2026-10-01T15:03:58.000-07:00",
+   "url": "https://github.com/UniversalStandards/IDEA/commit/17f9306fe9ff8d2ba3bbb939afbc42348480d58a"
+  },
+  {
+   "query": "UPCLOUD_API_TOKEN",
+   "repo": "Kudbee-Studio/think-box-ai",
+   "sha": "86cf1f78412f4a8198b579afac9893f93213df6f",
+   "msg": "feat(server): dashboard bridge to governed upcloud-ssh execution (#284)",
+   "date": "2026-09-29T12:50:59.000-05:00",
+   "url": "https://github.com/Kudbee-Studio/think-box-ai/commit/86cf1f78412f4a8198b579afac9893f93213df6f"
+  },
+  {
+   "query": "UPCLOUD_API_TOKEN",
+   "repo": "DwieDave/kumulo",
+   "sha": "2d63bafd4fca179828c0d1245a63cd827e7f2e71",
+   "msg": "feat(upcloud): hand-written Effect client for the UpCloud 1.3 API",
+   "date": "2026-07-28T16:19:33.000+02:00",
+   "url": "https://github.com/DwieDave/kumulo/commit/2d63bafd4fca179828c0d1245a63cd827e7f2e71"
+  },
+  {
+   "query": "UPCLOUD_API_TOKEN",
+   "repo": "onetimesecret/ots-shared",
+   "sha": "46d310d72abed1dabc5526bf7580f2c83aa31bf9",
+   "msg": "Add ots_shared/upcloud provider helpers (UpCloud support)",
+   "date": "2026-06-27T02:47:39.000Z",
+   "url": "https://github.com/onetimesecret/ots-shared/commit/46d310d72abed1dabc5526bf7580f2c83aa31bf9"
+  },
+  {
+   "query": "UPCLOUD_API_TOKEN",
+   "repo": "bilal414/backupsheep",
+   "sha": "b6db3c9e07cdb62c636e0d67ec5066909f60cab8",
+   "msg": "feat: cloud snapshot restore + provider API updates",
+   "date": "2026-07-21T08:41:47.000-05:00",
+   "url": "https://github.com/bilal414/backupsheep/commit/b6db3c9e07cdb62c636e0d67ec5066909f60cab8"
+  },
+  {
+   "query": "UPCLOUD_API_TOKEN",
+   "repo": "tabssh/android",
+   "sha": "c821af81cb74fe01bb5673e81a2235820ad0c27e",
+   "msg": "\u2728 Add Scaleway and UpCloud cloud providers",
+   "date": "2026-09-24T20:12:53.000-04:00",
+   "url": "https://github.com/tabssh/android/commit/c821af81cb74fe01bb5673e81a2235820ad0c27e"
+  },
+  {
+   "query": "UPCLOUD_API_TOKEN",
+   "repo": "Kudbee-Studio/think-box-ai",
+   "sha": "3cf9ffff6887dc417d02d228cfc017c9c14cf60f",
+   "msg": "feat(security): whole-dashboard sign-in + backend-authoritative UpCloud exec policy (#286)",
+   "date": "2026-09-29T13:45:41.000-05:00",
+   "url": "https://github.com/Kudbee-Studio/think-box-ai/commit/3cf9ffff6887dc417d02d228cfc017c9c14cf60f"
+  },
+  {
+   "query": "UPCLOUD_API_TOKEN",
+   "repo": "Kudbee-Studio/think-box-ai",
+   "sha": "71574ffddd4f88256393ae71ea1558dc35826b24",
+   "msg": "docs(agents): add skills + workflows",
+   "date": "2026-09-16T18:48:27.000Z",
+   "url": "https://github.com/Kudbee-Studio/think-box-ai/commit/71574ffddd4f88256393ae71ea1558dc35826b24"
+  },
+  {
+   "query": "UPCLOUD_API_TOKEN",
+   "repo": "moveinfra/eu-cloud-prices",
+   "sha": "09c584b695db5f288426e3bbd026e069ccf0576a",
+   "msg": "EU Cloud Price Index: generator, first monthly data, docs",
+   "date": "2026-10-28T22:28:31.000+01:00",
+   "url": "https://github.com/moveinfra/eu-cloud-prices/commit/09c584b695db5f288426e3bbd026e069ccf0576a"
+  },
+  {
+   "query": "UPCLOUD_API_TOKEN",
+   "repo": "nicois/openbao-cloud-creds",
+   "sha": "b5fa72556eb54743c385f9f702a5d700fd88f913",
+   "msg": "feat(fakes): add UpCloud fake API server",
+   "date": "2026-05-29T22:10:22.000+10:00",
+   "url": "https://github.com/nicois/openbao-cloud-creds/commit/b5fa72556eb54743c385f9f702a5d700fd88f913"
+  },
+  {
+   "query": "UPCLOUD_API_TOKEN",
+   "repo": "brawer/kube-shim",
+   "sha": "b58d048766b5f596f1707fa472b8cf52d371c7c1",
+   "msg": "docs(tofu): user_data is RequiresReplace -- any input change replaces the server",
+   "date": "2026-10-16T09:40:36.000+08:00",
+   "url": "https://github.com/brawer/kube-shim/commit/b58d048766b5f596f1707fa472b8cf52d371c7c1"
+  },
+  {
+   "query": "UPCLOUD_API_TOKEN",
+   "repo": "nicois/openbao-cloud-creds",
+   "sha": "76de4a0e44e759642677e772cad1d21f8fdcd7d4",
+   "msg": "fix(credential-upcloud): decode bare-array token list response",
+   "date": "2026-05-30T21:47:43.000+10:00",
+   "url": "https://github.com/nicois/openbao-cloud-creds/commit/76de4a0e44e759642677e772cad1d21f8fdcd7d4"
+  },
+  {
+   "query": "UPCLOUD_API_TOKEN",
+   "repo": "k9032431-cmd/Vpn_Bot",
+   "sha": "955b58b0b6fe2ac520da6fc1a0e05c82e1ec6824",
+   "msg": "Add Hetzner Cloud as a third Cloud VPS provider",
+   "date": "2026-09-26T11:20:04.000Z",
+   "url": "https://github.com/k9032431-cmd/Vpn_Bot/commit/955b58b0b6fe2ac520da6fc1a0e05c82e1ec6824"
+  },
+  {
+   "query": "UPCLOUD_API_TOKEN",
+   "repo": "Recva-by-katsu/Bot-rin",
+   "sha": "89660aa05d0a216f985c0786819809fafe4e7941",
+   "msg": "Deteksi status free trial akun (trial_mode dari GET /1.3/account)",
+   "date": "2026-09-23T16:45:19.000Z",
+   "url": "https://github.com/Recva-by-katsu/Bot-rin/commit/89660aa05d0a216f985c0786819809fafe4e7941"
+  },
+  {
+   "query": "UPCLOUD_PASSWORD",
+   "repo": "vineetu/simple-host",
+   "sha": "e5ac76922a35fcf8868d3fcb0b38a23f519bf3f6",
+   "msg": "Setup helper: UpCloud as the recommended place for a small box; the agent prompt creates the server there; the installer",
+   "date": "2026-09-27T21:49:43.000Z",
+   "url": "https://github.com/vineetu/simple-host/commit/e5ac76922a35fcf8868d3fcb0b38a23f519bf3f6"
+  },
+  {
+   "query": "UPCLOUD_PASSWORD",
+   "repo": "vreid/idol-appreciation.club_old",
+   "sha": "a73c65c8bb578411eac47be05e150425cb4a4438",
+   "msg": "deploy: derive managed-DB app password from UpCloud API (tofu state password can diverge from actual user password) (#16",
+   "date": "2026-10-13T03:15:50.000+02:00",
+   "url": "https://github.com/vreid/idol-appreciation.club_old/commit/a73c65c8bb578411eac47be05e150425cb4a4438"
+  },
+  {
+   "query": "UPCLOUD_PASSWORD",
+   "repo": "k9032431-cmd/Vpn_Bot",
+   "sha": "f63aea6b7f47ec584588548f0d946c6ce5a0b472",
+   "msg": "Add SSH-key login option for Node installer and Cloud VPS creation",
+   "date": "2026-09-06T06:10:12.000Z",
+   "url": "https://github.com/k9032431-cmd/Vpn_Bot/commit/f63aea6b7f47ec584588548f0d946c6ce5a0b472"
+  },
+  {
+   "query": "UPCLOUD_PASSWORD",
+   "repo": "Kudbee-Studio/think-box-ai",
+   "sha": "3e7c3614f5a53ee77a6c945a64a195b30eaeb99c",
+   "msg": "feat(recovery): restore UpCloud provider, execution module, CONTINUITY.md from git history",
+   "date": "2026-09-17T00:42:42.000Z",
+   "url": "https://github.com/Kudbee-Studio/think-box-ai/commit/3e7c3614f5a53ee77a6c945a64a195b30eaeb99c"
+  },
+  {
+   "query": "UPCLOUD_PASSWORD",
+   "repo": "hbjydev/phoebe",
+   "sha": "6cfd8bf68f90fd627b67b1280fbef4780f14099e",
+   "msg": "feat(deps): update terraform upcloud ( 5.36.2 \u2192 5.39.0 ) (#25)",
+   "date": "2026-06-10T12:30:09.000Z",
+   "url": "https://github.com/hbjydev/phoebe/commit/6cfd8bf68f90fd627b67b1280fbef4780f14099e"
+  },
+  {
+   "query": "UPCLOUD_PASSWORD",
+   "repo": "mementomori-social/ansibles",
+   "sha": "5550964827107c7d27ec301be44ec92bdbf90729",
+   "msg": "Add root password for the UpCloud web console",
+   "date": "2026-10-03T19:51:30.000+03:00",
+   "url": "https://github.com/mementomori-social/ansibles/commit/5550964827107c7d27ec301be44ec92bdbf90729"
+  },
+  {
+   "query": "UPCLOUD_PASSWORD",
+   "repo": "vineetu/simple-host-enterprise",
+   "sha": "b748dd5e110213b0752ac9339b401216c9e62173",
+   "msg": "UpCloud: public- DB host, API examples, password without a terminal, bucket-only policy",
+   "date": "2026-09-27T23:20:08.000Z",
+   "url": "https://github.com/vineetu/simple-host-enterprise/commit/b748dd5e110213b0752ac9339b401216c9e62173"
+  },
+  {
+   "query": "UPCLOUD_PASSWORD",
+   "repo": "brawer/kube-shim",
+   "sha": "12c87243675e8a0c1e539dc0985090666cc95e76",
+   "msg": "feat: add tofu/ -- a reusable OpenTofu module to provision kube-shim on UpCloud",
+   "date": "2026-10-13T19:58:31.000+08:00",
+   "url": "https://github.com/brawer/kube-shim/commit/12c87243675e8a0c1e539dc0985090666cc95e76"
+  },
+  {
+   "query": "UPCLOUD_PASSWORD",
+   "repo": "k9032431-cmd/Vpn_Bot",
+   "sha": "2281182d50b80bb92565e71a8b5118a23365245a",
+   "msg": "Make UpCloud connect screen look like a plain site login",
+   "date": "2026-09-05T15:26:45.000Z",
+   "url": "https://github.com/k9032431-cmd/Vpn_Bot/commit/2281182d50b80bb92565e71a8b5118a23365245a"
+  },
+  {
+   "query": "UPCLOUD_PASSWORD",
+   "repo": "k9032431-cmd/Vpn_Bot",
+   "sha": "9f96dacd31329357ca8afd0df6817c1376cc9727",
+   "msg": "Rename Cloud VPN to Cloud VPS and add UpCloud server management",
+   "date": "2026-09-05T02:27:18.000Z",
+   "url": "https://github.com/k9032431-cmd/Vpn_Bot/commit/9f96dacd31329357ca8afd0df6817c1376cc9727"
+  },
+  {
+   "query": "UPCLOUD_PASSWORD",
+   "repo": "k9032431-cmd/Vpn_Bot",
+   "sha": "782b67a9d3bc3b89e6597da9be1bfc99f014ad2d",
+   "msg": "Allow main-account UpCloud login and add plan/disk/backup/IP management",
+   "date": "2026-09-05T02:55:49.000Z",
+   "url": "https://github.com/k9032431-cmd/Vpn_Bot/commit/782b67a9d3bc3b89e6597da9be1bfc99f014ad2d"
+  },
+  {
+   "query": "UPCLOUD_PASSWORD",
+   "repo": "ClawBrick/webapp",
+   "sha": "31e1deacb2a341c9addf8b1bd1ef6934606a3498",
+   "msg": "feat: switch to UpCloud infra, add SNS + SOL balance to wallet popup & profile",
+   "date": "2026-03-02T22:36:29.000+04:00",
+   "url": "https://github.com/ClawBrick/webapp/commit/31e1deacb2a341c9addf8b1bd1ef6934606a3498"
+  },
+  {
+   "query": "UPCLOUD_PASSWORD",
+   "repo": "k9032431-cmd/Vpn_Bot",
+   "sha": "e567d669e629a4309b377c1bff2e66d6f38aad57",
+   "msg": "Remember VM/server passwords for later lookup, cover more Azure regions",
+   "date": "2026-09-07T02:53:27.000Z",
+   "url": "https://github.com/k9032431-cmd/Vpn_Bot/commit/e567d669e629a4309b377c1bff2e66d6f38aad57"
+  },
+  {
+   "query": "UPCLOUD_PASSWORD",
+   "repo": "k9032431-cmd/Vpn_Bot",
+   "sha": "449fe416f449243a41425d07849cf7d60d22e999",
+   "msg": "Add Microsoft Azure as a second Cloud VPS provider (VM management)",
+   "date": "2026-09-06T16:34:18.000Z",
+   "url": "https://github.com/k9032431-cmd/Vpn_Bot/commit/449fe416f449243a41425d07849cf7d60d22e999"
+  },
+  {
+   "query": "UPCLOUD_PASSWORD",
+   "repo": "peter-svensson/dotfiles",
+   "sha": "c26f0e3d51b5fe38791fac81dc884cc61c26a747",
+   "msg": "feat(intersolia): add Scaleway staging profile + scw helpers",
+   "date": "2026-06-18T11:17:57.000+02:00",
+   "url": "https://github.com/peter-svensson/dotfiles/commit/c26f0e3d51b5fe38791fac81dc884cc61c26a747"
+  },
+  {
+   "query": "UPCLOUD_PASSWORD",
+   "repo": "vineetu/simple-host",
+   "sha": "5d12f0619cfb5786b11ef8e2a10b497f07a74e76",
+   "msg": "Setup assistant: redaction catches JSON keys, log prefixes, colour codes, quoted values, curl/mysql/--password credentia",
+   "date": "2026-09-27T22:04:44.000Z",
+   "url": "https://github.com/vineetu/simple-host/commit/5d12f0619cfb5786b11ef8e2a10b497f07a74e76"
+  },
+  {
+   "query": "UPCLOUD_PASSWORD",
+   "repo": "JeniT/wordwright",
+   "sha": "e14a0b4419dc3e6818d3b03a64caa5eb3b91f643",
+   "msg": "Deploy docs: the UpCloud firewall, outgoing mail, what to do when email does not send",
+   "date": "2026-10-23T16:16:52.000+01:00",
+   "url": "https://github.com/JeniT/wordwright/commit/e14a0b4419dc3e6818d3b03a64caa5eb3b91f643"
+  },
+  {
+   "query": "UPCLOUD_PASSWORD",
+   "repo": "k9032431-cmd/Vpn_Bot",
+   "sha": "0d41769574faea294a57831631318a820e53a48d",
+   "msg": "Add Azure port management, custom login, reimage, prices and region flags",
+   "date": "2026-09-06T18:04:19.000Z",
+   "url": "https://github.com/k9032431-cmd/Vpn_Bot/commit/0d41769574faea294a57831631318a820e53a48d"
+  },
+  {
+   "query": "UPCLOUD_PASSWORD",
+   "repo": "onetimesecret/ots-shared",
+   "sha": "46d310d72abed1dabc5526bf7580f2c83aa31bf9",
+   "msg": "Add ots_shared/upcloud provider helpers (UpCloud support)",
+   "date": "2026-06-27T02:47:39.000Z",
+   "url": "https://github.com/onetimesecret/ots-shared/commit/46d310d72abed1dabc5526bf7580f2c83aa31bf9"
+  },
+  {
+   "query": "UPCLOUD_PASSWORD",
+   "repo": "vineetu/simple-host",
+   "sha": "43feaefa8c72d45755e45dcce1b431b55ca98436",
+   "msg": "Setup helper: installer fetched by commit and checked against its sha256; shell-quoted command values and strict emails;",
+   "date": "2026-09-27T22:09:51.000Z",
+   "url": "https://github.com/vineetu/simple-host/commit/43feaefa8c72d45755e45dcce1b431b55ca98436"
+  },
+  {
+   "query": "UPCLOUD_PASSWORD",
+   "repo": "jahru23/rdpinstall",
+   "sha": "7f9719978d42fdbb6b6356a75080122284039991",
+   "msg": "F3: wizard install mode template UpCloud + worker + progres live (SSE)",
+   "date": "2026-10-18T09:29:14.000+07:00",
+   "url": "https://github.com/jahru23/rdpinstall/commit/7f9719978d42fdbb6b6356a75080122284039991"
+  },
+  {
+   "query": "UPCLOUD_PASSWORD",
+   "repo": "intUnderflow/bigfleet-providers",
+   "sha": "467226623992bea37b4527bca5f7c59628e1e770",
+   "msg": "Add UpCloud capacity provider",
+   "date": "2026-06-21T18:40:00.000Z",
+   "url": "https://github.com/intUnderflow/bigfleet-providers/commit/467226623992bea37b4527bca5f7c59628e1e770"
+  },
+  {
+   "query": "UPCLOUD_PASSWORD",
+   "repo": "jahru23/rdpinstall",
+   "sha": "a727e4082467b8bf402889d5ffecd883fa530b15",
+   "msg": "wip: fondasi mode SSH root+password (russh + reinstall.sh)",
+   "date": "2026-10-18T10:18:45.000+07:00",
+   "url": "https://github.com/jahru23/rdpinstall/commit/a727e4082467b8bf402889d5ffecd883fa530b15"
+  },
+  {
+   "query": "UPCLOUD_PASSWORD",
+   "repo": "BooDevSecOps/Rainbow-Clickhouse",
+   "sha": "f8136e1b9f3bb1249132d96dd9e31ea1c166f9c8",
+   "msg": "Migrate ClickHouse from destroyed DO server to UpCloud (213.163.193.79)",
+   "date": "2026-09-17T02:59:14.000+07:00",
+   "url": "https://github.com/BooDevSecOps/Rainbow-Clickhouse/commit/f8136e1b9f3bb1249132d96dd9e31ea1c166f9c8"
+  },
+  {
+   "query": "UPCLOUD_PASSWORD",
+   "repo": "tabssh/android",
+   "sha": "c821af81cb74fe01bb5673e81a2235820ad0c27e",
+   "msg": "\u2728 Add Scaleway and UpCloud cloud providers",
+   "date": "2026-09-24T20:12:53.000-04:00",
+   "url": "https://github.com/tabssh/android/commit/c821af81cb74fe01bb5673e81a2235820ad0c27e"
+  },
+  {
+   "query": "UPCLOUD_PASSWORD",
+   "repo": "Wnt/greenhouse-solar-heater",
+   "sha": "d58660b1e4ee6fadd4b59d6798c38bc675af00e0",
+   "msg": "Amend constitution to v1.1.0: add token-based cloud auth principle",
+   "date": "2026-03-21T19:18:26.000Z",
+   "url": "https://github.com/Wnt/greenhouse-solar-heater/commit/d58660b1e4ee6fadd4b59d6798c38bc675af00e0"
+  },
+  {
+   "query": "UPCLOUD_PASSWORD",
+   "repo": "k9032431-cmd/Vpn_Bot",
+   "sha": "955b58b0b6fe2ac520da6fc1a0e05c82e1ec6824",
+   "msg": "Add Hetzner Cloud as a third Cloud VPS provider",
+   "date": "2026-09-26T11:20:04.000Z",
+   "url": "https://github.com/k9032431-cmd/Vpn_Bot/commit/955b58b0b6fe2ac520da6fc1a0e05c82e1ec6824"
+  },
+  {
+   "query": "UPCLOUD_PASSWORD",
+   "repo": "UpCloudLtd/terraform-provider-upcloud",
+   "sha": "a92dd1d2c073566341f886caa0962bb633940a75",
+   "msg": "feat(server): add attribute for retrieving one-time password (#1013)",
+   "date": "2026-06-08T16:26:50.000+02:00",
+   "url": "https://github.com/UpCloudLtd/terraform-provider-upcloud/commit/a92dd1d2c073566341f886caa0962bb633940a75"
+  },
+  {
+   "query": "UPCLOUD_PASSWORD",
+   "repo": "Elemento-Modular-Cloud/elemento-common-definitions",
+   "sha": "7fbc1aa10e078884760bcc937519928a246cb1ca",
+   "msg": "fix: server_ips (#72)",
+   "date": "2026-10-06T16:17:22.000+02:00",
+   "url": "https://github.com/Elemento-Modular-Cloud/elemento-common-definitions/commit/7fbc1aa10e078884760bcc937519928a246cb1ca"
+  },
+  {
+   "query": "UPCLOUD_PASSWORD",
+   "repo": "JimLundin/vpscompare",
+   "sha": "53e2aaedb148b2e6517d00478d6178a1bba25288",
+   "msg": "fix: use GitHub Actions secrets for all provider API keys",
+   "date": "2026-02-23T23:46:08.000Z",
+   "url": "https://github.com/JimLundin/vpscompare/commit/53e2aaedb148b2e6517d00478d6178a1bba25288"
+  },
+  {
+   "query": "UPCLOUD_USERNAME",
+   "repo": "k9032431-cmd/Vpn_Bot",
+   "sha": "163070f743474493fd376175d5b80010536b5ba7",
+   "msg": "Trim Cloud VPS copy (provider list, UpCloud connect, backup/reimage warnings)",
+   "date": "2026-09-30T15:59:59.000Z",
+   "url": "https://github.com/k9032431-cmd/Vpn_Bot/commit/163070f743474493fd376175d5b80010536b5ba7"
+  },
+  {
+   "query": "UPCLOUD_USERNAME",
+   "repo": "vineetu/simple-host",
+   "sha": "e5ac76922a35fcf8868d3fcb0b38a23f519bf3f6",
+   "msg": "Setup helper: UpCloud as the recommended place for a small box; the agent prompt creates the server there; the installer",
+   "date": "2026-09-27T21:49:43.000Z",
+   "url": "https://github.com/vineetu/simple-host/commit/e5ac76922a35fcf8868d3fcb0b38a23f519bf3f6"
+  },
+  {
+   "query": "UPCLOUD_USERNAME",
+   "repo": "phnx-im/air",
+   "sha": "1f154e967833edd378a880d27dc843b476eebe39",
+   "msg": "feat(app): send keep-alives on idle listen streams  (#1649)",
+   "date": "2026-10-12T10:33:19.000Z",
+   "url": "https://github.com/phnx-im/air/commit/1f154e967833edd378a880d27dc843b476eebe39"
+  },
+  {
+   "query": "UPCLOUD_USERNAME",
+   "repo": "k9032431-cmd/Vpn_Bot",
+   "sha": "0d41769574faea294a57831631318a820e53a48d",
+   "msg": "Add Azure port management, custom login, reimage, prices and region flags",
+   "date": "2026-09-06T18:04:19.000Z",
+   "url": "https://github.com/k9032431-cmd/Vpn_Bot/commit/0d41769574faea294a57831631318a820e53a48d"
+  },
+  {
+   "query": "UPCLOUD_USERNAME",
+   "repo": "k9032431-cmd/Vpn_Bot",
+   "sha": "2281182d50b80bb92565e71a8b5118a23365245a",
+   "msg": "Make UpCloud connect screen look like a plain site login",
+   "date": "2026-09-05T15:26:45.000Z",
+   "url": "https://github.com/k9032431-cmd/Vpn_Bot/commit/2281182d50b80bb92565e71a8b5118a23365245a"
+  },
+  {
+   "query": "UPCLOUD_USERNAME",
+   "repo": "ClawBrick/webapp",
+   "sha": "31e1deacb2a341c9addf8b1bd1ef6934606a3498",
+   "msg": "feat: switch to UpCloud infra, add SNS + SOL balance to wallet popup & profile",
+   "date": "2026-03-02T22:36:29.000+04:00",
+   "url": "https://github.com/ClawBrick/webapp/commit/31e1deacb2a341c9addf8b1bd1ef6934606a3498"
+  },
+  {
+   "query": "UPCLOUD_USERNAME",
+   "repo": "k9032431-cmd/Vpn_Bot",
+   "sha": "9f96dacd31329357ca8afd0df6817c1376cc9727",
+   "msg": "Rename Cloud VPN to Cloud VPS and add UpCloud server management",
+   "date": "2026-09-05T02:27:18.000Z",
+   "url": "https://github.com/k9032431-cmd/Vpn_Bot/commit/9f96dacd31329357ca8afd0df6817c1376cc9727"
+  },
+  {
+   "query": "UPCLOUD_USERNAME",
+   "repo": "k9032431-cmd/Vpn_Bot",
+   "sha": "782b67a9d3bc3b89e6597da9be1bfc99f014ad2d",
+   "msg": "Allow main-account UpCloud login and add plan/disk/backup/IP management",
+   "date": "2026-09-05T02:55:49.000Z",
+   "url": "https://github.com/k9032431-cmd/Vpn_Bot/commit/782b67a9d3bc3b89e6597da9be1bfc99f014ad2d"
+  },
+  {
+   "query": "UPCLOUD_USERNAME",
+   "repo": "peter-svensson/dotfiles",
+   "sha": "c26f0e3d51b5fe38791fac81dc884cc61c26a747",
+   "msg": "feat(intersolia): add Scaleway staging profile + scw helpers",
+   "date": "2026-06-18T11:17:57.000+02:00",
+   "url": "https://github.com/peter-svensson/dotfiles/commit/c26f0e3d51b5fe38791fac81dc884cc61c26a747"
+  },
+  {
+   "query": "UPCLOUD_USERNAME",
+   "repo": "onetimesecret/ots-shared",
+   "sha": "46d310d72abed1dabc5526bf7580f2c83aa31bf9",
+   "msg": "Add ots_shared/upcloud provider helpers (UpCloud support)",
+   "date": "2026-06-27T02:47:39.000Z",
+   "url": "https://github.com/onetimesecret/ots-shared/commit/46d310d72abed1dabc5526bf7580f2c83aa31bf9"
+  },
+  {
+   "query": "UPCLOUD_USERNAME",
+   "repo": "ibisllc/flagship",
+   "sha": "2a46fa3d5953f29c66d6d072b084429ecb666c80",
+   "msg": "Add the prod reap: DNS records and demo servers of accounts no longer in D1",
+   "date": "2026-10-18T12:34:55.000-05:00",
+   "url": "https://github.com/ibisllc/flagship/commit/2a46fa3d5953f29c66d6d072b084429ecb666c80"
+  },
+  {
+   "query": "UPCLOUD_USERNAME",
+   "repo": "JeniT/wordwright",
+   "sha": "e14a0b4419dc3e6818d3b03a64caa5eb3b91f643",
+   "msg": "Deploy docs: the UpCloud firewall, outgoing mail, what to do when email does not send",
+   "date": "2026-10-23T16:16:52.000+01:00",
+   "url": "https://github.com/JeniT/wordwright/commit/e14a0b4419dc3e6818d3b03a64caa5eb3b91f643"
+  },
+  {
+   "query": "UPCLOUD_USERNAME",
+   "repo": "intUnderflow/bigfleet-providers",
+   "sha": "467226623992bea37b4527bca5f7c59628e1e770",
+   "msg": "Add UpCloud capacity provider",
+   "date": "2026-06-21T18:40:00.000Z",
+   "url": "https://github.com/intUnderflow/bigfleet-providers/commit/467226623992bea37b4527bca5f7c59628e1e770"
+  },
+  {
+   "query": "UPCLOUD_USERNAME",
+   "repo": "k9032431-cmd/Vpn_Bot",
+   "sha": "0da77832b0a9d5a84ed969712088a7820e8dbcd1",
+   "msg": "Redesign server detail/creation screens as a labeled info card",
+   "date": "2026-09-06T05:29:11.000Z",
+   "url": "https://github.com/k9032431-cmd/Vpn_Bot/commit/0da77832b0a9d5a84ed969712088a7820e8dbcd1"
+  },
+  {
+   "query": "UPCLOUD_USERNAME",
+   "repo": "nicois/openbao-cloud-creds",
+   "sha": "3ac1ec6613977e3bbf2ff8a8be6b5b8905d4407e",
+   "msg": "feat(credential-upcloud): add backend factory, config, and role paths",
+   "date": "2026-05-29T22:10:34.000+10:00",
+   "url": "https://github.com/nicois/openbao-cloud-creds/commit/3ac1ec6613977e3bbf2ff8a8be6b5b8905d4407e"
+  },
+  {
+   "query": "UPCLOUD_USERNAME",
+   "repo": "Wnt/greenhouse-solar-heater",
+   "sha": "d58660b1e4ee6fadd4b59d6798c38bc675af00e0",
+   "msg": "Amend constitution to v1.1.0: add token-based cloud auth principle",
+   "date": "2026-03-21T19:18:26.000Z",
+   "url": "https://github.com/Wnt/greenhouse-solar-heater/commit/d58660b1e4ee6fadd4b59d6798c38bc675af00e0"
+  },
+  {
+   "query": "UPCLOUD_USERNAME",
+   "repo": "k9032431-cmd/Vpn_Bot",
+   "sha": "449fe416f449243a41425d07849cf7d60d22e999",
+   "msg": "Add Microsoft Azure as a second Cloud VPS provider (VM management)",
+   "date": "2026-09-06T16:34:18.000Z",
+   "url": "https://github.com/k9032431-cmd/Vpn_Bot/commit/449fe416f449243a41425d07849cf7d60d22e999"
+  },
+  {
+   "query": "UPCLOUD_USERNAME",
+   "repo": "tabssh/android",
+   "sha": "c821af81cb74fe01bb5673e81a2235820ad0c27e",
+   "msg": "\u2728 Add Scaleway and UpCloud cloud providers",
+   "date": "2026-09-24T20:12:53.000-04:00",
+   "url": "https://github.com/tabssh/android/commit/c821af81cb74fe01bb5673e81a2235820ad0c27e"
+  },
+  {
+   "query": "UPCLOUD_USERNAME",
+   "repo": "JimLundin/vpscompare",
+   "sha": "53e2aaedb148b2e6517d00478d6178a1bba25288",
+   "msg": "fix: use GitHub Actions secrets for all provider API keys",
+   "date": "2026-02-23T23:46:08.000Z",
+   "url": "https://github.com/JimLundin/vpscompare/commit/53e2aaedb148b2e6517d00478d6178a1bba25288"
+  },
+  {
+   "query": "UPCLOUD_USERNAME",
+   "repo": "k9032431-cmd/Vpn_Bot",
+   "sha": "f63aea6b7f47ec584588548f0d946c6ce5a0b472",
+   "msg": "Add SSH-key login option for Node installer and Cloud VPS creation",
+   "date": "2026-09-06T06:10:12.000Z",
+   "url": "https://github.com/k9032431-cmd/Vpn_Bot/commit/f63aea6b7f47ec584588548f0d946c6ce5a0b472"
+  },
+  {
+   "query": "UPCLOUD_USERNAME",
+   "repo": "Kudbee-Studio/think-box-ai",
+   "sha": "d94afbbbfe454441e5269f1429085da7f85262fe",
+   "msg": "#340 P3: redacting live-proof bundle builder (item 4) (#340)",
+   "date": "2026-10-03T11:21:33.000Z",
+   "url": "https://github.com/Kudbee-Studio/think-box-ai/commit/d94afbbbfe454441e5269f1429085da7f85262fe"
+  },
+  {
+   "query": "UPCLOUD_USERNAME",
+   "repo": "OpenRouterLabs/spawn",
+   "sha": "3b4444f2925608dcc2f28902a1073dc41866b69d",
+   "msg": "fix: show all auth vars in agent info quick start for multi-credential clouds (#975)",
+   "date": "2026-02-13T11:18:28.000-08:00",
+   "url": "https://github.com/OpenRouterLabs/spawn/commit/3b4444f2925608dcc2f28902a1073dc41866b69d"
+  },
+  {
+   "query": "UPCLOUD_USERNAME",
+   "repo": "nicois/openbao-cloud-creds",
+   "sha": "db6dba0c6f363946157f4790d65709a1266b05d0",
+   "msg": "feat(credential-upcloud): implement JIT credential issuance and revocation",
+   "date": "2026-05-29T22:10:45.000+10:00",
+   "url": "https://github.com/nicois/openbao-cloud-creds/commit/db6dba0c6f363946157f4790d65709a1266b05d0"
+  },
+  {
+   "query": "UPCLOUD_USERNAME",
+   "repo": "crossplane-contrib/provider-upcloud",
+   "sha": "31cf9993f67547ec9ffea0468d90333494bee9c2",
+   "msg": "feat: align provider runtime with the upjet template",
+   "date": "2026-09-28T09:38:52.000+02:00",
+   "url": "https://github.com/crossplane-contrib/provider-upcloud/commit/31cf9993f67547ec9ffea0468d90333494bee9c2"
+  },
+  {
+   "query": "UPCLOUD_USERNAME",
+   "repo": "tsolbjor/devhub",
+   "sha": "e4b14be0df07ced9d60de54c0d55361a4020ed93",
+   "msg": "Ask for a deployment prefix; tag resources with the deployer",
+   "date": "2026-08-22T17:56:59.000+02:00",
+   "url": "https://github.com/tsolbjor/devhub/commit/e4b14be0df07ced9d60de54c0d55361a4020ed93"
+  },
+  {
+   "query": "UPCLOUD_USERNAME",
+   "repo": "getprobo/probo",
+   "sha": "099543dfa953d9aa48f2bdc6224f35b0f8a72eb6",
+   "msg": "Fix UpCloud admin detection and add name resolver",
+   "date": "2026-07-27T10:31:40.000+02:00",
+   "url": "https://github.com/getprobo/probo/commit/099543dfa953d9aa48f2bdc6224f35b0f8a72eb6"
+  },
+  {
+   "query": "UPCLOUD_USERNAME",
+   "repo": "OpenRouterLabs/spawn",
+   "sha": "2364458f36fdf1a93fdc7b54139fa305988ddcf9",
+   "msg": "Add RunPod GPU cloud provider (#39)",
+   "date": "2026-02-07T21:43:10.000-08:00",
+   "url": "https://github.com/OpenRouterLabs/spawn/commit/2364458f36fdf1a93fdc7b54139fa305988ddcf9"
+  },
+  {
+   "query": "UPCLOUD_USERNAME",
+   "repo": "po4yka/ripdpi-vpn-deploy",
+   "sha": "cbe2b99da13f1aecedae8e057a4d67a31b8dbcd6",
+   "msg": "feat(ci): real-vps-deploy workflow \u2014 ephemeral UpCloud end-to-end gate",
+   "date": "2026-05-11T18:50:16.000+04:00",
+   "url": "https://github.com/po4yka/ripdpi-vpn-deploy/commit/cbe2b99da13f1aecedae8e057a4d67a31b8dbcd6"
+  },
+  {
+   "query": "UPCLOUD_USERNAME",
+   "repo": "mremes/mumina",
+   "sha": "fc21e7764a9d2ea6d23dd3eec3da62eb27e274a7",
+   "msg": "UpCloud install: ask for API token instead of username/password",
+   "date": "2026-03-27T03:04:34.000+02:00",
+   "url": "https://github.com/mremes/mumina/commit/fc21e7764a9d2ea6d23dd3eec3da62eb27e274a7"
+  },
+  {
+   "query": "UPCLOUD_USERNAME",
+   "repo": "OpenRouterLabs/spawn",
+   "sha": "138fe91333fa83df4383b26abbd89a76a20831bf",
+   "msg": "test: add 25 tests for cloud/agent Quick start and Not-yet-available display (#507)",
+   "date": "2026-02-11T12:28:43.000-08:00",
+   "url": "https://github.com/OpenRouterLabs/spawn/commit/138fe91333fa83df4383b26abbd89a76a20831bf"
+  },
+  {
+   "query": "UPCLOUD_TOKEN",
+   "repo": "Kirbo/gitlab-fleeting-plugin-upcloud",
+   "sha": "61c0a7d727d027347b9ecc14b425e480e11ab84b",
+   "msg": "test: add opt-in integration test against real UpCloud servers",
+   "date": "2026-10-26T14:25:47.000+02:00",
+   "url": "https://github.com/Kirbo/gitlab-fleeting-plugin-upcloud/commit/61c0a7d727d027347b9ecc14b425e480e11ab84b"
+  },
+  {
+   "query": "UPCLOUD_TOKEN",
+   "repo": "Suo-commerce/taso",
+   "sha": "7b353bf0542e9060e612dd19c11c145ec17bb362",
+   "msg": "upctl-nodes.sh, README: the token from a file, the README's node creation through the script",
+   "date": "2026-10-21T10:31:33.000Z",
+   "url": "https://github.com/Suo-commerce/taso/commit/7b353bf0542e9060e612dd19c11c145ec17bb362"
+  },
+  {
+   "query": "UPCLOUD_TOKEN",
+   "repo": "broberg-ai/components",
+   "sha": "a890f1f15a3fd68189f9eda347815b0d6e63044d",
+   "msg": "feat(components-F035.16): @broberg/secret-scan 0.10.0 \u2014 UpCloud API tokens are classified and redacted",
+   "date": "2026-09-30T01:15:39.000+02:00",
+   "url": "https://github.com/broberg-ai/components/commit/a890f1f15a3fd68189f9eda347815b0d6e63044d"
+  },
+  {
+   "query": "UPCLOUD_TOKEN",
+   "repo": "Kudbee-Studio/think-box-ai",
+   "sha": "d85bead5d209abfaa865fe8ad8390b6a04c3402a",
+   "msg": "fix(infra): correct upctl tooling; record live UpCloud substrate audit (#280)",
+   "date": "2026-09-29T12:15:55.000-05:00",
+   "url": "https://github.com/Kudbee-Studio/think-box-ai/commit/d85bead5d209abfaa865fe8ad8390b6a04c3402a"
+  },
+  {
+   "query": "UPCLOUD_TOKEN",
+   "repo": "ankraio/ankra-docs",
+   "sha": "bc567a566677be8f7d4b574780e94750aa93489a",
+   "msg": "docs(upcloud): API tokens page path depends on account type (ankra-t3mtt.3) (#160)",
+   "date": "2026-08-22T13:53:32.000+02:00",
+   "url": "https://github.com/ankraio/ankra-docs/commit/bc567a566677be8f7d4b574780e94750aa93489a"
+  },
+  {
+   "query": "UPCLOUD_TOKEN",
+   "repo": "akshatauppinventure/web-app-test",
+   "sha": "53e4b9b54a09cb7de31794d532576ed593ceeb73",
+   "msg": "docs: P6 done; UpCloud token lives in ~/.config/upcloud/token (#50)",
+   "date": "2026-09-17T00:13:37.000-04:00",
+   "url": "https://github.com/akshatauppinventure/web-app-test/commit/53e4b9b54a09cb7de31794d532576ed593ceeb73"
+  },
+  {
+   "query": "UPCLOUD_TOKEN",
+   "repo": "vineetu/simple-host",
+   "sha": "0becc90a2eb8906a9f6e4587c5adc0c4c14588a5",
+   "msg": "skill: drive every provider with a bearer token and curl, not a CLI",
+   "date": "2026-09-09T18:27:01.000Z",
+   "url": "https://github.com/vineetu/simple-host/commit/0becc90a2eb8906a9f6e4587c5adc0c4c14588a5"
+  },
+  {
+   "query": "UPCLOUD_TOKEN",
+   "repo": "shoehorn-dev/helm-charts",
+   "sha": "1ace1dc13508728e3f5008db90043013f70145d6",
+   "msg": "Give the api and worker their UpCloud environment (#67)",
+   "date": "2026-09-05T09:55:07.000+02:00",
+   "url": "https://github.com/shoehorn-dev/helm-charts/commit/1ace1dc13508728e3f5008db90043013f70145d6"
+  },
+  {
+   "query": "UPCLOUD_TOKEN",
+   "repo": "brawer/kube-shim",
+   "sha": "12c87243675e8a0c1e539dc0985090666cc95e76",
+   "msg": "feat: add tofu/ -- a reusable OpenTofu module to provision kube-shim on UpCloud",
+   "date": "2026-10-13T19:58:31.000+08:00",
+   "url": "https://github.com/brawer/kube-shim/commit/12c87243675e8a0c1e539dc0985090666cc95e76"
+  },
+  {
+   "query": "UPCLOUD_TOKEN",
+   "repo": "dagulv/kharoborathus",
+   "sha": "ab03cf69b78c7e3dfbdcb3799c86fb0d2de6ed2c",
+   "msg": "Authenticate OpenTofu with an UpCloud API token",
+   "date": "2026-10-18T13:07:14.000+02:00",
+   "url": "https://github.com/dagulv/kharoborathus/commit/ab03cf69b78c7e3dfbdcb3799c86fb0d2de6ed2c"
+  },
+  {
+   "query": "UPCLOUD_TOKEN",
+   "repo": "LadyHwesta/odoo-addons",
+   "sha": "6d66d3ab7c8218ee0bc70cf0bb75feac702878e7",
+   "msg": "Automate dedicated-VPS creation via UpCloud's API",
+   "date": "2026-09-15T11:51:17.000-07:00",
+   "url": "https://github.com/LadyHwesta/odoo-addons/commit/6d66d3ab7c8218ee0bc70cf0bb75feac702878e7"
+  },
+  {
+   "query": "UPCLOUD_TOKEN",
+   "repo": "Suo-commerce/taso",
+   "sha": "c71515b1969e467da9be399876fdbfa4769af333",
+   "msg": "upctl-nodes.sh: create, list and delete the UpCloud gate nodes from a terminal",
+   "date": "2026-10-21T10:23:09.000Z",
+   "url": "https://github.com/Suo-commerce/taso/commit/c71515b1969e467da9be399876fdbfa4769af333"
+  },
+  {
+   "query": "UPCLOUD_TOKEN",
+   "repo": "vineetu/simple-host",
+   "sha": "77552d5b8591b4906572b5fa6ccf9ee74dcfca0e",
+   "msg": "Setup helper from the 2026-09-28 e2e trials: UpCloud API token (preferred) or API user, price from GET /1.3/price (about",
+   "date": "2026-09-28T02:07:18.000Z",
+   "url": "https://github.com/vineetu/simple-host/commit/77552d5b8591b4906572b5fa6ccf9ee74dcfca0e"
+  },
+  {
+   "query": "UPCLOUD_TOKEN",
+   "repo": "Maixixi2025/vpstier.com",
+   "sha": "a2d05f8f8e219e912225f69d6d466c23dc7ad838",
+   "msg": "Add UpCloud provider + EN/ZH deep review (2026-06-06)",
+   "date": "2026-06-06T11:51:41.000+08:00",
+   "url": "https://github.com/Maixixi2025/vpstier.com/commit/a2d05f8f8e219e912225f69d6d466c23dc7ad838"
+  },
+  {
+   "query": "UPCLOUD_TOKEN",
+   "repo": "Spiritbulb/mcloud",
+   "sha": "65d67d22eadd2660d3e2f09b8b609f01ae28c090",
+   "msg": "feat(security): add functions for bill-servers token validation and UpCloud API key retrieval",
+   "date": "2026-10-23T19:14:09.000+03:00",
+   "url": "https://github.com/Spiritbulb/mcloud/commit/65d67d22eadd2660d3e2f09b8b609f01ae28c090"
+  },
+  {
+   "query": "UPCLOUD_TOKEN",
+   "repo": "Spiritbulb/mcloud",
+   "sha": "3cee1e2fb6981ffff27dab48618e143eadf3167a",
+   "msg": "fix(docs): update cleanup and roadmap for bill-servers token handling and UpCloud key retrieval",
+   "date": "2026-10-23T20:30:37.000+03:00",
+   "url": "https://github.com/Spiritbulb/mcloud/commit/3cee1e2fb6981ffff27dab48618e143eadf3167a"
+  },
+  {
+   "query": "UPCLOUD_TOKEN",
+   "repo": "Kudbee-Studio/think-box-ai",
+   "sha": "3cf9ffff6887dc417d02d228cfc017c9c14cf60f",
+   "msg": "feat(security): whole-dashboard sign-in + backend-authoritative UpCloud exec policy (#286)",
+   "date": "2026-09-29T13:45:41.000-05:00",
+   "url": "https://github.com/Kudbee-Studio/think-box-ai/commit/3cf9ffff6887dc417d02d228cfc017c9c14cf60f"
+  },
+  {
+   "query": "UPCLOUD_TOKEN",
+   "repo": "errorware/crow",
+   "sha": "04f271fdac3425f8b68ec0cf13c7f4fa225c694f",
+   "msg": "feat(providers): provider-core contract, Linode and UpCloud providers (ERR-42, ERR-43, ERR-44)",
+   "date": "2026-09-25T18:03:19.000+01:00",
+   "url": "https://github.com/errorware/crow/commit/04f271fdac3425f8b68ec0cf13c7f4fa225c694f"
+  },
+  {
+   "query": "UPCLOUD_TOKEN",
+   "repo": "ibisllc/flagship",
+   "sha": "5813ce8e7545103b3f5ffc4cddf5a381dab0c093",
+   "msg": "Fold the UpCloud inference research into main",
+   "date": "2026-10-14T09:36:31.000-05:00",
+   "url": "https://github.com/ibisllc/flagship/commit/5813ce8e7545103b3f5ffc4cddf5a381dab0c093"
+  },
+  {
+   "query": "UPCLOUD_TOKEN",
+   "repo": "hardimpactdev/orbit",
+   "sha": "af59789546b2c181c986e6ae7a9360892e02e209",
+   "msg": "Sweep UpCloud and refresh its template nightly while the token file is set",
+   "date": "2026-10-12T21:23:32.000+02:00",
+   "url": "https://github.com/hardimpactdev/orbit/commit/af59789546b2c181c986e6ae7a9360892e02e209"
+  },
+  {
+   "query": "UPCLOUD_TOKEN",
+   "repo": "vreid/idol-appreciation.club_old",
+   "sha": "afeb18cc1b2f949ad85804e3003d5c7b6de03f44",
+   "msg": "deploy: expose UPCLOUD_API_TOKEN to the app-env step (API-derived DB pw + S3 endpoint need it) (#19)",
+   "date": "2026-10-13T03:41:31.000+02:00",
+   "url": "https://github.com/vreid/idol-appreciation.club_old/commit/afeb18cc1b2f949ad85804e3003d5c7b6de03f44"
+  },
+  {
+   "query": "UPCLOUD_TOKEN",
+   "repo": "busdk/docs",
+   "sha": "16255542d3b3425dc215530bd3d29cde2c5b18a0",
+   "msg": "docs: document UpCloud worker operations",
+   "date": "2026-04-30T16:03:02.000+03:00",
+   "url": "https://github.com/busdk/docs/commit/16255542d3b3425dc215530bd3d29cde2c5b18a0"
+  },
+  {
+   "query": "UPCLOUD_TOKEN",
+   "repo": "obotkov/lexer_space",
+   "sha": "737d543442c08c54d6c016474a350f8e39e8a5ab",
+   "msg": "vpn-admin: UpCloud hosting with server creation via cloud-init",
+   "date": "2026-10-27T13:33:07.000+03:00",
+   "url": "https://github.com/obotkov/lexer_space/commit/737d543442c08c54d6c016474a350f8e39e8a5ab"
+  },
+  {
+   "query": "UPCLOUD_TOKEN",
+   "repo": "Snzy09/NexVps",
+   "sha": "db5d2874c1b3bac4149cc9d572c2c8660f963140",
+   "msg": "fix(upcloud): resolve masked token testing, add Accept headers, and display detailed status codes",
+   "date": "2026-10-17T10:34:56.000+07:00",
+   "url": "https://github.com/Snzy09/NexVps/commit/db5d2874c1b3bac4149cc9d572c2c8660f963140"
+  },
+  {
+   "query": "UPCLOUD_TOKEN",
+   "repo": "DwieDave/kumulo",
+   "sha": "2d63bafd4fca179828c0d1245a63cd827e7f2e71",
+   "msg": "feat(upcloud): hand-written Effect client for the UpCloud 1.3 API",
+   "date": "2026-07-28T16:19:33.000+02:00",
+   "url": "https://github.com/DwieDave/kumulo/commit/2d63bafd4fca179828c0d1245a63cd827e7f2e71"
+  },
+  {
+   "query": "UPCLOUD_TOKEN",
+   "repo": "peter-svensson/dotfiles",
+   "sha": "c26f0e3d51b5fe38791fac81dc884cc61c26a747",
+   "msg": "feat(intersolia): add Scaleway staging profile + scw helpers",
+   "date": "2026-06-18T11:17:57.000+02:00",
+   "url": "https://github.com/peter-svensson/dotfiles/commit/c26f0e3d51b5fe38791fac81dc884cc61c26a747"
+  },
+  {
+   "query": "UPCLOUD_TOKEN",
+   "repo": "Snzy09/NexVps",
+   "sha": "9c4d1dc2d4e6c1101067af36c7cc6579dd2f766e",
+   "msg": "feat: complete NexVps platform with multi-token UpCloud failover, UIable alert dialog, and GitHub Pages hosting",
+   "date": "2026-10-12T12:21:21.000+07:00",
+   "url": "https://github.com/Snzy09/NexVps/commit/9c4d1dc2d4e6c1101067af36c7cc6579dd2f766e"
+  },
+  {
+   "query": "UPCLOUD_TOKEN",
+   "repo": "Wnt/greenhouse-solar-heater",
+   "sha": "d58660b1e4ee6fadd4b59d6798c38bc675af00e0",
+   "msg": "Amend constitution to v1.1.0: add token-based cloud auth principle",
+   "date": "2026-03-21T19:18:26.000Z",
+   "url": "https://github.com/Wnt/greenhouse-solar-heater/commit/d58660b1e4ee6fadd4b59d6798c38bc675af00e0"
+  },
+  {
+   "query": "UPCLOUD_TOKEN",
+   "repo": "broberg-ai/components",
+   "sha": "fcc786ad5f9433cfef0247178b3bc5c5f34d25a9",
+   "msg": "docs(F035.16): write docs/features/F035.16-upcloud-api-token.md via cardmem_write_plan",
+   "date": "2026-09-29T23:08:20.000Z",
+   "url": "https://github.com/broberg-ai/components/commit/fcc786ad5f9433cfef0247178b3bc5c5f34d25a9"
+  },
+  {
+   "query": "UPCLOUD_TOKEN",
+   "repo": "jahru23/rdpinstall",
+   "sha": "b3fc7694f68c5e2b08075fc353bb51ab2993e61c",
+   "msg": "F2: akun cloud UpCloud \u2014 uji token ke GET /1.3/account, simpan terenkripsi, daftar/uji/hapus",
+   "date": "2026-10-18T09:19:05.000+07:00",
+   "url": "https://github.com/jahru23/rdpinstall/commit/b3fc7694f68c5e2b08075fc353bb51ab2993e61c"
+  }
+ ]
+}

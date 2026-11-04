@@ -1,0 +1,274 @@
+From 0da77832b0a9d5a84ed969712088a7820e8dbcd1 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sun, 6 Sep 2026 05:29:11 +0000
+Subject: [PATCH] Redesign server detail/creation screens as a labeled info
+ card
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Replace the cramped one-paragraph server text with a clean labeled
+layout (status, location, plan, resources, hostname, IPv4/IPv6 each
+on their own line), matching the requested "Name: value" style.
+
+Location now shows a flag emoji next to the city, computed directly
+from the zone id's country-code prefix (e.g. "us-nyc1" -> 🇺🇸 New
+York) via Unicode regional indicators — works for any country UpCloud
+adds a zone in, not just a hardcoded list. IPv4 and IPv6 are shown on
+separate lines instead of comma-joined. The server-created message
+also now explicitly shows the root username, and upcloud_create_server
+sets it explicitly instead of relying on UpCloud's implicit default.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01NFMuHFMb7r1xEwqxGw4pZn
+---
+ README.md                   |  6 +++-
+ bot/services/upcloud_api.py |  3 +-
+ bot/texts/cloud.py          | 69 +++++++++++++++++++++++++++++++------
+ bot/texts/translations.py   | 63 ++++++++++++++++++++-------------
+ 4 files changed, 105 insertions(+), 36 deletions(-)
+
+diff --git a/README.md b/README.md
+index 32189e9..b4e1be5 100644
+--- a/README.md
++++ b/README.md
+@@ -249,7 +249,11 @@ URL API. Если панель развёрнута под собственны
+ - **список серверов** с их статусом (🟢 запущен / 🔴 остановлен);
+ - по каждому серверу — **старт / стоп / перезагрузка / удаление** (удаление
+   требует явного подтверждения — это необратимое платное действие) и
+-  просмотр деталей (hostname, зона, план, CPU/RAM, публичный IP). Удаление,
++  просмотр деталей аккуратной карточкой: статус, локация с флагом страны
++  (🇺🇸, 🇩🇪, 🇫🇮 и т.д. — вычисляется из кода зоны UpCloud, поддерживает
++  вообще любую страну), план, CPU/RAM, hostname и отдельно IPv4/IPv6. Та же
++  карточка показывается сразу после создания сервера, вместе с логином и
++  паролем root. Удаление,
+   смена плана и восстановление из бэкапа сами проверяют состояние сервера:
+   если он включён — предложат сначала его выключить, а если UpCloud держит
+   его во временном состоянии `maintenance` (сразу после другого действия,
+diff --git a/bot/services/upcloud_api.py b/bot/services/upcloud_api.py
+index d65da7e..aa58c5b 100644
+--- a/bot/services/upcloud_api.py
++++ b/bot/services/upcloud_api.py
+@@ -249,7 +249,8 @@ async def upcloud_create_server(
+     ``password_delivery: none`` + a generated root password returned in the
+     response when no SSH key is given (fetched separately by the caller and
+     shown once), matching UpCloud's own "create server" defaults."""
+-    login_user: dict = {"create_password": "yes" if not ssh_public_key else "no"}
++    # UpCloud's own default login user for every standard Linux template.
++    login_user: dict = {"username": "root", "create_password": "yes" if not ssh_public_key else "no"}
+     if ssh_public_key:
+         login_user["ssh_keys"] = {"ssh_key": [ssh_public_key]}
+ 
+diff --git a/bot/texts/cloud.py b/bot/texts/cloud.py
+index 1a0269f..bd0f05c 100644
+--- a/bot/texts/cloud.py
++++ b/bot/texts/cloud.py
+@@ -25,11 +25,60 @@
+ 
+ _PROVIDER_TITLES = {"upcloud": "UpCloud", "aws": "AWS", "azure": "Azure", "linode": "Linode", "kamatera": "Kamatera"}
+ 
++# UpCloud zone ids follow "<country>-<city><n>" (e.g. "us-nyc1") — the city
++# names for the zones UpCloud actually operates are listed here for a nice
++# display; unlisted zones (new ones UpCloud adds later, or test fixtures)
++# just fall back to the raw zone id, so this never breaks anything.
++_ZONE_CITY_NAMES = {
++    "fi-hel1": "Helsinki",
++    "fi-hel2": "Helsinki",
++    "de-fra1": "Frankfurt",
++    "uk-lon1": "London",
++    "nl-ams1": "Amsterdam",
++    "es-mad1": "Madrid",
++    "pl-waw1": "Warsaw",
++    "se-sto1": "Stockholm",
++    "us-chi1": "Chicago",
++    "us-nyc1": "New York",
++    "us-sjo1": "San Jose",
++    "sg-sin1": "Singapore",
++    "au-syd1": "Sydney",
++}
++
+ 
+ def provider_title(provider: str) -> str:
+     return _PROVIDER_TITLES.get(provider, provider.capitalize())
+ 
+ 
++def _flag_emoji(country_code: str) -> str:
++    # A flag emoji is just two Unicode "regional indicator" letters — this
++    # works for any real ISO country code without a lookup table.
++    code = country_code.upper()
++    if len(code) != 2 or not code.isalpha():
++        return "🌍"
++    return "".join(chr(0x1F1E6 + ord(ch) - ord("A")) for ch in code)
++
++
++def zone_display(zone_id: str) -> str:
++    country_code = zone_id.split("-", 1)[0] if "-" in zone_id else ""
++    flag = _flag_emoji(country_code)
++    city = _ZONE_CITY_NAMES.get(zone_id, zone_id)
++    return f"{flag} {city}"
++
++
++def _format_memory(memory_mb: int) -> str:
++    if memory_mb and memory_mb % 1024 == 0:
++        return f"{memory_mb // 1024} GB"
++    return f"{memory_mb} MB"
++
++
++def _public_ip(server, family: str) -> str | None:
++    for ip in server.ip_addresses:
++        if ip.access == "public" and ip.family == family:
++            return ip.address
++    return None
++
++
+ def provider_list_text(lang: str) -> str:
+     return t(lang, "cloud_provider_list", icon=e("cloud_vps", "☁️"))
+ 
+@@ -142,23 +191,20 @@ def server_list_label(server) -> str:
+     return f"{icon} {server.title or server.hostname}"
+ 
+ 
+-def _ip_list(server) -> str:
+-    public = [ip.address for ip in server.ip_addresses if ip.access == "public"]
+-    return ", ".join(public) if public else t("ru", "cloud_server_no_ip")
+-
+-
+ def server_detail_text(lang: str, server) -> str:
++    no_ip = t(lang, "cloud_server_no_ip")
+     return t(
+         lang,
+         "cloud_server_detail",
+         title=html.escape(server.title or server.hostname),
+-        hostname=html.escape(server.hostname),
+         state=f"{_STATE_EMOJI.get(server.state, '⚪️')} {server.state}",
+-        zone=server.zone,
++        location=zone_display(server.zone),
+         plan=server.plan,
+         cores=server.core_number,
+-        memory=server.memory_amount,
+-        ips=_ip_list(server) if server.ip_addresses else t(lang, "cloud_server_no_ip"),
++        memory=_format_memory(server.memory_amount),
++        hostname=html.escape(server.hostname),
++        ipv4=_public_ip(server, "IPv4") or no_ip,
++        ipv6=_public_ip(server, "IPv6") or no_ip,
+     )
+ 
+ 
+@@ -221,6 +267,7 @@ def creating_text(lang: str) -> str:
+ 
+ 
+ def create_success_text(lang: str, server) -> str:
++    no_ip = t(lang, "cloud_server_no_ip")
+     password_line = ""
+     if server.password:
+         password_line = t(lang, "cloud_create_password_line", password=server.password)
+@@ -229,7 +276,9 @@ def create_success_text(lang: str, server) -> str:
+         "cloud_create_success",
+         icon=e("success", "✅"),
+         title=html.escape(server.title or server.hostname),
+-        ips=_ip_list(server) if server.ip_addresses else t(lang, "cloud_server_no_ip"),
++        location=zone_display(server.zone),
++        ipv4=_public_ip(server, "IPv4") or no_ip,
++        ipv6=_public_ip(server, "IPv6") or no_ip,
+         password_line=password_line,
+     )
+ 
+diff --git a/bot/texts/translations.py b/bot/texts/translations.py
+index 17adbee..0bdb037 100644
+--- a/bot/texts/translations.py
++++ b/bot/texts/translations.py
+@@ -1844,27 +1844,33 @@ def resolve_language(code: str | None) -> str:
+     "cloud_server_detail": {
+         "ru": (
+             "🖥 <b>{title}</b>\n\n"
+-            "🌐 Hostname: <code>{hostname}</code>\n"
+-            "🚦 Статус: {state}\n"
+-            "📍 Зона: {zone}\n"
+-            "⚙️ План: {plan} ({cores} CPU / {memory} MB RAM)\n"
+-            "🌍 IP: {ips}"
++            "🚦 <b>Статус:</b> {state}\n"
++            "📍 <b>Локация:</b> {location}\n"
++            "⚙️ <b>План:</b> {plan}\n"
++            "🧠 <b>Ресурсы:</b> {cores} CPU / {memory} RAM\n"
++            "🏷 <b>Hostname:</b> <code>{hostname}</code>\n"
++            "🌐 <b>IPv4:</b> <code>{ipv4}</code>\n"
++            "🌐 <b>IPv6:</b> <code>{ipv6}</code>"
+         ),
+         "en": (
+             "🖥 <b>{title}</b>\n\n"
+-            "🌐 Hostname: <code>{hostname}</code>\n"
+-            "🚦 State: {state}\n"
+-            "📍 Zone: {zone}\n"
+-            "⚙️ Plan: {plan} ({cores} CPU / {memory} MB RAM)\n"
+-            "🌍 IP: {ips}"
++            "🚦 <b>Status:</b> {state}\n"
++            "📍 <b>Location:</b> {location}\n"
++            "⚙️ <b>Plan:</b> {plan}\n"
++            "🧠 <b>Resources:</b> {cores} CPU / {memory} RAM\n"
++            "🏷 <b>Hostname:</b> <code>{hostname}</code>\n"
++            "🌐 <b>IPv4:</b> <code>{ipv4}</code>\n"
++            "🌐 <b>IPv6:</b> <code>{ipv6}</code>"
+         ),
+         "tk": (
+             "🖥 <b>{title}</b>\n\n"
+-            "🌐 Hostname: <code>{hostname}</code>\n"
+-            "🚦 Ýagdaýy: {state}\n"
+-            "📍 Zolak: {zone}\n"
+-            "⚙️ Meýilnama: {plan} ({cores} CPU / {memory} MB RAM)\n"
+-            "🌍 IP: {ips}"
++            "🚦 <b>Ýagdaýy:</b> {state}\n"
++            "📍 <b>Ýerleşişi:</b> {location}\n"
++            "⚙️ <b>Meýilnama:</b> {plan}\n"
++            "🧠 <b>Serişdeler:</b> {cores} CPU / {memory} RAM\n"
++            "🏷 <b>Hostname:</b> <code>{hostname}</code>\n"
++            "🌐 <b>IPv4:</b> <code>{ipv4}</code>\n"
++            "🌐 <b>IPv6:</b> <code>{ipv6}</code>"
+         ),
+     },
+     "cloud_server_no_ip": {"ru": "—", "en": "—", "tk": "—"},
+@@ -1965,27 +1971,36 @@ def resolve_language(code: str | None) -> str:
+     "cloud_create_success": {
+         "ru": (
+             "{icon} <b>Сервер создан!</b>\n\n"
+-            "🖥 {title}\n"
+-            "🌐 IP: {ips}\n"
++            "🖥 <b>Hostname:</b> {title}\n"
++            "📍 <b>Локация:</b> {location}\n"
++            "🌐 <b>IPv4:</b> <code>{ipv4}</code>\n"
++            "🌐 <b>IPv6:</b> <code>{ipv6}</code>\n"
++            "👤 <b>Логин:</b> <code>root</code>\n"
+             "{password_line}"
+         ),
+         "en": (
+             "{icon} <b>Server created!</b>\n\n"
+-            "🖥 {title}\n"
+-            "🌐 IP: {ips}\n"
++            "🖥 <b>Hostname:</b> {title}\n"
++            "📍 <b>Location:</b> {location}\n"
++            "🌐 <b>IPv4:</b> <code>{ipv4}</code>\n"
++            "🌐 <b>IPv6:</b> <code>{ipv6}</code>\n"
++            "👤 <b>Username:</b> <code>root</code>\n"
+             "{password_line}"
+         ),
+         "tk": (
+             "{icon} <b>Serwer döredildi!</b>\n\n"
+-            "🖥 {title}\n"
+-            "🌐 IP: {ips}\n"
++            "🖥 <b>Hostname:</b> {title}\n"
++            "📍 <b>Ýerleşişi:</b> {location}\n"
++            "🌐 <b>IPv4:</b> <code>{ipv4}</code>\n"
++            "🌐 <b>IPv6:</b> <code>{ipv6}</code>\n"
++            "👤 <b>Ulanyjy ady:</b> <code>root</code>\n"
+             "{password_line}"
+         ),
+     },
+     "cloud_create_password_line": {
+-        "ru": "🔑 Пароль root: <code>{password}</code> (сохраните, повторно показан не будет)",
+-        "en": "🔑 Root password: <code>{password}</code> (save it, it won't be shown again)",
+-        "tk": "🔑 Root paroly: <code>{password}</code> (ýatda saklaň, indi görkezilmez)",
++        "ru": "🔑 <b>Пароль:</b> <code>{password}</code>\n\n<i>Сохраните пароль — повторно он показан не будет.</i>",
++        "en": "🔑 <b>Password:</b> <code>{password}</code>\n\n<i>Save it — it won't be shown again.</i>",
++        "tk": "🔑 <b>Parol:</b> <code>{password}</code>\n\n<i>Paroly ýatda saklaň — indi görkezilmez.</i>",
+     },
+     # --- Cloud VPS: server detail extra buttons ---
+     "btn_cloud_server_plan": {"ru": "⚙️ Изменить план", "en": "⚙️ Change plan", "tk": "⚙️ Meýilnamany üýtget"},

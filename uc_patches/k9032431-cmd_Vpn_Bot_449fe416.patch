@@ -1,0 +1,2008 @@
+From 449fe416f449243a41425d07849cf7d60d22e999 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sun, 6 Sep 2026 16:34:18 +0000
+Subject: [PATCH] Add Microsoft Azure as a second Cloud VPS provider (VM
+ management)
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Azure joins UpCloud as an active provider in the Cloud VPS section, scoped
+to virtual machines (create/list/detail/start/stop/restart/delete), same
+as the user asked ("почти всё, но только с виртуальными серверами").
+
+- bot/services/azure_api.py: new ARM REST client using Service Principal
+  (client-credentials OAuth2) auth. Handles ARM's async semantics — every
+  create/delete/power action polls the resource's own
+  provisioningState/instanceView until it reaches a terminal state, since
+  the initial PUT/POST response only reflects the desired state. VM
+  creation orchestrates the full resource chain a VM needs (resource
+  group -> VNet/subnet -> public IP -> NSG -> NIC -> VM), reusing one
+  resource group and one VNet per (account, location) so repeat creates
+  don't pile up duplicate infrastructure, and delete cleans up the VM's
+  own NIC/public IP/NSG afterwards. Curated (not full-Marketplace) image
+  and VM-size catalogs keep the picker usable instead of listing Azure's
+  200+ raw sizes.
+
+- cloud_store.py: generalized to store arbitrary provider-specific
+  credential fields (tenant_id/client_id/client_secret/subscription_id
+  for Azure) instead of hardcoding username/password, since Azure's auth
+  shape has no equivalent to UpCloud's login.
+
+- Account connect is a 4-step wizard (Tenant ID, Client ID, Client
+  Secret, Subscription ID) instead of UpCloud's username+password, since
+  Azure has no plain API login — the Client Secret message is deleted
+  right after receipt like a password. VM creation reuses the same
+  password-vs-SSH-key choice already built for UpCloud/Node.
+
+Verified against a fake Azure ARM server exercising the full flow
+end-to-end: wrong-credential rejection, the 4-field connect wizard, VM
+creation via both auth paths (including the multi-resource orchestration
+and its progress callback), list/detail/start/stop/restart/delete, and
+the async polling logic actually looping (not just checking once) for
+provisioning state, power state, and deletion.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01NFMuHFMb7r1xEwqxGw4pZn
+---
+ README.md                   |  55 +++-
+ bot/handlers/cloud.py       | 505 +++++++++++++++++++++++++++-
+ bot/keyboards/cloud.py      |  63 ++++
+ bot/services/azure_api.py   | 641 ++++++++++++++++++++++++++++++++++++
+ bot/services/cloud_store.py |  25 +-
+ bot/states/cloud_setup.py   |  18 +
+ bot/texts/cloud.py          | 183 +++++++++-
+ bot/texts/translations.py   | 222 ++++++++++++-
+ 8 files changed, 1686 insertions(+), 26 deletions(-)
+ create mode 100644 bot/services/azure_api.py
+
+diff --git a/README.md b/README.md
+index 9f10c91..fd40827 100644
+--- a/README.md
++++ b/README.md
+@@ -16,9 +16,9 @@ Telegram-бот для управления VPN: ноды, облачные по
+ - **три языка интерфейса** — русский, английский, туркменский (подробности ниже);
+ - кнопка **SOS**, ведущая прямо в личку админу с готовым приветствием;
+ - раздел **Cloud VPS** — покупка и управление VPS-серверами через API
+-  облачных провайдеров прямо из бота, начиная с **UpCloud** (подробности
+-  ниже); другие провайдеры (AWS, Azure, Linode, Kamatera и т.д.) показаны
+-  в списке как "скоро";
++  облачных провайдеров прямо из бота: **UpCloud** и **Microsoft Azure**
++  (подробности ниже); остальные провайдеры (AWS, Linode, Kamatera и т.д.)
++  пока показаны в списке как "скоро";
+ - кнопки-заглушки: **Cloud Account**, **Crypt/Decrypt**,
+   **Info** (каждая открывает свой экран с кнопкой "Назад" — функциональность
+   будет добавляться дальше).
+@@ -322,6 +322,52 @@ URL API. Если панель развёрнута под собственны
+ Подключённые аккаунты хранятся в `data/cloud_accounts.json` (список
+ записей на пользователя, тот же принцип, что и `panel_connections.json`).
+ 
++### Microsoft Azure — управление виртуальными машинами
++
++У Azure нет простого входа по логину/паролю для API — вместо этого нужен
++**App Registration с Service Principal** (создаётся один раз в Azure
++Portal → Microsoft Entra ID → App registrations, дальше на вкладке
++подписки роль **Contributor** выдаётся этому приложению). Подключение
++аккаунта в боте — это 4 отдельных шага, по одному значению за раз:
++**Tenant ID**, **Client ID**, **Client Secret** и **Subscription ID**.
++Секрет (Client Secret), как и пароль в других разделах, бот сразу удаляет
++из чата после получения и нигде не хранит в открытом виде дольше, чем
++нужно для проверки подключения.
++
++После подключения доступно управление виртуальными машинами:
++- **список VM** аккаунта со статусом (🟢 running / 🔴 deallocated /
++  🚧 в процессе старта или остановки);
++- по каждой VM — **старт / стоп (deallocate) / перезагрузка / удаление**
++  (удаление снимает саму VM и её собственные сетевой интерфейс, публичный
++  IP и группу безопасности — общие для аккаунта группа ресурсов и сеть не
++  трогаются, чтобы не ломать другие VM) и просмотр деталей: статус,
++  регион, размер, IP, логин;
++- **создание новой VM** пошаговым мастером: регион → размер (VM size) →
++  образ ОС → имя VM → способ входа (пароль или SSH-ключ, как и в UpCloud)
++  → подтверждение. Создание VM в Azure требует сразу нескольких ресурсов
++  (группа ресурсов → сеть/подсеть → публичный IP → группа безопасности
++  (NSG, с открытыми портами 22 и 443) → сетевой интерфейс → сама VM) —
++  бот создаёт их по очереди сам, показывая прогресс на каждом шаге, и
++  переиспользует общую группу ресурсов/сеть для всех VM одного аккаунта
++  в одном регионе, чтобы не плодить лишние сущности. Пароль для входа,
++  если выбран этот способ, генерируется автоматически (12+ символов,
++  все 4 категории символов — того требует сама Azure) и показывается один
++  раз на экране успеха, как и root-пароль у UpCloud;
++- **каталог образов ОС** — небольшой проверенный список (Ubuntu 24.04 LTS,
++  Ubuntu 22.04 LTS, Debian 12), а не полный перебор Azure Marketplace;
++  **список размеров VM** — тоже курируемый шорт-лист (от `Standard_B1s` до
++  `Standard_D4s_v5`), отфильтрованный под то, что реально доступно в
++  выбранном регионе — у Azure их официально больше 200, показывать их все
++  в списке было бы просто неудобно.
++
++Azure Resource Manager — асинхронный API: создание/удаление ресурса или
++включение/выключение VM не происходит мгновенно по ответу на запрос, а
++требует опроса (polling) до тех пор, пока `provisioningState`/статус
++питания не станет финальным. `bot/services/azure_api.py` делает это сам
++и прозрачно для остальных частей бота — тот, кто вызывает
++`azure_create_vm`/`azure_start_vm`/`azure_delete_vm` и т.д., получает
++уже готовый результат, а не промежуточное состояние.
++
+ ## Раздел Arsi WhoIs — инфо об IP и доменах
+ 
+ В главном меню → **🌐 Arsi WhoIs** бот просит прислать IP-адрес или домен и
+@@ -405,7 +451,7 @@ bot/
+     language.py                  # выбор языка интерфейса
+     node.py                      # установка нод по SSH + уведомление админов
+     panel.py                     # список/подключение/управление панелями + уведомление админов
+-    cloud.py                     # провайдеры Cloud VPS (UpCloud) + управление серверами
++    cloud.py                     # провайдеры Cloud VPS (UpCloud, Azure) + управление серверами/VM
+     profile.py                   # раздел Профиль
+   keyboards/                # инлайн-клавиатуры (все принимают lang)
+   services/
+@@ -415,6 +461,7 @@ bot/
+     panel_api.py                  # HTTP-клиенты Marzban/PasarGuard/3X-UI API
+     panel_store.py                # список панелей на пользователя (data/*.json)
+     upcloud_api.py                 # HTTP-клиент UpCloud API (Basic Auth)
++    azure_api.py                   # HTTP-клиент Azure ARM API (Service Principal, OAuth2)
+     cloud_store.py                 # список облачных аккаунтов на пользователя (data/*.json)
+   texts/
+     translations.py                # все переводы (ru/en/tk) в одном месте
+diff --git a/bot/handlers/cloud.py b/bot/handlers/cloud.py
+index 9aea84a..aaf131b 100644
+--- a/bot/handlers/cloud.py
++++ b/bot/handlers/cloud.py
+@@ -11,6 +11,12 @@
+     account_dashboard_keyboard,
+     account_list_keyboard,
+     account_remove_confirm_keyboard,
++    azure_create_auth_method_keyboard,
++    azure_create_cancel_keyboard,
++    azure_create_confirm_keyboard,
++    azure_vm_delete_confirm_keyboard,
++    azure_vm_detail_keyboard,
++    azure_vms_list_keyboard,
+     back_to_server_keyboard,
+     backup_create_confirm_keyboard,
+     backup_delete_confirm_keyboard,
+@@ -41,6 +47,24 @@
+     storage_resize_confirm_keyboard,
+     storage_wizard_cancel_keyboard,
+ )
++from bot.services.azure_api import (
++    AzureAPIError,
++    AzureCredentials,
++    ImageInfo,
++    azure_create_vm,
++    azure_delete_vm,
++    azure_get_account,
++    azure_get_vm,
++    azure_list_available_sizes,
++    azure_list_images,
++    azure_list_locations,
++    azure_list_vms,
++    azure_login,
++    azure_restart_vm,
++    azure_start_vm,
++    azure_stop_vm,
++    generate_azure_password,
++)
+ from bot.services.cloud_store import cloud_store
+ from bot.services.upcloud_api import (
+     UpCloudAPIError,
+@@ -69,6 +93,8 @@
+     upcloud_stop_server,
+ )
+ from bot.states.cloud_setup import (
++    AzureSetupStates,
++    AzureVMCreateStates,
+     CloudDiskStates,
+     CloudPlanChangeStates,
+     CloudServerCreateStates,
+@@ -81,12 +107,22 @@
+ 
+ HOSTNAME_RE = re.compile(r"^[a-zA-Z0-9]([a-zA-Z0-9\-.]{0,251}[a-zA-Z0-9])?$")
+ SSH_PUBLIC_KEY_PREFIXES = ("ssh-rsa ", "ssh-ed25519 ", "ssh-dss ", "ecdsa-sha2-")
++AZURE_VM_NAME_RE = re.compile(r"^(?!\d+$)[a-zA-Z0-9]([a-zA-Z0-9-]{0,62}[a-zA-Z0-9])?$")
+ 
+ 
+ def _is_valid_ssh_public_key(value: str) -> bool:
+     return value.startswith(SSH_PUBLIC_KEY_PREFIXES)
+ 
+ 
++def _azure_creds(account: dict) -> AzureCredentials:
++    return AzureCredentials(
++        tenant_id=account["tenant_id"],
++        client_id=account["client_id"],
++        client_secret=account["client_secret"],
++        subscription_id=account["subscription_id"],
++    )
++
++
+ async def _login(provider: str, username: str, password: str):
+     if provider == "upcloud":
+         return await upcloud_login(username, password)
+@@ -183,6 +219,13 @@ async def cb_add_account(callback: CallbackQuery, state: FSMContext, lang: str)
+     provider = callback.data.split(":", 1)[1]
+     await state.clear()
+     await state.update_data(provider=provider)
++    if provider == "azure":
++        await state.set_state(AzureSetupStates.waiting_tenant_id)
++        await callback.message.edit_text(
++            texts.azure_step_tenant_text(lang), reply_markup=cloud_cancel_keyboard(lang)
++        )
++        await callback.answer()
++        return
+     await state.set_state(CloudSetupStates.waiting_username)
+     await callback.message.edit_text(
+         texts.step_username_text(lang, provider), reply_markup=cloud_cancel_keyboard(lang)
+@@ -199,6 +242,90 @@ async def cb_cancel_setup(callback: CallbackQuery, state: FSMContext, lang: str)
+     await callback.answer()
+ 
+ 
++@router.message(AzureSetupStates.waiting_tenant_id)
++async def process_azure_tenant(message: Message, state: FSMContext, lang: str) -> None:
++    value = message.text.strip() if message.text else ""
++    if not value:
++        await message.answer(texts.azure_empty_field_text(lang), reply_markup=cloud_cancel_keyboard(lang))
++        return
++    await state.update_data(tenant_id=value)
++    await state.set_state(AzureSetupStates.waiting_client_id)
++    await message.answer(texts.azure_step_client_id_text(lang), reply_markup=cloud_cancel_keyboard(lang))
++
++
++@router.message(AzureSetupStates.waiting_client_id)
++async def process_azure_client_id(message: Message, state: FSMContext, lang: str) -> None:
++    value = message.text.strip() if message.text else ""
++    if not value:
++        await message.answer(texts.azure_empty_field_text(lang), reply_markup=cloud_cancel_keyboard(lang))
++        return
++    await state.update_data(client_id=value)
++    await state.set_state(AzureSetupStates.waiting_client_secret)
++    await message.answer(texts.azure_step_client_secret_text(lang), reply_markup=cloud_cancel_keyboard(lang))
++
++
++@router.message(AzureSetupStates.waiting_client_secret)
++async def process_azure_client_secret(message: Message, state: FSMContext, lang: str) -> None:
++    value = message.text or ""
++    try:
++        await message.delete()
++    except Exception:
++        pass
++    if not value:
++        await message.answer(texts.azure_empty_field_text(lang), reply_markup=cloud_cancel_keyboard(lang))
++        return
++    await state.update_data(client_secret=value)
++    await state.set_state(AzureSetupStates.waiting_subscription_id)
++    await message.answer(texts.azure_step_subscription_text(lang), reply_markup=cloud_cancel_keyboard(lang))
++
++
++@router.message(AzureSetupStates.waiting_subscription_id)
++async def process_azure_subscription(message: Message, state: FSMContext, lang: str) -> None:
++    value = message.text.strip() if message.text else ""
++    if not value:
++        await message.answer(texts.azure_empty_field_text(lang), reply_markup=cloud_cancel_keyboard(lang))
++        return
++
++    data = await state.update_data(subscription_id=value)
++    await state.set_state(AzureSetupStates.connecting)
++    status_message = await message.answer(texts.connecting_text(lang))
++
++    creds = AzureCredentials(
++        tenant_id=data["tenant_id"],
++        client_id=data["client_id"],
++        client_secret=data["client_secret"],
++        subscription_id=value,
++    )
++    try:
++        await azure_login(creds)
++    except AzureAPIError as exc:
++        await state.clear()
++        await status_message.edit_text(
++            texts.login_error_text(lang, str(exc), "azure"), reply_markup=cloud_error_keyboard(lang)
++        )
++        return
++    except Exception:  # noqa: BLE001 - surface unexpected errors to the user
++        await state.clear()
++        await status_message.edit_text(
++            texts.login_error_text(lang, "bad_response", "azure"), reply_markup=cloud_error_keyboard(lang)
++        )
++        return
++
++    account_id = await cloud_store.add(
++        message.from_user.id,
++        "azure",
++        tenant_id=data["tenant_id"],
++        client_id=data["client_id"],
++        client_secret=data["client_secret"],
++        subscription_id=value,
++    )
++    await state.clear()
++    await status_message.edit_text(
++        texts.connected_text(lang, "azure"),
++        reply_markup=account_dashboard_keyboard(lang, account_id, "azure"),
++    )
++
++
+ @router.message(CloudSetupStates.waiting_username)
+ async def process_username(message: Message, state: FSMContext, lang: str) -> None:
+     username = message.text.strip() if message.text else ""
+@@ -241,7 +368,9 @@ async def process_password(message: Message, state: FSMContext, lang: str) -> No
+         )
+         return
+ 
+-    account_id = await cloud_store.add(message.from_user.id, data["provider"], data["username"], password)
++    account_id = await cloud_store.add(
++        message.from_user.id, data["provider"], username=data["username"], password=password
++    )
+     await state.clear()
+     await status_message.edit_text(
+         texts.connected_text(lang, data["provider"]),
+@@ -262,6 +391,17 @@ async def cb_view_account(callback: CallbackQuery, state: FSMContext, lang: str)
+         await callback.answer()
+         return
+     await callback.answer()
++    if account["provider"] == "azure":
++        try:
++            info = await azure_get_account(_azure_creds(account))
++        except AzureAPIError as exc:
++            await callback.message.edit_text(texts.action_error_text(lang, str(exc)), reply_markup=cloud_error_keyboard(lang))
++            return
++        await callback.message.edit_text(
++            texts.azure_account_dashboard_text(lang, account, info),
++            reply_markup=account_dashboard_keyboard(lang, account_id, "azure"),
++        )
++        return
+     try:
+         info = await upcloud_get_account(account["username"], account["password"])
+     except UpCloudAPIError as exc:
+@@ -306,9 +446,24 @@ async def cb_account_servers(callback: CallbackQuery, state: FSMContext, lang: s
+         await callback.answer()
+         return
+     await callback.answer()
++    if account["provider"] == "azure":
++        await _show_azure_vms(callback, lang, account, account_id)
++        return
+     await _show_servers(callback, lang, account)
+ 
+ 
++async def _show_azure_vms(callback: CallbackQuery, lang: str, account: dict, account_id: str) -> None:
++    try:
++        vms = await azure_list_vms(_azure_creds(account))
++    except AzureAPIError as exc:
++        await callback.message.edit_text(texts.action_error_text(lang, str(exc)), reply_markup=cloud_error_keyboard(lang))
++        return
++    await callback.message.edit_text(
++        texts.azure_vms_header_text(lang, account, bool(vms)),
++        reply_markup=azure_vms_list_keyboard(lang, account_id, vms),
++    )
++
++
+ # --- Server detail & actions ---
+ 
+ 
+@@ -1455,3 +1610,351 @@ async def cb_ip_remove(callback: CallbackQuery, lang: str) -> None:
+         return
+     await callback.message.edit_text(texts.ip_removed_text(lang), reply_markup=None)
+     await _show_ips(callback, lang, account, account_id, server_uuid)
++
++
++# --- Azure: VM detail & actions ---
++
++
++@router.callback_query(F.data.startswith("azvm:view:"))
++async def cb_azure_vm_view(callback: CallbackQuery, state: FSMContext, lang: str) -> None:
++    await state.clear()
++    _, _, account_id, vm_name = callback.data.split(":", 3)
++    account = await _get_account(callback, lang, account_id)
++    if not account:
++        return
++    await callback.answer()
++    try:
++        vm = await azure_get_vm(_azure_creds(account), vm_name)
++    except AzureAPIError as exc:
++        await callback.message.edit_text(texts.action_error_text(lang, str(exc)), reply_markup=cloud_error_keyboard(lang))
++        return
++    await callback.message.edit_text(
++        texts.azure_vm_detail_text(lang, vm), reply_markup=azure_vm_detail_keyboard(lang, account_id, vm)
++    )
++
++
++async def _run_azure_vm_action(callback: CallbackQuery, lang: str, action, account_id: str, vm_name: str) -> None:
++    account = await _get_account(callback, lang, account_id)
++    if not account:
++        return
++    await callback.answer(texts.azure_vm_action_ok_text(lang))
++    creds = _azure_creds(account)
++    try:
++        await action(creds, vm_name)
++        vm = await azure_get_vm(creds, vm_name)
++    except AzureAPIError as exc:
++        await callback.message.edit_text(texts.action_error_text(lang, str(exc)), reply_markup=cloud_error_keyboard(lang))
++        return
++    await callback.message.edit_text(
++        texts.azure_vm_detail_text(lang, vm), reply_markup=azure_vm_detail_keyboard(lang, account_id, vm)
++    )
++
++
++@router.callback_query(F.data.startswith("azvm:start:"))
++async def cb_azure_vm_start(callback: CallbackQuery, lang: str) -> None:
++    _, _, account_id, vm_name = callback.data.split(":", 3)
++    await _run_azure_vm_action(callback, lang, azure_start_vm, account_id, vm_name)
++
++
++@router.callback_query(F.data.startswith("azvm:stop:"))
++async def cb_azure_vm_stop(callback: CallbackQuery, lang: str) -> None:
++    _, _, account_id, vm_name = callback.data.split(":", 3)
++    await _run_azure_vm_action(callback, lang, azure_stop_vm, account_id, vm_name)
++
++
++@router.callback_query(F.data.startswith("azvm:restart:"))
++async def cb_azure_vm_restart(callback: CallbackQuery, lang: str) -> None:
++    _, _, account_id, vm_name = callback.data.split(":", 3)
++    await _run_azure_vm_action(callback, lang, azure_restart_vm, account_id, vm_name)
++
++
++@router.callback_query(F.data.startswith("azvm:delask:"))
++async def cb_azure_vm_delete_ask(callback: CallbackQuery, lang: str) -> None:
++    _, _, account_id, vm_name = callback.data.split(":", 3)
++    account = await _get_account(callback, lang, account_id)
++    if not account:
++        return
++    try:
++        vm = await azure_get_vm(_azure_creds(account), vm_name)
++    except AzureAPIError as exc:
++        await callback.answer()
++        await callback.message.edit_text(texts.action_error_text(lang, str(exc)), reply_markup=cloud_error_keyboard(lang))
++        return
++    await callback.answer()
++    await callback.message.edit_text(
++        texts.azure_vm_delete_confirm_text(lang, vm),
++        reply_markup=azure_vm_delete_confirm_keyboard(lang, account_id, vm_name),
++    )
++
++
++@router.callback_query(F.data.startswith("azvm:del:"))
++async def cb_azure_vm_delete(callback: CallbackQuery, lang: str) -> None:
++    _, _, account_id, vm_name = callback.data.split(":", 3)
++    account = await _get_account(callback, lang, account_id)
++    if not account:
++        return
++    await callback.answer()
++    try:
++        await azure_delete_vm(_azure_creds(account), vm_name)
++    except AzureAPIError as exc:
++        await callback.message.edit_text(texts.action_error_text(lang, str(exc)), reply_markup=cloud_error_keyboard(lang))
++        return
++    await callback.message.edit_text(texts.azure_vm_deleted_text(lang), reply_markup=None)
++    await _show_azure_vms(callback, lang, account, account_id)
++
++
++# --- Azure: VM creation ---
++
++
++def _azure_location_options(locations: list[dict]) -> list[tuple[str, str]]:
++    return [(loc["display_name"], f"azcreate:loc:{i}") for i, loc in enumerate(locations)]
++
++
++def _azure_format_memory(memory_mb: int) -> str:
++    if memory_mb and memory_mb % 1024 == 0:
++        return f"{memory_mb // 1024} GB"
++    return f"{memory_mb} MB"
++
++
++def _azure_size_options(sizes: list[dict]) -> list[tuple[str, str]]:
++    return [
++        (f"{s['name']} ({s['cores']} CPU / {_azure_format_memory(s['memory_mb'])})", f"azcreate:size:{i}")
++        for i, s in enumerate(sizes)
++    ]
++
++
++def _azure_image_options(images: list[dict]) -> list[tuple[str, str]]:
++    return [(img["title"], f"azcreate:img:{i}") for i, img in enumerate(images)]
++
++
++@router.callback_query(F.data.startswith("azvm:add:"))
++async def cb_azure_vm_add(callback: CallbackQuery, state: FSMContext, lang: str) -> None:
++    account_id = callback.data.split(":", 2)[2]
++    account = await _get_account(callback, lang, account_id)
++    if not account:
++        return
++    await callback.answer()
++    try:
++        locations = await azure_list_locations(_azure_creds(account))
++    except AzureAPIError as exc:
++        await callback.message.edit_text(texts.action_error_text(lang, str(exc)), reply_markup=cloud_error_keyboard(lang))
++        return
++
++    await state.clear()
++    location_dicts = [{"name": loc.name, "display_name": loc.display_name} for loc in locations]
++    await state.update_data(account_id=account_id, locations=location_dicts)
++    await state.set_state(AzureVMCreateStates.choosing_location)
++    await _render_create_page(
++        callback, lang, texts.azure_create_choose_location_text, _azure_location_options(location_dicts),
++        0, "azcreate:locpage", "azcreate:cancel",
++    )
++
++
++@router.callback_query(F.data.startswith("azcreate:locpage:"), AzureVMCreateStates.choosing_location)
++async def cb_azure_create_location_page(callback: CallbackQuery, state: FSMContext, lang: str) -> None:
++    page = int(callback.data.split(":", 2)[2])
++    data = await state.get_data()
++    await callback.answer()
++    await _render_create_page(
++        callback, lang, texts.azure_create_choose_location_text, _azure_location_options(data["locations"]),
++        page, "azcreate:locpage", "azcreate:cancel",
++    )
++
++
++@router.callback_query(F.data == "azcreate:cancel", AzureVMCreateStates)
++async def cb_azure_create_cancel(callback: CallbackQuery, state: FSMContext, lang: str) -> None:
++    data = await state.get_data()
++    account_id = data.get("account_id")
++    await state.clear()
++    account = await cloud_store.get(callback.from_user.id, account_id) if account_id else None
++    await callback.answer()
++    if not account:
++        await _show_provider_list(callback, lang)
++        return
++    await _show_azure_vms(callback, lang, account, account_id)
++
++
++@router.callback_query(F.data.startswith("azcreate:loc:"), AzureVMCreateStates.choosing_location)
++async def cb_azure_create_pick_location(callback: CallbackQuery, state: FSMContext, lang: str) -> None:
++    index = int(callback.data.split(":", 2)[2])
++    data = await state.get_data()
++    location = data["locations"][index]
++    account = await cloud_store.get(callback.from_user.id, data["account_id"])
++    if not account:
++        await state.clear()
++        await _show_provider_list(callback, lang)
++        await callback.answer()
++        return
++    await callback.answer()
++    try:
++        sizes = await azure_list_available_sizes(_azure_creds(account), location["name"])
++    except AzureAPIError as exc:
++        await callback.message.edit_text(texts.action_error_text(lang, str(exc)), reply_markup=cloud_error_keyboard(lang))
++        return
++
++    size_dicts = [{"name": s.name, "cores": s.cores, "memory_mb": s.memory_mb} for s in sizes]
++    await state.update_data(location=location["name"], location_display=location["display_name"], sizes=size_dicts)
++    await state.set_state(AzureVMCreateStates.choosing_size)
++    await _render_create_page(
++        callback, lang, texts.azure_create_choose_size_text, _azure_size_options(size_dicts),
++        0, "azcreate:sizepage", "azcreate:cancel",
++    )
++
++
++@router.callback_query(F.data.startswith("azcreate:sizepage:"), AzureVMCreateStates.choosing_size)
++async def cb_azure_create_size_page(callback: CallbackQuery, state: FSMContext, lang: str) -> None:
++    page = int(callback.data.split(":", 2)[2])
++    data = await state.get_data()
++    await callback.answer()
++    await _render_create_page(
++        callback, lang, texts.azure_create_choose_size_text, _azure_size_options(data["sizes"]),
++        page, "azcreate:sizepage", "azcreate:cancel",
++    )
++
++
++@router.callback_query(F.data.startswith("azcreate:size:"), AzureVMCreateStates.choosing_size)
++async def cb_azure_create_pick_size(callback: CallbackQuery, state: FSMContext, lang: str) -> None:
++    index = int(callback.data.split(":", 2)[2])
++    data = await state.get_data()
++    size = data["sizes"][index]
++    images = azure_list_images()
++    image_dicts = [
++        {"key": img.key, "title": img.title, "publisher": img.publisher, "offer": img.offer, "sku": img.sku, "version": img.version}
++        for img in images
++    ]
++    await state.update_data(vm_size=size["name"], images=image_dicts)
++    await state.set_state(AzureVMCreateStates.choosing_image)
++    await callback.answer()
++    await _render_create_page(
++        callback, lang, texts.azure_create_choose_image_text, _azure_image_options(image_dicts),
++        0, "azcreate:imgpage", "azcreate:cancel",
++    )
++
++
++@router.callback_query(F.data.startswith("azcreate:imgpage:"), AzureVMCreateStates.choosing_image)
++async def cb_azure_create_image_page(callback: CallbackQuery, state: FSMContext, lang: str) -> None:
++    page = int(callback.data.split(":", 2)[2])
++    data = await state.get_data()
++    await callback.answer()
++    await _render_create_page(
++        callback, lang, texts.azure_create_choose_image_text, _azure_image_options(data["images"]),
++        page, "azcreate:imgpage", "azcreate:cancel",
++    )
++
++
++@router.callback_query(F.data.startswith("azcreate:img:"), AzureVMCreateStates.choosing_image)
++async def cb_azure_create_pick_image(callback: CallbackQuery, state: FSMContext, lang: str) -> None:
++    index = int(callback.data.split(":", 2)[2])
++    data = await state.get_data()
++    image = data["images"][index]
++    await state.update_data(image_key=image["key"])
++    await state.set_state(AzureVMCreateStates.waiting_hostname)
++    await callback.message.edit_text(
++        texts.azure_create_waiting_hostname_text(lang), reply_markup=azure_create_cancel_keyboard(lang)
++    )
++    await callback.answer()
++
++
++@router.message(AzureVMCreateStates.waiting_hostname)
++async def process_azure_hostname(message: Message, state: FSMContext, lang: str) -> None:
++    hostname = message.text.strip() if message.text else ""
++    if not hostname or not AZURE_VM_NAME_RE.match(hostname) or len(hostname) > 64:
++        await message.answer(texts.azure_create_invalid_hostname_text(lang), reply_markup=azure_create_cancel_keyboard(lang))
++        return
++
++    await state.update_data(hostname=hostname)
++    await state.set_state(AzureVMCreateStates.choosing_auth_method)
++    await message.answer(
++        texts.azure_create_choose_auth_method_text(lang), reply_markup=azure_create_auth_method_keyboard(lang)
++    )
++
++
++@router.callback_query(F.data == "azcreate:auth:password", AzureVMCreateStates.choosing_auth_method)
++async def cb_azure_create_choose_password_auth(callback: CallbackQuery, state: FSMContext, lang: str) -> None:
++    await state.update_data(ssh_public_key=None)
++    await _show_azure_create_confirmation(callback.message, state, lang)
++    await callback.answer()
++
++
++@router.callback_query(F.data == "azcreate:auth:key", AzureVMCreateStates.choosing_auth_method)
++async def cb_azure_create_choose_key_auth(callback: CallbackQuery, state: FSMContext, lang: str) -> None:
++    await state.set_state(AzureVMCreateStates.waiting_ssh_key)
++    await callback.message.edit_text(
++        texts.azure_create_waiting_ssh_key_text(lang), reply_markup=azure_create_cancel_keyboard(lang)
++    )
++    await callback.answer()
++
++
++@router.message(AzureVMCreateStates.waiting_ssh_key)
++async def process_azure_ssh_public_key(message: Message, state: FSMContext, lang: str) -> None:
++    public_key = message.text.strip() if message.text else ""
++    if not _is_valid_ssh_public_key(public_key):
++        await message.answer(texts.azure_create_invalid_ssh_key_text(lang), reply_markup=azure_create_cancel_keyboard(lang))
++        return
++
++    await state.update_data(ssh_public_key=public_key)
++    await _show_azure_create_confirmation(message, state, lang)
++
++
++async def _show_azure_create_confirmation(target_message: Message, state: FSMContext, lang: str) -> None:
++    data = await state.get_data()
++    await state.set_state(AzureVMCreateStates.confirming)
++    image = next(img for img in data["images"] if img["key"] == data["image_key"])
++    auth_method = "key" if data.get("ssh_public_key") else "password"
++    await target_message.answer(
++        texts.azure_create_confirm_text(
++            lang, data["hostname"], data["location_display"], data["vm_size"], image["title"], auth_method
++        ),
++        reply_markup=azure_create_confirm_keyboard(lang),
++    )
++
++
++@router.callback_query(F.data == "azcreate:confirm", AzureVMCreateStates.confirming)
++async def cb_azure_create_confirm(callback: CallbackQuery, state: FSMContext, lang: str) -> None:
++    data = await state.get_data()
++    account = await cloud_store.get(callback.from_user.id, data["account_id"])
++    if not account:
++        await state.clear()
++        await _show_provider_list(callback, lang)
++        await callback.answer()
++        return
++    await callback.answer()
++
++    status_message = callback.message
++    await status_message.edit_text(texts.azure_progress_text(lang, "resource_group"))
++
++    async def progress(step: str) -> None:
++        try:
++            await status_message.edit_text(texts.azure_progress_text(lang, step))
++        except Exception:
++            pass
++
++    image_dict = next(img for img in data["images"] if img["key"] == data["image_key"])
++    image = ImageInfo(
++        key=image_dict["key"], title=image_dict["title"], publisher=image_dict["publisher"],
++        offer=image_dict["offer"], sku=image_dict["sku"], version=image_dict["version"],
++    )
++    ssh_public_key = data.get("ssh_public_key")
++    admin_password = None if ssh_public_key else generate_azure_password()
++
++    try:
++        vm = await azure_create_vm(
++            _azure_creds(account),
++            location=data["location"],
++            vm_size=data["vm_size"],
++            image=image,
++            vm_name=data["hostname"],
++            admin_password=admin_password,
++            ssh_public_key=ssh_public_key,
++            progress=progress,
++        )
++    except AzureAPIError as exc:
++        await state.clear()
++        await status_message.edit_text(texts.action_error_text(lang, str(exc)), reply_markup=cloud_error_keyboard(lang))
++        return
++
++    await state.clear()
++    await status_message.edit_text(
++        texts.azure_create_success_text(lang, vm, ssh_key_used=bool(ssh_public_key)),
++        reply_markup=azure_vm_detail_keyboard(lang, data["account_id"], vm),
++    )
+diff --git a/bot/keyboards/cloud.py b/bot/keyboards/cloud.py
+index c773fb6..1bc7a06 100644
+--- a/bot/keyboards/cloud.py
++++ b/bot/keyboards/cloud.py
+@@ -5,6 +5,7 @@
+     ACTIVE_PROVIDERS,
+     PROVIDERS,
+     account_list_label,
++    azure_vm_list_label,
+     backup_list_label,
+     ip_list_label,
+     server_list_label,
+@@ -380,3 +381,65 @@ def ip_remove_confirm_keyboard(lang: str, account_id: str, server_uuid: str, ind
+     builder.button(text=t(lang, "btn_cloud_ips_back"), callback_data=f"cip:list:{account_id}:{server_uuid}")
+     builder.adjust(1, 1)
+     return builder.as_markup()
++
++
++# --- Azure ---
++
++
++def azure_vms_list_keyboard(lang: str, account_id: str, vms: list) -> InlineKeyboardMarkup:
++    builder = InlineKeyboardBuilder()
++    rows: list[int] = []
++    for vm in vms:
++        builder.button(text=azure_vm_list_label(vm), callback_data=f"azvm:view:{account_id}:{vm.name}")
++        rows.append(1)
++    builder.button(text=t(lang, "btn_cloud_server_add"), callback_data=f"azvm:add:{account_id}")
++    rows.append(1)
++    builder.button(text=t(lang, "btn_cloud_account_dashboard"), callback_data=f"cview:{account_id}")
++    rows.append(1)
++    builder.adjust(*rows)
++    return builder.as_markup()
++
++
++def azure_vm_detail_keyboard(lang: str, account_id: str, vm) -> InlineKeyboardMarkup:
++    builder = InlineKeyboardBuilder()
++    if vm.power_state == "deallocated":
++        builder.button(text=t(lang, "btn_cloud_server_start"), callback_data=f"azvm:start:{account_id}:{vm.name}")
++    else:
++        builder.button(text=t(lang, "btn_cloud_server_stop"), callback_data=f"azvm:stop:{account_id}:{vm.name}")
++    builder.button(text=t(lang, "btn_cloud_server_restart"), callback_data=f"azvm:restart:{account_id}:{vm.name}")
++    builder.button(text=t(lang, "btn_cloud_server_delete"), callback_data=f"azvm:delask:{account_id}:{vm.name}")
++    builder.button(text=t(lang, "btn_cloud_servers_list"), callback_data=f"azvm:list:{account_id}")
++    builder.adjust(2, 1, 1)
++    return builder.as_markup()
++
++
++def azure_vm_delete_confirm_keyboard(lang: str, account_id: str, vm_name: str) -> InlineKeyboardMarkup:
++    builder = InlineKeyboardBuilder()
++    builder.button(text=t(lang, "btn_cloud_server_delete_confirm"), callback_data=f"azvm:del:{account_id}:{vm_name}")
++    builder.button(text=t(lang, "btn_cloud_servers_list"), callback_data=f"azvm:list:{account_id}")
++    builder.adjust(1, 1)
++    return builder.as_markup()
++
++
++def azure_create_cancel_keyboard(lang: str) -> InlineKeyboardMarkup:
++    builder = InlineKeyboardBuilder()
++    builder.button(text=t(lang, "btn_cloud_cancel"), callback_data="azcreate:cancel")
++    builder.adjust(1)
++    return builder.as_markup()
++
++
++def azure_create_auth_method_keyboard(lang: str) -> InlineKeyboardMarkup:
++    builder = InlineKeyboardBuilder()
++    builder.button(text=t(lang, "btn_cloud_auth_password"), callback_data="azcreate:auth:password")
++    builder.button(text=t(lang, "btn_cloud_auth_key"), callback_data="azcreate:auth:key")
++    builder.button(text=t(lang, "btn_cloud_cancel"), callback_data="azcreate:cancel")
++    builder.adjust(1, 1, 1)
++    return builder.as_markup()
++
++
++def azure_create_confirm_keyboard(lang: str) -> InlineKeyboardMarkup:
++    builder = InlineKeyboardBuilder()
++    builder.button(text=t(lang, "btn_cloud_create_confirm"), callback_data="azcreate:confirm")
++    builder.button(text=t(lang, "btn_cloud_cancel"), callback_data="azcreate:cancel")
++    builder.adjust(1, 1)
++    return builder.as_markup()
+diff --git a/bot/services/azure_api.py b/bot/services/azure_api.py
+new file mode 100644
+index 0000000..39d8843
+--- /dev/null
++++ b/bot/services/azure_api.py
+@@ -0,0 +1,641 @@
++from __future__ import annotations
++
++import asyncio
++import json
++import secrets
++import string
++from dataclasses import dataclass, field
++from typing import Awaitable, Callable
++
++import aiohttp
++
++REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=30)
++
++AZURE_LOGIN_BASE = "https://login.microsoftonline.com"
++AZURE_MANAGEMENT_BASE = "https://management.azure.com"
++AZURE_SCOPE = "https://management.azure.com/.default"
++
++# Every VM this bot creates lives in one fixed resource group per Azure
++# account, with one shared VNet/subnet per (account, location) — this keeps
++# delete simple (VM + its own NIC/public IP/NSG go away; the RG/VNet are
++# reused by the next VM) without needing a resource-group picker in the UI.
++RESOURCE_GROUP_NAME = "arsicloudbot-rg"
++
++API_VERSION_SUBS = "2022-12-01"
++API_VERSION_RG = "2022-09-01"
++API_VERSION_NETWORK = "2023-09-01"
++API_VERSION_COMPUTE = "2023-09-01"
++
++POLL_INTERVAL = 3
++POLL_TIMEOUT = 240
++
++ADMIN_USERNAME = "azureuser"
++
++ProgressCallback = Callable[[str], Awaitable[None]]
++
++
++class AzureAPIError(Exception):
++    """Raised when an Azure ARM API call fails.
++
++    ``str(exc)`` is one of a small set of reason codes ('wrong_credentials',
++    'connect_failed', 'bad_response', 'timeout', 'not_found'), or
++    'detail:<msg>' carrying Azure's own error message — the texts layer
++    translates these into a human message, so it's always safe to show
++    directly.
++    """
++
++
++@dataclass
++class AzureCredentials:
++    tenant_id: str
++    client_id: str
++    client_secret: str
++    subscription_id: str
++    # Overridable only so fake-server tests can point both endpoints
++    # elsewhere — real usage always talks to the real Azure endpoints.
++    management_base: str = AZURE_MANAGEMENT_BASE
++    login_base: str = AZURE_LOGIN_BASE
++
++
++@dataclass
++class AccountInfo:
++    subscription_id: str
++    display_name: str
++    state: str = "Enabled"
++
++
++@dataclass
++class LocationInfo:
++    name: str
++    display_name: str
++
++
++@dataclass
++class VmSizeInfo:
++    name: str
++    cores: int
++    memory_mb: int
++
++
++@dataclass
++class ImageInfo:
++    key: str
++    title: str
++    publisher: str
++    offer: str
++    sku: str
++    version: str = "latest"
++
++
++@dataclass
++class VMInfo:
++    name: str
++    location: str
++    vm_size: str
++    power_state: str  # "running" | "deallocated" | "stopped" | "starting" | "stopping" | "unknown"
++    public_ip: str | None = None
++    admin_username: str = ADMIN_USERNAME
++    admin_password: str | None = None  # only set right after creation
++
++
++# A short, static catalog rather than crawling the full Marketplace API
++# (which needs several extra authenticated calls per publisher/offer/sku) —
++# these are well-known, stable image references that work in every region.
++CURATED_IMAGES: list[ImageInfo] = [
++    ImageInfo("ubuntu2404", "Ubuntu Server 24.04 LTS", "Canonical", "ubuntu-24_04-lts", "server"),
++    ImageInfo("ubuntu2204", "Ubuntu Server 22.04 LTS", "Canonical", "0001-com-ubuntu-server-jammy", "22_04-lts-gen2"),
++    ImageInfo("debian12", "Debian 12", "Debian", "debian-12", "12-gen2"),
++]
++
++# A curated shortlist rather than every VM size Azure returns (200+,
++# unusable in a paginated bot menu) — filtered against what's actually
++# available in the chosen location before being shown.
++CURATED_SIZES = [
++    "Standard_B1s",
++    "Standard_B1ms",
++    "Standard_B2s",
++    "Standard_B2ms",
++    "Standard_D2s_v5",
++    "Standard_D4s_v5",
++]
++
++
++def generate_azure_password(length: int = 16) -> str:
++    """Generates a password meeting Azure's Linux VM complexity rule (12-72
++    chars, at least 3 of lower/upper/digit/special)."""
++    length = max(length, 12)
++    specials = "!@#$%^&*()-_=+"
++    required = [
++        secrets.choice(string.ascii_lowercase),
++        secrets.choice(string.ascii_uppercase),
++        secrets.choice(string.digits),
++        secrets.choice(specials),
++    ]
++    pool = string.ascii_lowercase + string.ascii_uppercase + string.digits + specials
++    chars = required + [secrets.choice(pool) for _ in range(length - len(required))]
++    secrets.SystemRandom().shuffle(chars)
++    return "".join(chars)
++
++
++def _connector() -> aiohttp.TCPConnector:
++    return aiohttp.TCPConnector(ssl=True)
++
++
++async def _get_token(creds: AzureCredentials) -> str:
++    url = f"{creds.login_base.rstrip('/')}/{creds.tenant_id}/oauth2/v2.0/token"
++    data = {
++        "grant_type": "client_credentials",
++        "client_id": creds.client_id,
++        "client_secret": creds.client_secret,
++        "scope": AZURE_SCOPE,
++    }
++    try:
++        async with aiohttp.ClientSession(connector=_connector(), timeout=REQUEST_TIMEOUT) as session:
++            async with session.post(url, data=data) as resp:
++                try:
++                    payload = await resp.json(content_type=None)
++                except (json.JSONDecodeError, aiohttp.ContentTypeError):
++                    payload = None
++                if resp.status in (400, 401):
++                    raise AzureAPIError("wrong_credentials")
++                if resp.status >= 400:
++                    raise AzureAPIError("bad_response")
++                token = (payload or {}).get("access_token")
++                if not token:
++                    raise AzureAPIError("bad_response")
++                return token
++    except (aiohttp.ClientError, TimeoutError) as exc:
++        raise AzureAPIError("connect_failed") from exc
++
++
++def _extract_detail(payload: object) -> str | None:
++    if not isinstance(payload, dict):
++        return None
++    error = payload.get("error")
++    if isinstance(error, dict):
++        msg = error.get("message")
++        if isinstance(msg, str) and msg:
++            return msg
++    return None
++
++
++async def _request(
++    method: str,
++    path: str,
++    creds: AzureCredentials,
++    *,
++    json_body: dict | None = None,
++    params: dict | None = None,
++) -> tuple[int, object]:
++    token = await _get_token(creds)
++    url = f"{creds.management_base.rstrip('/')}{path}"
++    headers = {"Authorization": f"Bearer {token}"}
++    try:
++        async with aiohttp.ClientSession(
++            connector=_connector(), timeout=REQUEST_TIMEOUT, headers=headers
++        ) as session:
++            async with session.request(method, url, json=json_body, params=params) as resp:
++                try:
++                    payload = await resp.json(content_type=None)
++                except (json.JSONDecodeError, aiohttp.ContentTypeError):
++                    payload = None
++                if resp.status == 401:
++                    raise AzureAPIError("wrong_credentials")
++                if resp.status == 404:
++                    return resp.status, payload
++                if resp.status >= 400:
++                    detail = _extract_detail(payload)
++                    if detail:
++                        raise AzureAPIError(f"detail:{detail}")
++                    raise AzureAPIError("bad_response")
++                return resp.status, payload
++    except (aiohttp.ClientError, TimeoutError) as exc:
++        raise AzureAPIError("connect_failed") from exc
++
++
++async def _poll_provisioning_state(
++    path: str, creds: AzureCredentials, *, params: dict | None = None,
++    timeout: int | None = None, interval: int | None = None,
++) -> dict:
++    """ARM resource PUTs are asynchronous — the initial response reflects
++    the *desired* state, not the actual one yet. Polls the resource's own
++    GET until ``properties.provisioningState`` reaches a terminal value.
++
++    ``timeout``/``interval`` read the module-level POLL_TIMEOUT/POLL_INTERVAL
++    at call time (not as bound defaults) so tests can speed them up by
++    patching the module attributes after import."""
++    timeout = POLL_TIMEOUT if timeout is None else timeout
++    interval = POLL_INTERVAL if interval is None else interval
++    elapsed = 0
++    while True:
++        _, payload = await _request("GET", path, creds, params=params)
++        state = (payload or {}).get("properties", {}).get("provisioningState") if isinstance(payload, dict) else None
++        if state == "Succeeded":
++            return payload
++        if state in ("Failed", "Canceled"):
++            raise AzureAPIError("detail:provisioning failed")
++        if elapsed >= timeout:
++            raise AzureAPIError("timeout")
++        await asyncio.sleep(interval)
++        elapsed += interval
++
++
++async def _poll_deleted(
++    path: str, creds: AzureCredentials, *, params: dict | None = None,
++    timeout: int | None = None, interval: int | None = None,
++) -> None:
++    timeout = POLL_TIMEOUT if timeout is None else timeout
++    interval = POLL_INTERVAL if interval is None else interval
++    elapsed = 0
++    while True:
++        status, _ = await _request("GET", path, creds, params=params)
++        if status == 404:
++            return
++        if elapsed >= timeout:
++            raise AzureAPIError("timeout")
++        await asyncio.sleep(interval)
++        elapsed += interval
++
++
++# --- Account ---
++
++
++def _rg_path(creds: AzureCredentials) -> str:
++    return f"/subscriptions/{creds.subscription_id}/resourceGroups/{RESOURCE_GROUP_NAME}"
++
++
++async def azure_login(creds: AzureCredentials) -> AccountInfo:
++    """Validates credentials and returns the subscription snapshot — a
++    wrong tenant/client/secret raises AzureAPIError("wrong_credentials")
++    from the token call, and a subscription id the app has no access to
++    raises the same from the subscription lookup."""
++    return await azure_get_account(creds)
++
++
++async def azure_get_account(creds: AzureCredentials) -> AccountInfo:
++    path = f"/subscriptions/{creds.subscription_id}"
++    status, payload = await _request("GET", path, creds, params={"api-version": API_VERSION_SUBS})
++    if status == 404:
++        raise AzureAPIError("wrong_credentials")
++    payload = payload or {}
++    return AccountInfo(
++        subscription_id=payload.get("subscriptionId", creds.subscription_id),
++        display_name=payload.get("displayName", ""),
++        state=payload.get("state", "Enabled"),
++    )
++
++
++# --- Catalog: locations, sizes, images ---
++
++
++async def azure_list_locations(creds: AzureCredentials) -> list[LocationInfo]:
++    path = f"/subscriptions/{creds.subscription_id}/locations"
++    _, payload = await _request("GET", path, creds, params={"api-version": API_VERSION_SUBS})
++    entries = (payload or {}).get("value", [])
++    return [
++        LocationInfo(name=item.get("name", ""), display_name=item.get("displayName", item.get("name", "")))
++        for item in entries
++        if isinstance(item, dict) and item.get("metadata", {}).get("regionType", "Physical") == "Physical"
++    ]
++
++
++async def azure_list_available_sizes(creds: AzureCredentials, location: str) -> list[VmSizeInfo]:
++    path = f"/subscriptions/{creds.subscription_id}/providers/Microsoft.Compute/locations/{location}/vmSizes"
++    _, payload = await _request("GET", path, creds, params={"api-version": API_VERSION_COMPUTE})
++    entries = (payload or {}).get("value", [])
++    by_name = {item.get("name"): item for item in entries if isinstance(item, dict)}
++    result = []
++    for name in CURATED_SIZES:
++        item = by_name.get(name)
++        if item:
++            result.append(
++                VmSizeInfo(
++                    name=name,
++                    cores=int(item.get("numberOfCores", 0) or 0),
++                    memory_mb=int(item.get("memoryInMB", 0) or 0),
++                )
++            )
++    return result
++
++
++def azure_list_images() -> list[ImageInfo]:
++    return list(CURATED_IMAGES)
++
++
++# --- Networking building blocks (idempotent "ensure"/"create" helpers) ---
++
++
++async def azure_ensure_resource_group(creds: AzureCredentials, location: str) -> None:
++    await _request(
++        "PUT", _rg_path(creds), creds,
++        json_body={"location": location}, params={"api-version": API_VERSION_RG},
++    )
++
++
++def _vnet_name(location: str) -> str:
++    return f"arsicloud-vnet-{location}"
++
++
++def _vnet_path(creds: AzureCredentials, location: str) -> str:
++    return f"{_rg_path(creds)}/providers/Microsoft.Network/virtualNetworks/{_vnet_name(location)}"
++
++
++async def azure_ensure_network(creds: AzureCredentials, location: str) -> str:
++    """Creates the shared VNet+subnet for this (account, location) if it
++    doesn't already exist, returning the subnet's resource id."""
++    path = _vnet_path(creds, location)
++    status, payload = await _request("GET", path, creds, params={"api-version": API_VERSION_NETWORK})
++    if status == 200:
++        subnets = (payload or {}).get("properties", {}).get("subnets", [])
++        if subnets:
++            return subnets[0]["id"]
++
++    body = {
++        "location": location,
++        "properties": {
++            "addressSpace": {"addressPrefixes": ["10.10.0.0/16"]},
++            "subnets": [{"name": "default", "properties": {"addressPrefix": "10.10.1.0/24"}}],
++        },
++    }
++    await _request("PUT", path, creds, json_body=body, params={"api-version": API_VERSION_NETWORK})
++    final = await _poll_provisioning_state(path, creds, params={"api-version": API_VERSION_NETWORK})
++    return final["properties"]["subnets"][0]["id"]
++
++
++def _pip_name(vm_name: str) -> str:
++    return f"{vm_name}-pip"
++
++
++def _pip_path(creds: AzureCredentials, vm_name: str) -> str:
++    return f"{_rg_path(creds)}/providers/Microsoft.Network/publicIPAddresses/{_pip_name(vm_name)}"
++
++
++async def azure_create_public_ip(creds: AzureCredentials, vm_name: str, location: str) -> tuple[str, str | None]:
++    path = _pip_path(creds, vm_name)
++    body = {
++        "location": location,
++        "sku": {"name": "Standard"},
++        # Static (not Dynamic) so the address is known right after creation,
++        # instead of only once a running VM's NIC picks it up.
++        "properties": {"publicIPAllocationMethod": "Static"},
++    }
++    await _request("PUT", path, creds, json_body=body, params={"api-version": API_VERSION_NETWORK})
++    final = await _poll_provisioning_state(path, creds, params={"api-version": API_VERSION_NETWORK})
++    return final["id"], final.get("properties", {}).get("ipAddress")
++
++
++def _nsg_name(vm_name: str) -> str:
++    return f"{vm_name}-nsg"
++
++
++def _nsg_path(creds: AzureCredentials, vm_name: str) -> str:
++    return f"{_rg_path(creds)}/providers/Microsoft.Network/networkSecurityGroups/{_nsg_name(vm_name)}"
++
++
++async def azure_create_nsg(creds: AzureCredentials, vm_name: str, location: str) -> str:
++    path = _nsg_path(creds, vm_name)
++    body = {
++        "location": location,
++        "properties": {
++            "securityRules": [
++                {
++                    "name": "AllowSSH",
++                    "properties": {
++                        "priority": 1000, "direction": "Inbound", "access": "Allow", "protocol": "Tcp",
++                        "sourcePortRange": "*", "destinationPortRange": "22",
++                        "sourceAddressPrefix": "*", "destinationAddressPrefix": "*",
++                    },
++                },
++                {
++                    "name": "AllowHTTPS",
++                    "properties": {
++                        "priority": 1010, "direction": "Inbound", "access": "Allow", "protocol": "Tcp",
++                        "sourcePortRange": "*", "destinationPortRange": "443",
++                        "sourceAddressPrefix": "*", "destinationAddressPrefix": "*",
++                    },
++                },
++            ]
++        },
++    }
++    await _request("PUT", path, creds, json_body=body, params={"api-version": API_VERSION_NETWORK})
++    final = await _poll_provisioning_state(path, creds, params={"api-version": API_VERSION_NETWORK})
++    return final["id"]
++
++
++def _nic_name(vm_name: str) -> str:
++    return f"{vm_name}-nic"
++
++
++def _nic_path(creds: AzureCredentials, vm_name: str) -> str:
++    return f"{_rg_path(creds)}/providers/Microsoft.Network/networkInterfaces/{_nic_name(vm_name)}"
++
++
++async def azure_create_nic(
++    creds: AzureCredentials, vm_name: str, location: str, subnet_id: str, pip_id: str, nsg_id: str
++) -> str:
++    path = _nic_path(creds, vm_name)
++    body = {
++        "location": location,
++        "properties": {
++            "ipConfigurations": [
++                {
++                    "name": "ipconfig1",
++                    "properties": {
++                        "subnet": {"id": subnet_id},
++                        "publicIPAddress": {"id": pip_id},
++                        "privateIPAllocationMethod": "Dynamic",
++                    },
++                }
++            ],
++            "networkSecurityGroup": {"id": nsg_id},
++        },
++    }
++    await _request("PUT", path, creds, json_body=body, params={"api-version": API_VERSION_NETWORK})
++    final = await _poll_provisioning_state(path, creds, params={"api-version": API_VERSION_NETWORK})
++    return final["id"]
++
++
++# --- Virtual machines ---
++
++
++def _vm_path(creds: AzureCredentials, vm_name: str) -> str:
++    return f"{_rg_path(creds)}/providers/Microsoft.Compute/virtualMachines/{vm_name}"
++
++
++async def azure_create_vm(
++    creds: AzureCredentials,
++    *,
++    location: str,
++    vm_size: str,
++    image: ImageInfo,
++    vm_name: str,
++    admin_password: str | None = None,
++    ssh_public_key: str | None = None,
++    progress: ProgressCallback | None = None,
++) -> VMInfo:
++    async def tick(step: str) -> None:
++        if progress:
++            await progress(step)
++
++    await tick("resource_group")
++    await azure_ensure_resource_group(creds, location)
++
++    await tick("network")
++    subnet_id = await azure_ensure_network(creds, location)
++
++    await tick("public_ip")
++    pip_id, pip_address = await azure_create_public_ip(creds, vm_name, location)
++
++    await tick("nsg")
++    nsg_id = await azure_create_nsg(creds, vm_name, location)
++
++    await tick("nic")
++    nic_id = await azure_create_nic(creds, vm_name, location, subnet_id, pip_id, nsg_id)
++
++    await tick("vm")
++    os_profile: dict = {"computerName": vm_name, "adminUsername": ADMIN_USERNAME}
++    if ssh_public_key:
++        os_profile["linuxConfiguration"] = {
++            "disablePasswordAuthentication": True,
++            "ssh": {
++                "publicKeys": [
++                    {"path": f"/home/{ADMIN_USERNAME}/.ssh/authorized_keys", "keyData": ssh_public_key}
++                ]
++            },
++        }
++    else:
++        os_profile["adminPassword"] = admin_password
++
++    body = {
++        "location": location,
++        "properties": {
++            "hardwareProfile": {"vmSize": vm_size},
++            "storageProfile": {
++                "imageReference": {
++                    "publisher": image.publisher,
++                    "offer": image.offer,
++                    "sku": image.sku,
++                    "version": image.version,
++                },
++                "osDisk": {"createOption": "FromImage", "managedDisk": {"storageAccountType": "Standard_LRS"}},
++            },
++            "osProfile": os_profile,
++            "networkProfile": {"networkInterfaces": [{"id": nic_id}]},
++        },
++    }
++    path = _vm_path(creds, vm_name)
++    await _request("PUT", path, creds, json_body=body, params={"api-version": API_VERSION_COMPUTE})
++    await _poll_provisioning_state(path, creds, params={"api-version": API_VERSION_COMPUTE})
++
++    return VMInfo(
++        name=vm_name,
++        location=location,
++        vm_size=vm_size,
++        power_state="running",
++        public_ip=pip_address,
++        admin_username=ADMIN_USERNAME,
++        admin_password=None if ssh_public_key else admin_password,
++    )
++
++
++def _power_state_from_instance_view(instance_view: dict) -> str:
++    for status in instance_view.get("statuses", []):
++        code = status.get("code", "")
++        if code.startswith("PowerState/"):
++            return code.split("/", 1)[1]
++    return "unknown"
++
++
++async def azure_list_vms(creds: AzureCredentials) -> list[VMInfo]:
++    path = f"{_rg_path(creds)}/providers/Microsoft.Compute/virtualMachines"
++    status, payload = await _request("GET", path, creds, params={"api-version": API_VERSION_COMPUTE})
++    if status == 404:
++        return []
++    entries = (payload or {}).get("value", [])
++    result = []
++    for item in entries:
++        name = item.get("name", "")
++        try:
++            result.append(await azure_get_vm(creds, name))
++        except AzureAPIError:
++            continue
++    return result
++
++
++async def azure_get_vm(creds: AzureCredentials, vm_name: str) -> VMInfo:
++    path = _vm_path(creds, vm_name)
++    status, payload = await _request(
++        "GET", path, creds, params={"api-version": API_VERSION_COMPUTE, "$expand": "instanceView"}
++    )
++    if status == 404:
++        raise AzureAPIError("not_found")
++    payload = payload or {}
++    props = payload.get("properties", {})
++    power_state = _power_state_from_instance_view(props.get("instanceView", {}))
++
++    public_ip = None
++    pip_status, pip_payload = await _request(
++        "GET", _pip_path(creds, vm_name), creds, params={"api-version": API_VERSION_NETWORK}
++    )
++    if pip_status == 200:
++        public_ip = (pip_payload or {}).get("properties", {}).get("ipAddress")
++
++    return VMInfo(
++        name=vm_name,
++        location=payload.get("location", ""),
++        vm_size=props.get("hardwareProfile", {}).get("vmSize", ""),
++        power_state=power_state,
++        public_ip=public_ip,
++        admin_username=props.get("osProfile", {}).get("adminUsername", ADMIN_USERNAME),
++    )
++
++
++async def _poll_power_state(creds: AzureCredentials, vm_name: str, target: str) -> None:
++    elapsed = 0
++    while True:
++        info = await azure_get_vm(creds, vm_name)
++        if info.power_state == target:
++            return
++        if elapsed >= POLL_TIMEOUT:
++            raise AzureAPIError("timeout")
++        await asyncio.sleep(POLL_INTERVAL)
++        elapsed += POLL_INTERVAL
++
++
++async def _do_power_action(creds: AzureCredentials, vm_name: str, action: str, target_state: str) -> None:
++    path = f"{_vm_path(creds, vm_name)}/{action}"
++    await _request("POST", path, creds, params={"api-version": API_VERSION_COMPUTE})
++    await _poll_power_state(creds, vm_name, target_state)
++
++
++async def azure_start_vm(creds: AzureCredentials, vm_name: str) -> None:
++    await _do_power_action(creds, vm_name, "start", "running")
++
++
++async def azure_stop_vm(creds: AzureCredentials, vm_name: str) -> None:
++    # "deallocate" (not just "powerOff") releases the compute allocation so
++    # the VM stops billing for compute — the same thing Azure's own portal
++    # Stop button does, and the closest match to what "stop" means economically.
++    await _do_power_action(creds, vm_name, "deallocate", "deallocated")
++
++
++async def azure_restart_vm(creds: AzureCredentials, vm_name: str) -> None:
++    await _do_power_action(creds, vm_name, "restart", "running")
++
++
++async def azure_delete_vm(creds: AzureCredentials, vm_name: str) -> None:
++    await _request("DELETE", _vm_path(creds, vm_name), creds, params={"api-version": API_VERSION_COMPUTE})
++    await _poll_deleted(_vm_path(creds, vm_name), creds, params={"api-version": API_VERSION_COMPUTE})
++
++    # Best-effort cleanup of the VM's own NIC/public IP/NSG — the shared
++    # VNet/resource group stay, since other VMs may still use them.
++    for path, api_version in (
++        (_nic_path(creds, vm_name), API_VERSION_NETWORK),
++        (_pip_path(creds, vm_name), API_VERSION_NETWORK),
++        (_nsg_path(creds, vm_name), API_VERSION_NETWORK),
++    ):
++        try:
++            await _request("DELETE", path, creds, params={"api-version": api_version})
++            await _poll_deleted(path, creds, params={"api-version": api_version})
++        except AzureAPIError:
++            pass
+diff --git a/bot/services/cloud_store.py b/bot/services/cloud_store.py
+index f85b5c1..71683ff 100644
+--- a/bot/services/cloud_store.py
++++ b/bot/services/cloud_store.py
+@@ -10,13 +10,15 @@
+ 
+ class CloudStore:
+     """Tiny JSON-backed store for the cloud-provider accounts each user has
+-    connected (provider, login, password). A user can connect several
+-    accounts — including several with the same provider — each identified
+-    by a short random id used in callback_data.
++    connected. A user can connect several accounts — including several with
++    the same provider — each identified by a short random id used in
++    callback_data.
+ 
+-    Mirrors bot.services.panel_store.PanelStore: the stored password lets
+-    the bot re-authenticate on demand, since the provider APIs used here
+-    (UpCloud's HTTP Basic Auth) don't hand out a long-lived token to cache.
++    Credentials are stored as a flat dict of provider-specific fields
++    (UpCloud: username/password; Azure: tenant_id/client_id/client_secret/
++    subscription_id) since each provider's auth shape is different — the
++    bot re-authenticates on demand from these on every action, since none
++    of the provider APIs used here hand out a long-lived token worth caching.
+     """
+ 
+     def __init__(self, path: Path) -> None:
+@@ -52,7 +54,7 @@ async def get(self, user_id: int, account_id: str) -> dict | None:
+                 return account
+         return None
+ 
+-    async def add(self, user_id: int, provider: str, username: str, password: str) -> str:
++    async def add(self, user_id: int, provider: str, **credentials: str) -> str:
+         data = await self._load()
+         async with self._lock:
+             accounts = data.setdefault(str(user_id), [])
+@@ -60,14 +62,7 @@ async def add(self, user_id: int, provider: str, username: str, password: str) -
+             account_id = secrets.token_hex(4)
+             while account_id in existing_ids:
+                 account_id = secrets.token_hex(4)
+-            accounts.append(
+-                {
+-                    "id": account_id,
+-                    "provider": provider,
+-                    "username": username,
+-                    "password": password,
+-                }
+-            )
++            accounts.append({"id": account_id, "provider": provider, **credentials})
+             await self._write(data)
+         return account_id
+ 
+diff --git a/bot/states/cloud_setup.py b/bot/states/cloud_setup.py
+index f17fe4d..c4cf216 100644
+--- a/bot/states/cloud_setup.py
++++ b/bot/states/cloud_setup.py
+@@ -27,3 +27,21 @@ class CloudDiskStates(StatesGroup):
+     confirming_attach = State()
+     waiting_resize_size = State()
+     confirming_resize = State()
++
++
++class AzureSetupStates(StatesGroup):
++    waiting_tenant_id = State()
++    waiting_client_id = State()
++    waiting_client_secret = State()
++    waiting_subscription_id = State()
++    connecting = State()
++
++
++class AzureVMCreateStates(StatesGroup):
++    choosing_location = State()
++    choosing_size = State()
++    choosing_image = State()
++    waiting_hostname = State()
++    choosing_auth_method = State()
++    waiting_ssh_key = State()
++    confirming = State()
+diff --git a/bot/texts/cloud.py b/bot/texts/cloud.py
+index 88b98c7..f5105a4 100644
+--- a/bot/texts/cloud.py
++++ b/bot/texts/cloud.py
+@@ -7,7 +7,7 @@
+ from .translations import t
+ 
+ PROVIDERS = ("upcloud", "aws", "azure", "linode", "kamatera")
+-ACTIVE_PROVIDERS = ("upcloud",)
++ACTIVE_PROVIDERS = ("upcloud", "azure")
+ 
+ _STATE_EMOJI = {
+     "started": "🟢",
+@@ -20,6 +20,8 @@
+     "wrong_credentials": "cloud_err_wrong_credentials",
+     "connect_failed": "cloud_err_connect_failed",
+     "bad_response": "cloud_err_bad_response",
++    "timeout": "cloud_err_timeout",
++    "not_found": "cloud_err_not_found",
+ }
+ 
+ 
+@@ -99,8 +101,16 @@ def account_list_text(lang: str, provider: str, accounts: list[dict]) -> str:
+     )
+ 
+ 
++def account_display_name(account: dict) -> str:
++    """UpCloud accounts are identified by username; Azure accounts have no
++    single "login" — the subscription id is the closest equivalent."""
++    if account["provider"] == "azure":
++        return account.get("subscription_id", "")
++    return account.get("username", "")
++
++
+ def account_list_label(account: dict) -> str:
+-    return f"☁️ {account['username']}"
++    return f"☁️ {account_display_name(account)}"
+ 
+ 
+ def step_username_text(lang: str, provider: str) -> str:
+@@ -162,7 +172,7 @@ def account_dashboard_text(lang: str, account: dict, credits: float) -> str:
+         lang,
+         "cloud_account_dashboard",
+         provider=provider_title(account["provider"]),
+-        username=html.escape(account["username"]),
++        username=html.escape(account_display_name(account)),
+         credits=f"{credits:.2f}",
+         currency="EUR",
+     )
+@@ -173,7 +183,7 @@ def account_remove_confirm_text(lang: str, account: dict) -> str:
+         lang,
+         "cloud_account_remove_confirm",
+         icon=e("warning", "⚠️"),
+-        username=html.escape(account["username"]),
++        username=html.escape(account_display_name(account)),
+     )
+ 
+ 
+@@ -183,7 +193,9 @@ def account_removed_text(lang: str) -> str:
+ 
+ def servers_header_text(lang: str, account: dict, has_servers: bool) -> str:
+     body_key = "cloud_servers_hint" if has_servers else "cloud_servers_empty"
+-    return t(lang, "cloud_servers_header", username=html.escape(account["username"]), body=t(lang, body_key))
++    return t(
++        lang, "cloud_servers_header", username=html.escape(account_display_name(account)), body=t(lang, body_key)
++    )
+ 
+ 
+ def server_list_label(server) -> str:
+@@ -477,5 +489,166 @@ def ip_remove_confirm_text(lang: str, server, address: str) -> str:
+     )
+ 
+ 
++# --- Azure ---
++
++
++_AZURE_POWER_EMOJI = {
++    "running": "🟢",
++    "deallocated": "🔴",
++    "stopped": "🔴",
++    "starting": "🚧",
++    "stopping": "🚧",
++}
++
++
++def azure_step_tenant_text(lang: str) -> str:
++    return t(lang, "azure_step_tenant")
++
++
++def azure_step_client_id_text(lang: str) -> str:
++    return t(lang, "azure_step_client_id")
++
++
++def azure_step_client_secret_text(lang: str) -> str:
++    return t(lang, "azure_step_client_secret")
++
++
++def azure_step_subscription_text(lang: str) -> str:
++    return t(lang, "azure_step_subscription")
++
++
++def azure_empty_field_text(lang: str) -> str:
++    return t(lang, "azure_empty_field")
++
++
++def azure_account_dashboard_text(lang: str, account: dict, info) -> str:
++    return t(
++        lang,
++        "azure_account_dashboard",
++        subscription_id=html.escape(account.get("subscription_id", "")),
++        display_name=html.escape(info.display_name) or "—",
++        state=html.escape(info.state),
++    )
++
++
++def azure_vms_header_text(lang: str, account: dict, has_vms: bool) -> str:
++    body_key = "cloud_servers_hint" if has_vms else "cloud_servers_empty"
++    return t(
++        lang, "azure_vms_header", subscription_id=html.escape(account.get("subscription_id", "")), body=t(lang, body_key)
++    )
++
++
++def azure_vm_list_label(vm) -> str:
++    icon = _AZURE_POWER_EMOJI.get(vm.power_state, "⚪️")
++    return f"{icon} {vm.name}"
++
++
++def azure_vm_detail_text(lang: str, vm) -> str:
++    no_ip = t(lang, "cloud_server_no_ip")
++    return t(
++        lang,
++        "azure_vm_detail",
++        name=html.escape(vm.name),
++        state=f"{_AZURE_POWER_EMOJI.get(vm.power_state, '⚪️')} {vm.power_state}",
++        location=html.escape(vm.location),
++        size=vm.vm_size,
++        ip=vm.public_ip or no_ip,
++        username=html.escape(vm.admin_username),
++    )
++
++
++def azure_vm_action_ok_text(lang: str) -> str:
++    return t(lang, "cloud_server_action_ok", icon=e("success", "✅"))
++
++
++def azure_vm_delete_confirm_text(lang: str, vm) -> str:
++    return t(lang, "azure_vm_delete_confirm", icon=e("warning", "⚠️"), name=html.escape(vm.name))
++
++
++def azure_vm_deleted_text(lang: str) -> str:
++    return t(lang, "cloud_server_deleted", icon=e("success", "✅"))
++
++
++def azure_create_choose_location_text(lang: str, page: int = 0, total_pages: int = 1) -> str:
++    return t(lang, "azure_create_choose_location") + _page_suffix(lang, page, total_pages)
++
++
++def azure_create_choose_size_text(lang: str, page: int = 0, total_pages: int = 1) -> str:
++    return t(lang, "azure_create_choose_size") + _page_suffix(lang, page, total_pages)
++
++
++def azure_create_choose_image_text(lang: str, page: int = 0, total_pages: int = 1) -> str:
++    return t(lang, "azure_create_choose_image") + _page_suffix(lang, page, total_pages)
++
++
++def azure_create_waiting_hostname_text(lang: str) -> str:
++    return t(lang, "azure_create_waiting_hostname")
++
++
++def azure_create_invalid_hostname_text(lang: str) -> str:
++    return t(lang, "azure_create_invalid_hostname")
++
++
++def azure_create_choose_auth_method_text(lang: str) -> str:
++    return t(lang, "cloud_create_choose_auth_method")
++
++
++def azure_create_waiting_ssh_key_text(lang: str) -> str:
++    return t(lang, "cloud_create_waiting_ssh_key")
++
++
++def azure_create_invalid_ssh_key_text(lang: str) -> str:
++    return t(lang, "cloud_create_invalid_ssh_key")
++
++
++def azure_create_confirm_text(
++    lang: str, hostname: str, location: str, size: str, image_title: str, auth_method: str
++) -> str:
++    auth_label = t(lang, "cloud_auth_method_key" if auth_method == "key" else "cloud_auth_method_password")
++    return t(
++        lang,
++        "azure_create_confirm",
++        hostname=html.escape(hostname),
++        location=location,
++        size=size,
++        image=html.escape(image_title),
++        auth_method=auth_label,
++    )
++
++
++_AZURE_PROGRESS_KEYS = {
++    "resource_group": "azure_progress_resource_group",
++    "network": "azure_progress_network",
++    "public_ip": "azure_progress_public_ip",
++    "nsg": "azure_progress_nsg",
++    "nic": "azure_progress_nic",
++    "vm": "azure_progress_vm",
++}
++
++
++def azure_progress_text(lang: str, step: str) -> str:
++    key = _AZURE_PROGRESS_KEYS.get(step, "azure_progress_vm")
++    return t(lang, key)
++
++
++def azure_create_success_text(lang: str, vm, ssh_key_used: bool = False) -> str:
++    no_ip = t(lang, "cloud_server_no_ip")
++    password_line = ""
++    if ssh_key_used:
++        password_line = t(lang, "cloud_create_ssh_key_line")
++    elif vm.admin_password:
++        password_line = t(lang, "cloud_create_password_line", password=html.escape(vm.admin_password))
++    return t(
++        lang,
++        "azure_create_success",
++        icon=e("success", "✅"),
++        name=html.escape(vm.name),
++        location=html.escape(vm.location),
++        ip=vm.public_ip or no_ip,
++        username=html.escape(vm.admin_username),
++        password_line=password_line,
++    )
++
++
+ def ip_removed_text(lang: str) -> str:
+     return t(lang, "cloud_ip_removed", icon=e("success", "✅"))
+diff --git a/bot/texts/translations.py b/bot/texts/translations.py
+index 2da8db6..b4a1be6 100644
+--- a/bot/texts/translations.py
++++ b/bot/texts/translations.py
+@@ -1749,7 +1749,7 @@ def resolve_language(code: str | None) -> str:
+     },
+     "btn_cloud_provider_upcloud": {"ru": "☁️ UpCloud", "en": "☁️ UpCloud", "tk": "☁️ UpCloud"},
+     "btn_cloud_provider_aws": {"ru": "🟧 AWS (скоро)", "en": "🟧 AWS (soon)", "tk": "🟧 AWS (ýakynda)"},
+-    "btn_cloud_provider_azure": {"ru": "🔷 Azure (скоро)", "en": "🔷 Azure (soon)", "tk": "🔷 Azure (ýakynda)"},
++    "btn_cloud_provider_azure": {"ru": "🔷 Azure", "en": "🔷 Azure", "tk": "🔷 Azure"},
+     "btn_cloud_provider_linode": {"ru": "🟩 Linode (скоро)", "en": "🟩 Linode (soon)", "tk": "🟩 Linode (ýakynda)"},
+     "btn_cloud_provider_kamatera": {
+         "ru": "🟪 Kamatera (скоро)",
+@@ -2353,6 +2353,226 @@ def resolve_language(code: str | None) -> str:
+         "tk": "{icon} <code>{address}</code> IP-ni <b>{title}</b> serwerinden aýyrmalymy?",
+     },
+     "cloud_ip_removed": {"ru": "{icon} IP удалён.", "en": "{icon} IP removed.", "tk": "{icon} IP aýryldy."},
++    "cloud_err_timeout": {
++        "ru": "Провайдер слишком долго не отвечал на этот запрос (таймаут). Попробуйте ещё раз чуть позже.",
++        "en": "The provider took too long to respond to this request (timeout). Try again in a bit.",
++        "tk": "Provaýder bu soraga gaty uzak wagt jogap bermedi (wagt gutardy). Birazdan täzeden synanyň.",
++    },
++    "cloud_err_not_found": {
++        "ru": "Не найдено — возможно, ресурс уже удалён.",
++        "en": "Not found — it may have already been deleted.",
++        "tk": "Tapylmady — ol eýýäm pozulan bolmagy mümkin.",
++    },
++    # --- Azure account connect ---
++    "azure_step_tenant": {
++        "ru": (
++            "🔷 <b>Подключение Azure — шаг 1/4</b>\n\n"
++            "Введите <b>Tenant ID</b> (Directory ID) вашего Azure AD / Entra ID."
++        ),
++        "en": (
++            "🔷 <b>Connect Azure — step 1/4</b>\n\n"
++            "Enter your <b>Tenant ID</b> (Directory ID) from Azure AD / Entra ID."
++        ),
++        "tk": (
++            "🔷 <b>Azure birikdirmek — 1/4 ädim</b>\n\n"
++            "Azure AD / Entra ID-den <b>Tenant ID</b> (Directory ID) giriziň."
++        ),
++    },
++    "azure_step_client_id": {
++        "ru": "🔷 <b>Шаг 2/4</b>\n\nТеперь <b>Client ID</b> (Application ID) вашего App Registration:",
++        "en": "🔷 <b>Step 2/4</b>\n\nNow the <b>Client ID</b> (Application ID) of your App Registration:",
++        "tk": "🔷 <b>2/4 ädim</b>\n\nIndi App Registration-yňyzyň <b>Client ID</b> (Application ID)-sini giriziň:",
++    },
++    "azure_step_client_secret": {
++        "ru": (
++            "🔷 <b>Шаг 3/4</b>\n\nТеперь <b>Client Secret</b> (значение секрета, не его Secret ID).\n\n"
++            "⚠️ <i>Сообщение с секретом бот удалит сразу после получения.</i>"
++        ),
++        "en": (
++            "🔷 <b>Step 3/4</b>\n\nNow the <b>Client Secret</b> (the secret's value, not its Secret ID).\n\n"
++            "⚠️ <i>The bot deletes the message with the secret right after receiving it.</i>"
++        ),
++        "tk": (
++            "🔷 <b>3/4 ädim</b>\n\nIndi <b>Client Secret</b> (syryň gymmaty, onuň ID-si däl) giriziň.\n\n"
++            "⚠️ <i>Bot syr bilen habary alnandan derrew soň pozar.</i>"
++        ),
++    },
++    "azure_step_subscription": {
++        "ru": "🔷 <b>Шаг 4/4</b>\n\nИ последнее — <b>Subscription ID</b>:",
++        "en": "🔷 <b>Step 4/4</b>\n\nAnd finally — the <b>Subscription ID</b>:",
++        "tk": "🔷 <b>4/4 ädim</b>\n\nWe iň soňunda — <b>Subscription ID</b>:",
++    },
++    "azure_empty_field": {
++        "ru": "Значение не может быть пустым. Попробуйте ещё раз:",
++        "en": "This can't be empty. Try again:",
++        "tk": "Bu boş bolup bilmez. Gaýtadan synanyň:",
++    },
++    "azure_account_dashboard": {
++        "ru": (
++            "🔷 <b>Azure</b>\n\n"
++            "🆔 Subscription: <code>{subscription_id}</code>\n"
++            "📛 Название: {display_name}\n"
++            "📶 Статус: {state}"
++        ),
++        "en": (
++            "🔷 <b>Azure</b>\n\n"
++            "🆔 Subscription: <code>{subscription_id}</code>\n"
++            "📛 Name: {display_name}\n"
++            "📶 State: {state}"
++        ),
++        "tk": (
++            "🔷 <b>Azure</b>\n\n"
++            "🆔 Subscription: <code>{subscription_id}</code>\n"
++            "📛 Ady: {display_name}\n"
++            "📶 Ýagdaýy: {state}"
++        ),
++    },
++    "azure_vms_header": {
++        "ru": "🔷 <b>VM аккаунта</b> <code>{subscription_id}</code>\n\n{body}",
++        "en": "🔷 <b>VMs for</b> <code>{subscription_id}</code>\n\n{body}",
++        "tk": "🔷 <code>{subscription_id}</code> <b>hasabynyň VM-leri</b>\n\n{body}",
++    },
++    "azure_vm_detail": {
++        "ru": (
++            "🖥 <b>{name}</b>\n\n"
++            "📶 Статус: {state}\n"
++            "📍 Локация: {location}\n"
++            "⚙️ Размер: {size}\n"
++            "🌐 IP: <code>{ip}</code>\n"
++            "👤 Логин: <code>{username}</code>"
++        ),
++        "en": (
++            "🖥 <b>{name}</b>\n\n"
++            "📶 State: {state}\n"
++            "📍 Location: {location}\n"
++            "⚙️ Size: {size}\n"
++            "🌐 IP: <code>{ip}</code>\n"
++            "👤 Username: <code>{username}</code>"
++        ),
++        "tk": (
++            "🖥 <b>{name}</b>\n\n"
++            "📶 Ýagdaýy: {state}\n"
++            "📍 Ýerleşişi: {location}\n"
++            "⚙️ Ölçegi: {size}\n"
++            "🌐 IP: <code>{ip}</code>\n"
++            "👤 Ulanyjy ady: <code>{username}</code>"
++        ),
++    },
++    "azure_vm_delete_confirm": {
++        "ru": "{icon} Удалить виртуальную машину <b>{name}</b>? Это необратимо — диск и сеть тоже будут удалены.",
++        "en": "{icon} Delete virtual machine <b>{name}</b>? This is irreversible — its disk and network will be removed too.",
++        "tk": "{icon} <b>{name}</b> wirtual maşynyny pozmalymy? Bu yzyna gaýtaryp bolmaýar — diski we ulgamy hem pozular.",
++    },
++    "azure_create_choose_location": {
++        "ru": "🔷 <b>Новая VM — шаг 1/5</b>\n\nВыберите регион (location):",
++        "en": "🔷 <b>New VM — step 1/5</b>\n\nChoose a region (location):",
++        "tk": "🔷 <b>Täze VM — 1/5 ädim</b>\n\nSebiti (location) saýlaň:",
++    },
++    "azure_create_choose_size": {
++        "ru": "🔷 <b>Новая VM — шаг 2/5</b>\n\nВыберите размер (size):",
++        "en": "🔷 <b>New VM — step 2/5</b>\n\nChoose a size:",
++        "tk": "🔷 <b>Täze VM — 2/5 ädim</b>\n\nÖlçegi saýlaň:",
++    },
++    "azure_create_choose_image": {
++        "ru": "🔷 <b>Новая VM — шаг 3/5</b>\n\nВыберите операционную систему:",
++        "en": "🔷 <b>New VM — step 3/5</b>\n\nChoose an OS image:",
++        "tk": "🔷 <b>Täze VM — 3/5 ädim</b>\n\nOperasiýa ulgamyny saýlaň:",
++    },
++    "azure_create_waiting_hostname": {
++        "ru": "✏️ <b>Новая VM — шаг 4/5</b>\n\nВведите имя виртуальной машины (латиница, цифры, дефисы):",
++        "en": "✏️ <b>New VM — step 4/5</b>\n\nEnter the virtual machine's name (letters, digits, hyphens):",
++        "tk": "✏️ <b>Täze VM — 4/5 ädim</b>\n\nWirtual maşynyň adyny giriziň (latyn harplary, sanlar, defisler):",
++    },
++    "azure_create_invalid_hostname": {
++        "ru": "Некорректное имя. Используйте только латинские буквы, цифры и дефисы (не более 64 символов). Попробуйте ещё раз:",
++        "en": "Invalid name. Use only Latin letters, digits and hyphens (up to 64 characters). Try again:",
++        "tk": "Ady nädogry. Diňe latyn harplary, sanlar we defisler ulanyň (64 alamatdan köp däl). Gaýtadan synanyň:",
++    },
++    "azure_create_confirm": {
++        "ru": (
++            "✅ <b>Проверьте параметры VM</b>\n\n"
++            "🖥 Имя: <code>{hostname}</code>\n"
++            "📍 Регион: {location}\n"
++            "⚙️ Размер: {size}\n"
++            "💿 ОС: {image}\n"
++            "🔐 Вход: {auth_method}\n\n"
++            "💰 Это создаст платный ресурс в Azure. Создать?"
++        ),
++        "en": (
++            "✅ <b>Review VM parameters</b>\n\n"
++            "🖥 Name: <code>{hostname}</code>\n"
++            "📍 Region: {location}\n"
++            "⚙️ Size: {size}\n"
++            "💿 OS: {image}\n"
++            "🔐 Login via: {auth_method}\n\n"
++            "💰 This will create a billable resource in Azure. Create it?"
++        ),
++        "tk": (
++            "✅ <b>VM parametrlerini barlaň</b>\n\n"
++            "🖥 Ady: <code>{hostname}</code>\n"
++            "📍 Sebit: {location}\n"
++            "⚙️ Ölçegi: {size}\n"
++            "💿 OS: {image}\n"
++            "🔐 Giriş: {auth_method}\n\n"
++            "💰 Bu Azure-da tölegli resurs dörediler. Döredilsinmi?"
++        ),
++    },
++    "azure_progress_resource_group": {
++        "ru": "🔷 Создаю группу ресурсов...",
++        "en": "🔷 Creating the resource group...",
++        "tk": "🔷 Resurs topary döredilýär...",
++    },
++    "azure_progress_network": {
++        "ru": "🔷 Настраиваю сеть (VNet/подсеть)...",
++        "en": "🔷 Setting up the network (VNet/subnet)...",
++        "tk": "🔷 Ulgam sazlanýar (VNet/subnet)...",
++    },
++    "azure_progress_public_ip": {
++        "ru": "🔷 Выделяю публичный IP...",
++        "en": "🔷 Allocating a public IP...",
++        "tk": "🔷 Açyk IP bölünip berilýär...",
++    },
++    "azure_progress_nsg": {
++        "ru": "🔷 Настраиваю фаервол (NSG)...",
++        "en": "🔷 Setting up the firewall (NSG)...",
++        "tk": "🔷 Firewall sazlanýar (NSG)...",
++    },
++    "azure_progress_nic": {
++        "ru": "🔷 Создаю сетевой интерфейс...",
++        "en": "🔷 Creating the network interface...",
++        "tk": "🔷 Ulgam interfeýsi döredilýär...",
++    },
++    "azure_progress_vm": {
++        "ru": "🔷 Создаю виртуальную машину, это может занять пару минут...",
++        "en": "🔷 Creating the virtual machine, this can take a couple of minutes...",
++        "tk": "🔷 Wirtual maşyn döredilýär, birnäçe minut wagt alyp biler...",
++    },
++    "azure_create_success": {
++        "ru": (
++            "{icon} <b>VM создана!</b>\n\n"
++            "🖥 <b>Имя:</b> {name}\n"
++            "📍 <b>Локация:</b> {location}\n"
++            "🌐 <b>IP:</b> <code>{ip}</code>\n"
++            "👤 <b>Логин:</b> <code>{username}</code>\n"
++            "{password_line}"
++        ),
++        "en": (
++            "{icon} <b>VM created!</b>\n\n"
++            "🖥 <b>Name:</b> {name}\n"
++            "📍 <b>Location:</b> {location}\n"
++            "🌐 <b>IP:</b> <code>{ip}</code>\n"
++            "👤 <b>Username:</b> <code>{username}</code>\n"
++            "{password_line}"
++        ),
++        "tk": (
++            "{icon} <b>VM döredildi!</b>\n\n"
++            "🖥 <b>Ady:</b> {name}\n"
++            "📍 <b>Ýerleşişi:</b> {location}\n"
++            "🌐 <b>IP:</b> <code>{ip}</code>\n"
++            "👤 <b>Ulanyjy ady:</b> <code>{username}</code>\n"
++            "{password_line}"
++        ),
++    },
+ }
+ 
+ 

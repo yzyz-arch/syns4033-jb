@@ -1,0 +1,30 @@
+From c78340d67b9636be916e385b0f9e073f525afa84 Mon Sep 17 00:00:00 2001
+From: KudbeeZero <dominick.ziola@gmail.com>
+Date: Tue, 1 Sep 2026 01:15:32 -0500
+Subject: [PATCH] chore(config): update env example and ignore rules
+
+add UPCLOUD_API_KEY to .env.example and ensure .env.example is ignored by git
+---
+ .env.example | 1 +
+ .gitignore   | 1 +
+ 2 files changed, 2 insertions(+)
+
+diff --git a/.env.example b/.env.example
+index 60862b50..2ed3414f 100644
+--- a/.env.example
++++ b/.env.example
+@@ -24,3 +24,4 @@ INCEPTION_API_KEY=
+ 
+ # ─── Cursor SDK (optional) ────────────────────────────────────
+ CURSOR_API_KEY=
++UPCLOUD_API_KEY=ucat_REDACTED_KUDBEE_C78340D6
+\ No newline at end of file
+diff --git a/.gitignore b/.gitignore
+index cdec02b6..cb527303 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -61,3 +61,4 @@ backend/instance/
+ .env
+ .env.local
+ .env.production
++.env.example

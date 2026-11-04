@@ -1,0 +1,1414 @@
+From 2d63bafd4fca179828c0d1245a63cd827e7f2e71 Mon Sep 17 00:00:00 2001
+From: David Stahl-Gruber <david@gruber.tv>
+Date: Tue, 28 Jul 2026 16:19:33 +0200
+Subject: [PATCH] feat(upcloud): hand-written Effect client for the UpCloud 1.3
+ API
+
+M2+M3 (T2.1-T3.3). UpCloud publishes no OpenAPI spec (the only one that
+exists is community, unmaintained, and predates UKS), so this client is
+hand-written and exempt from codegen:check -- documented in the README.
+
+Covers UKS clusters and node groups, SDN network/router, and zones, over a
+Bearer-token transport with a 429-aware retry. version is part of the
+cluster create body: without it every cluster lands on UpCloud's default.
+
+D15 relaxes no-sibling-package-imports for incoming edges to this package
+only; its own outgoing edges stay governed. Build order puts it beside core
+for the same reason -- it is the one package a sibling depends on.
+---
+ .dependency-cruiser.cjs                       |   8 +-
+ bun.lock                                      |  37 ++++++
+ package.json                                  |   2 +-
+ packages/upcloud/LICENSE                      |  20 +++
+ packages/upcloud/README.md                    |  39 ++++++
+ packages/upcloud/package.json                 |  66 ++++++++++
+ packages/upcloud/src/client/common.ts         |  42 +++++++
+ packages/upcloud/src/client/network.ts        |  95 ++++++++++++++
+ packages/upcloud/src/client/node-groups.ts    | 104 ++++++++++++++++
+ packages/upcloud/src/client/uks.ts            | 116 ++++++++++++++++++
+ packages/upcloud/src/client/zone.ts           |  38 ++++++
+ packages/upcloud/src/errors/index.ts          | 102 +++++++++++++++
+ packages/upcloud/src/index.ts                 |  29 +++++
+ packages/upcloud/src/transport/http-client.ts |  53 ++++++++
+ packages/upcloud/test/client/capture.ts       |  13 ++
+ packages/upcloud/test/client/network.test.ts  |  79 ++++++++++++
+ .../upcloud/test/client/node-groups.test.ts   |  66 ++++++++++
+ packages/upcloud/test/client/uks.test.ts      |  92 ++++++++++++++
+ packages/upcloud/test/client/zone.test.ts     |  27 ++++
+ packages/upcloud/test/errors/index.test.ts    |  57 +++++++++
+ .../test/transport/http-client.test.ts        |  57 +++++++++
+ packages/upcloud/tsconfig.build.json          |  14 +++
+ packages/upcloud/tsconfig.json                |   4 +
+ 23 files changed, 1157 insertions(+), 3 deletions(-)
+ create mode 100644 packages/upcloud/LICENSE
+ create mode 100644 packages/upcloud/README.md
+ create mode 100644 packages/upcloud/package.json
+ create mode 100644 packages/upcloud/src/client/common.ts
+ create mode 100644 packages/upcloud/src/client/network.ts
+ create mode 100644 packages/upcloud/src/client/node-groups.ts
+ create mode 100644 packages/upcloud/src/client/uks.ts
+ create mode 100644 packages/upcloud/src/client/zone.ts
+ create mode 100644 packages/upcloud/src/errors/index.ts
+ create mode 100644 packages/upcloud/src/index.ts
+ create mode 100644 packages/upcloud/src/transport/http-client.ts
+ create mode 100644 packages/upcloud/test/client/capture.ts
+ create mode 100644 packages/upcloud/test/client/network.test.ts
+ create mode 100644 packages/upcloud/test/client/node-groups.test.ts
+ create mode 100644 packages/upcloud/test/client/uks.test.ts
+ create mode 100644 packages/upcloud/test/client/zone.test.ts
+ create mode 100644 packages/upcloud/test/errors/index.test.ts
+ create mode 100644 packages/upcloud/test/transport/http-client.test.ts
+ create mode 100644 packages/upcloud/tsconfig.build.json
+ create mode 100644 packages/upcloud/tsconfig.json
+
+diff --git a/.dependency-cruiser.cjs b/.dependency-cruiser.cjs
+index e30c6c7..287bd99 100644
+--- a/.dependency-cruiser.cjs
++++ b/.dependency-cruiser.cjs
+@@ -36,11 +36,15 @@ module.exports = {
+     {
+       name: "no-sibling-package-imports",
+       comment:
+-        "non-core, non-cli @kumulo/* packages may depend on core only, never on each other",
++        "non-core, non-cli @kumulo/* packages may depend on core only, never on each other " +
++        "(D15: @kumulo/upcloud is exempted from this rule's 'to' side only — it is treated " +
++        "like core for INCOMING edges, so distro-upcloud-uks may import it — but it keeps " +
++        "'upcloud' in the 'from' pattern below, so its own OUTGOING edges stay governed by " +
++        "this same rule and it may still only import @kumulo/core)",
+       severity: "error",
+       from: { path: "^packages/(?!core/|cli/)([^/]+)/" },
+       to: {
+-        path: "^packages/(?!core/)[^/]+/",
++        path: "^packages/(?!core/|upcloud/)[^/]+/",
+         pathNot: "^packages/$1/",
+       },
+     },
+diff --git a/bun.lock b/bun.lock
+index 2045687..a8cf431 100644
+--- a/bun.lock
++++ b/bun.lock
+@@ -45,6 +45,7 @@
+         "@kumulo/core": "workspace:*",
+         "@kumulo/distro-k3s": "workspace:*",
+         "@kumulo/distro-ovh-mks": "workspace:*",
++        "@kumulo/distro-upcloud-uks": "workspace:*",
+         "@kumulo/dns-hetzner": "workspace:*",
+         "@kumulo/dns-ovh": "workspace:*",
+         "@kumulo/hetzner": "workspace:*",
+@@ -52,6 +53,7 @@
+         "@kumulo/provider-ovh": "workspace:*",
+         "@kumulo/secrets-sops": "workspace:*",
+         "@kumulo/storage-ovh": "workspace:*",
++        "@kumulo/upcloud": "workspace:*",
+         "@kumulo/volumes-cinder": "workspace:*",
+       },
+       "devDependencies": {
+@@ -116,6 +118,22 @@
+         "effect": "catalog:",
+       },
+     },
++    "packages/distro-upcloud-uks": {
++      "name": "@kumulo/distro-upcloud-uks",
++      "version": "0.1.1",
++      "dependencies": {
++        "@kumulo/core": "workspace:*",
++        "@kumulo/upcloud": "workspace:*",
++      },
++      "devDependencies": {
++        "@effect/vitest": "catalog:",
++        "effect": "catalog:",
++        "vitest": "catalog:",
++      },
++      "peerDependencies": {
++        "effect": "catalog:",
++      },
++    },
+     "packages/dns-hetzner": {
+       "name": "@kumulo/dns-hetzner",
+       "version": "0.1.1",
+@@ -241,6 +259,21 @@
+         "effect": "catalog:",
+       },
+     },
++    "packages/upcloud": {
++      "name": "@kumulo/upcloud",
++      "version": "0.1.0",
++      "dependencies": {
++        "@kumulo/core": "workspace:*",
++      },
++      "devDependencies": {
++        "@effect/vitest": "catalog:",
++        "effect": "catalog:",
++        "vitest": "catalog:",
++      },
++      "peerDependencies": {
++        "effect": "catalog:",
++      },
++    },
+     "packages/volumes-cinder": {
+       "name": "@kumulo/volumes-cinder",
+       "version": "0.1.1",
+@@ -349,6 +382,8 @@
+ 
+     "@kumulo/distro-ovh-mks": ["@kumulo/distro-ovh-mks@workspace:packages/distro-ovh-mks"],
+ 
++    "@kumulo/distro-upcloud-uks": ["@kumulo/distro-upcloud-uks@workspace:packages/distro-upcloud-uks"],
++
+     "@kumulo/dns-hetzner": ["@kumulo/dns-hetzner@workspace:packages/dns-hetzner"],
+ 
+     "@kumulo/dns-ovh": ["@kumulo/dns-ovh@workspace:packages/dns-ovh"],
+@@ -365,6 +400,8 @@
+ 
+     "@kumulo/storage-ovh": ["@kumulo/storage-ovh@workspace:packages/storage-ovh"],
+ 
++    "@kumulo/upcloud": ["@kumulo/upcloud@workspace:packages/upcloud"],
++
+     "@kumulo/volumes-cinder": ["@kumulo/volumes-cinder@workspace:packages/volumes-cinder"],
+ 
+     "@msgpackr-extract/msgpackr-extract-darwin-arm64": ["@msgpackr-extract/msgpackr-extract-darwin-arm64@3.0.4", "", { "os": "darwin", "cpu": "arm64" }, "sha512-LCkGo6JDfaBhgST7UpPWgNgLINpcpabaHfyz5OBx75nUYxBsaEPxjnyNjWpeb/xBup/682QnBfRBy2/LvPutZQ=="],
+diff --git a/package.json b/package.json
+index f5810d7..b0917b5 100644
+--- a/package.json
++++ b/package.json
+@@ -42,7 +42,7 @@
+     "codegen:check": "cd tools/codegen && bun run check",
+     "ci": "bun run typecheck && bun run build && bun run test && bun run lint:deps && bun run lint && bun run codegen:check && bun run schema:check",
+     "lint": "oxlint",
+-    "build": "set -e; for d in $(node -e 'const fs=require(\"node:fs\");const p=fs.readdirSync(\"packages\").filter(d=>fs.existsSync(`packages/${d}/package.json`)&&require(`${process.cwd()}/packages/${d}/package.json`).scripts?.build);const m=p.filter(d=>d!==\"core\"&&d!==\"cli\").sort();console.log([...p.filter(d=>d===\"core\"),...m,...p.filter(d=>d===\"cli\")].join(\" \"))'); do echo \"[build] $d\"; bun run --cwd \"packages/$d\" build; done",
++    "build": "set -e; for d in $(node -e 'const fs=require(\"node:fs\");const p=fs.readdirSync(\"packages\").filter(d=>fs.existsSync(`packages/${d}/package.json`)&&require(`${process.cwd()}/packages/${d}/package.json`).scripts?.build);const leaf=[\"core\",\"upcloud\"];const m=p.filter(d=>!leaf.includes(d)&&d!==\"cli\").sort();console.log([...p.filter(d=>leaf.includes(d)).sort((a,b)=>leaf.indexOf(a)-leaf.indexOf(b)),...m,...p.filter(d=>d===\"cli\")].join(\" \"))'); do echo \"[build] $d\"; bun run --cwd \"packages/$d\" build; done",
+     "schema:generate": "bun scripts/generate-schema.ts",
+     "schema:check": "set -e; cp kumulo.schema.json .kumulo.schema.check.bak; bun scripts/generate-schema.ts; s=0; diff -u .kumulo.schema.check.bak kumulo.schema.json || { s=$?; echo 'kumulo.schema.json is stale: run `bun run schema:generate` and commit'; }; mv .kumulo.schema.check.bak kumulo.schema.json; exit $s",
+     "version:bump": "node scripts/bump-version.mjs",
+diff --git a/packages/upcloud/LICENSE b/packages/upcloud/LICENSE
+new file mode 100644
+index 0000000..6ddf267
+--- /dev/null
++++ b/packages/upcloud/LICENSE
+@@ -0,0 +1,20 @@
++MIT License
++
++Copyright (c) 2026 David Stahl-Gruber
++
++Permission is hereby granted, free of charge, to any person obtaining a copy
++of this software and associated documentation files (the "Software"), to deal
++in the Software without restriction, including without limitation the rights
++to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
++copies of the Software, and to permit persons to whom the Software is
++furnished to do so, subject to the following conditions:
++
++The above copyright notice and this permission notice shall be included in all
++copies or substantial portions of the Software.
++
++THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
++AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
++OUT OF OR IN CONNECTION WITH THE SOFTWARE OR OTHER DEALINGS IN THE SOFTWARE.
+diff --git a/packages/upcloud/README.md b/packages/upcloud/README.md
+new file mode 100644
+index 0000000..163f5db
+--- /dev/null
++++ b/packages/upcloud/README.md
+@@ -0,0 +1,39 @@
++# @kumulo/upcloud
++
++Hand-written UpCloud API client: Managed Kubernetes (UKS) clusters and node
++groups, plus the SDN network and router resources a UKS cluster needs.
++
++Part of [kumulo](../../README.md) — a CLI that provisions and manages
++Kubernetes clusters on OVH, Hetzner, OpenStack and UpCloud from a single YAML
++config. This package is published from that workspace and is normally
++consumed through the `kumulo` CLI rather than directly.
++
++```sh
++bun add @kumulo/upcloud
++```
++
++## Why hand-written (D1)
++
++Every other provider client in this workspace (`@kumulo/hetzner`,
++`@kumulo/dns-hetzner`, `packages/openstack`'s generated clients,
++`tools/ovh2openapi`) is generated from a vendor-published OpenAPI spec via
++`@effect/openapi-generator`. UpCloud publishes no such spec — its API
++reference is hand-maintained prose, not a machine-readable document — so
++this package is hand-written against that documentation instead, and is
++**deliberately exempt from `codegen:check`**: it is simply absent from
++`tools/codegen/services.json`, the registry that drives regeneration and
++staleness checking, so there is nothing for that check to compare against.
++
++## D15 — a narrow dependency-cruiser exception
++
++`@kumulo/distro-upcloud-uks` depends on this package, which is an edge
++`no-sibling-package-imports` forbids as written (non-core siblings may not
++depend on each other). `.dependency-cruiser.cjs` relaxes that rule for
++*incoming* edges into `@kumulo/upcloud` only — this package is treated like
++`@kumulo/core` from the outside. Its own *outgoing* imports stay fully
++governed by the original rule: `@kumulo/upcloud` may still import
++`@kumulo/core` and nothing else, keeping it a dependency leaf. See D15 in
++`.docs/workflows/upcloud-uks/requirements.md`.
++
++See the [root README](../../README.md) for configuration, commands and
++examples, and the [changelog](../../CHANGELOG.md) for release notes.
+diff --git a/packages/upcloud/package.json b/packages/upcloud/package.json
+new file mode 100644
+index 0000000..5d5fb7e
+--- /dev/null
++++ b/packages/upcloud/package.json
+@@ -0,0 +1,66 @@
++{
++  "name": "@kumulo/upcloud",
++  "version": "0.1.0",
++  "description": "Hand-written UpCloud API client (UKS, network, router) for kumulo.",
++  "license": "MIT",
++  "author": "David Stahl-Gruber",
++  "homepage": "https://github.com/DwieDave/kumulo#readme",
++  "bugs": "https://github.com/DwieDave/kumulo/issues",
++  "repository": {
++    "type": "git",
++    "url": "git+https://github.com/DwieDave/kumulo.git",
++    "directory": "packages/upcloud"
++  },
++  "keywords": [
++    "upcloud",
++    "uks",
++    "kubernetes",
++    "effect",
++    "typescript"
++  ],
++  "type": "module",
++  "exports": {
++    ".": {
++      "bun": "./src/index.ts",
++      "source": "./src/index.ts",
++      "types": "./dist/index.d.ts",
++      "import": "./dist/index.mjs"
++    }
++  },
++  "main": "./dist/index.mjs",
++  "types": "./dist/index.d.ts",
++  "files": [
++    "dist",
++    "README.md",
++    "LICENSE"
++  ],
++  "engines": {
++    "node": ">=22"
++  },
++  "publishConfig": {
++    "access": "public",
++    "exports": {
++      ".": {
++        "types": "./dist/index.d.ts",
++        "import": "./dist/index.mjs"
++      }
++    }
++  },
++  "dependencies": {
++    "@kumulo/core": "workspace:*"
++  },
++  "peerDependencies": {
++    "effect": "catalog:"
++  },
++  "devDependencies": {
++    "@effect/vitest": "catalog:",
++    "vitest": "catalog:",
++    "effect": "catalog:"
++  },
++  "scripts": {
++    "build": "bash ../../scripts/build-package.sh",
++    "prepack": "node ../../scripts/prepack-exports.mjs strip",
++    "postpack": "node ../../scripts/prepack-exports.mjs restore",
++    "prepublishOnly": "bun run build"
++  }
++}
+diff --git a/packages/upcloud/src/client/common.ts b/packages/upcloud/src/client/common.ts
+new file mode 100644
+index 0000000..1308393
+--- /dev/null
++++ b/packages/upcloud/src/client/common.ts
+@@ -0,0 +1,42 @@
++/**
++ * Shapes shared across the UKS, node-group and network/router clients
++ * (D14 — labels are `[{key, value}]`, not a map, everywhere UpCloud uses
++ * them).
++ */
++import type { SchemaError } from "effect/Schema"
++import * as Schema from "effect/Schema"
++import * as HttpClientError from "effect/unstable/http/HttpClientError"
++import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
++import { Effect } from "effect"
++
++export const UpcloudLabel = Schema.Struct({ key: Schema.String, value: Schema.String })
++export type UpcloudLabel = typeof UpcloudLabel.Type
++
++export type UpcloudRawError = HttpClientError.HttpClientError | SchemaError
++
++// kumulo: plain status-range check instead of `HttpClientResponse.matchStatus`
++// — mirrors dns-hetzner's client (its `Unify`-based inference collapses this
++// file's precise per-schema error unions down to `unknown`).
++export const isOk = (response: HttpClientResponse.HttpClientResponse): boolean => response.status >= 200 && response.status < 300
++
++const _unexpectedStatus = (
++  response: HttpClientResponse.HttpClientResponse
++): Effect.Effect<never, HttpClientError.HttpClientError> =>
++  Effect.flatMap(
++    Effect.orElseSucceed(response.text, () => "unexpected UpCloud API response status"),
++    (description) =>
++      Effect.fail(
++        new HttpClientError.HttpClientError({
++          reason: new HttpClientError.StatusCodeError({ request: response.request, response, description })
++        })
++      )
++  )
++
++/** Decodes a 2xx body against `schema`; any other status becomes a decodable `HttpClientError` (R4). */
++export const decodeOn2xx = <A, I>(schema: Schema.Codec<A, I>) =>
++  (response: HttpClientResponse.HttpClientResponse): Effect.Effect<A, UpcloudRawError> =>
++    isOk(response) ? HttpClientResponse.schemaBodyJson(schema)(response) : _unexpectedStatus(response)
++
++/** A 2xx with no body worth decoding (deletes). */
++export const decodeVoid = (response: HttpClientResponse.HttpClientResponse): Effect.Effect<void, UpcloudRawError> =>
++  isOk(response) ? Effect.void : _unexpectedStatus(response)
+diff --git a/packages/upcloud/src/client/network.ts b/packages/upcloud/src/client/network.ts
+new file mode 100644
+index 0000000..717898b
+--- /dev/null
++++ b/packages/upcloud/src/client/network.ts
+@@ -0,0 +1,95 @@
++/**
++ * Hand-written client (D1) over `/1.3/network` and `/1.3/router` (R3, D10).
++ * kumulo creates and owns the SDN network/router a UKS cluster requires —
++ * response envelope (`{"network": {...}}` / `{"networks": [...]}`) mirrors
++ * `upcloud-go-api`'s network resource; unconfirmed against a live probe.
++ */
++import { Effect } from "effect"
++import * as Schema from "effect/Schema"
++import type * as HttpClient from "effect/unstable/http/HttpClient"
++import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
++import { decodeOn2xx, decodeVoid } from "./common.ts"
++import type { UpcloudRawError } from "./common.ts"
++
++export const IpNetwork = Schema.Struct({
++  address: Schema.String,
++  dhcp: Schema.Boolean,
++  family: Schema.Literals(["IPv4", "IPv6"]),
++  gateway: Schema.optionalKey(Schema.String)
++})
++export type IpNetwork = typeof IpNetwork.Type
++
++export const Network = Schema.Struct({
++  uuid: Schema.String,
++  name: Schema.String,
++  zone: Schema.String,
++  router: Schema.optionalKey(Schema.String),
++  ip_networks: Schema.Array(IpNetwork)
++})
++export type Network = typeof Network.Type
++
++export const Router = Schema.Struct({
++  uuid: Schema.String,
++  name: Schema.String,
++  type: Schema.optionalKey(Schema.String),
++  attached_networks: Schema.optionalKey(Schema.Array(Schema.String))
++})
++export type Router = typeof Router.Type
++
++const _NetworkResponse = Schema.Struct({ network: Network })
++const _NetworksResponse = Schema.Struct({ networks: Schema.Array(Network) })
++const _RouterResponse = Schema.Struct({ router: Router })
++const _RoutersResponse = Schema.Struct({ routers: Schema.Array(Router) })
++
++const _decodeNetwork = decodeOn2xx(_NetworkResponse)
++const _decodeNetworks = decodeOn2xx(_NetworksResponse)
++const _decodeRouter = decodeOn2xx(_RouterResponse)
++const _decodeRouters = decodeOn2xx(_RoutersResponse)
++
++/** `POST /1.3/network` body (intent.md's networking section). */
++export interface NetworkCreateInput {
++  readonly name: string
++  readonly zone: string
++  readonly ip_networks: ReadonlyArray<IpNetwork>
++  readonly router?: string
++}
++
++export interface NetworkClient {
++  readonly list: () => Effect.Effect<ReadonlyArray<Network>, UpcloudRawError>
++  readonly get: (uuid: string) => Effect.Effect<Network, UpcloudRawError>
++  readonly create: (body: NetworkCreateInput) => Effect.Effect<Network, UpcloudRawError>
++  readonly delete: (uuid: string) => Effect.Effect<void, UpcloudRawError>
++}
++
++export interface RouterClient {
++  readonly list: () => Effect.Effect<ReadonlyArray<Router>, UpcloudRawError>
++  readonly get: (uuid: string) => Effect.Effect<Router, UpcloudRawError>
++  readonly create: (body: { readonly name: string }) => Effect.Effect<Router, UpcloudRawError>
++  readonly delete: (uuid: string) => Effect.Effect<void, UpcloudRawError>
++}
++
++/** Hand-written client (D1) over `/1.3/network*`. */
++export const makeNetworkClient = (httpClient: HttpClient.HttpClient): NetworkClient => ({
++  list: () => httpClient.execute(HttpClientRequest.get("/1.3/network")).pipe(Effect.flatMap(_decodeNetworks), Effect.map((r) => r.networks)),
++  get: (uuid) =>
++    httpClient.execute(HttpClientRequest.get(`/1.3/network/${uuid}`)).pipe(Effect.flatMap(_decodeNetwork), Effect.map((r) => r.network)),
++  create: (body) =>
++    httpClient.execute(HttpClientRequest.post("/1.3/network").pipe(HttpClientRequest.bodyJsonUnsafe({ network: body }))).pipe(
++      Effect.flatMap(_decodeNetwork),
++      Effect.map((r) => r.network)
++    ),
++  delete: (uuid) => httpClient.execute(HttpClientRequest.delete(`/1.3/network/${uuid}`)).pipe(Effect.flatMap(decodeVoid))
++})
++
++/** Hand-written client (D1) over `/1.3/router*`. */
++export const makeRouterClient = (httpClient: HttpClient.HttpClient): RouterClient => ({
++  list: () => httpClient.execute(HttpClientRequest.get("/1.3/router")).pipe(Effect.flatMap(_decodeRouters), Effect.map((r) => r.routers)),
++  get: (uuid) =>
++    httpClient.execute(HttpClientRequest.get(`/1.3/router/${uuid}`)).pipe(Effect.flatMap(_decodeRouter), Effect.map((r) => r.router)),
++  create: (body) =>
++    httpClient.execute(HttpClientRequest.post("/1.3/router").pipe(HttpClientRequest.bodyJsonUnsafe({ router: body }))).pipe(
++      Effect.flatMap(_decodeRouter),
++      Effect.map((r) => r.router)
++    ),
++  delete: (uuid) => httpClient.execute(HttpClientRequest.delete(`/1.3/router/${uuid}`)).pipe(Effect.flatMap(decodeVoid))
++})
+diff --git a/packages/upcloud/src/client/node-groups.ts b/packages/upcloud/src/client/node-groups.ts
+new file mode 100644
+index 0000000..9ba3147
+--- /dev/null
++++ b/packages/upcloud/src/client/node-groups.ts
+@@ -0,0 +1,104 @@
++/**
++ * Hand-written client (D1) over `/1.3/kubernetes/{uuid}/node-groups*` (R2).
++ * D8: `PATCH` accepts only `count` — every other creation-time field is
++ * immutable and drift on it is `distro-upcloud-uks`'s job, not this
++ * client's.
++ */
++import { Effect } from "effect"
++import * as Schema from "effect/Schema"
++import type * as HttpClient from "effect/unstable/http/HttpClient"
++import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
++import { decodeOn2xx, decodeVoid, UpcloudLabel } from "./common.ts"
++import type { UpcloudRawError } from "./common.ts"
++
++export const NodeGroupState = Schema.Literals([
++  "pending",
++  "running",
++  "scaling-up",
++  "scaling-down",
++  "terminating",
++  "failed",
++  "unknown"
++])
++export type NodeGroupState = typeof NodeGroupState.Type
++
++export const NodeGroupTaint = Schema.Struct({ key: Schema.String, value: Schema.String, effect: Schema.String })
++export type NodeGroupTaint = typeof NodeGroupTaint.Type
++
++export const NodeGroupStorage = Schema.Struct({ tier: Schema.optionalKey(Schema.String), size: Schema.optionalKey(Schema.Number) })
++export type NodeGroupStorage = typeof NodeGroupStorage.Type
++
++export const NodeGroup = Schema.Struct({
++  name: Schema.String,
++  count: Schema.Number,
++  plan: Schema.String,
++  state: NodeGroupState,
++  labels: Schema.optionalKey(Schema.Array(UpcloudLabel)),
++  taints: Schema.optionalKey(Schema.Array(NodeGroupTaint)),
++  kubelet_args: Schema.optionalKey(Schema.Array(Schema.String)),
++  ssh_keys: Schema.optionalKey(Schema.Array(Schema.String)),
++  storage: Schema.optionalKey(NodeGroupStorage),
++  anti_affinity: Schema.optionalKey(Schema.Boolean),
++  utility_network_access: Schema.optionalKey(Schema.Boolean),
++  storage_encryption: Schema.optionalKey(Schema.String)
++})
++export type NodeGroup = typeof NodeGroup.Type
++
++const _NodeGroupsResponse = Schema.Struct({ node_groups: Schema.Array(NodeGroup) })
++const _decodeNodeGroup = decodeOn2xx(NodeGroup)
++const _decodeNodeGroups = decodeOn2xx(_NodeGroupsResponse)
++
++/** Fields accepted by `POST .../node-groups` (intent.md's create table). */
++export interface NodeGroupCreateInput {
++  readonly name: string
++  readonly count: number
++  readonly plan: string
++  readonly labels?: ReadonlyArray<UpcloudLabel>
++  readonly taints?: ReadonlyArray<NodeGroupTaint>
++  readonly kubelet_args?: ReadonlyArray<string>
++  readonly ssh_keys?: ReadonlyArray<string>
++  readonly storage?: NodeGroupStorage
++  readonly anti_affinity?: boolean
++  readonly utility_network_access?: boolean
++  readonly storage_encryption?: string
++}
++
++/** D8: the only mutable field. */
++export interface NodeGroupPatchInput {
++  readonly count: number
++}
++
++export interface NodeGroupsClient {
++  readonly list: (clusterUuid: string) => Effect.Effect<ReadonlyArray<NodeGroup>, UpcloudRawError>
++  readonly get: (clusterUuid: string, name: string) => Effect.Effect<NodeGroup, UpcloudRawError>
++  readonly create: (clusterUuid: string, body: NodeGroupCreateInput) => Effect.Effect<NodeGroup, UpcloudRawError>
++  readonly patch: (clusterUuid: string, name: string, body: NodeGroupPatchInput) => Effect.Effect<NodeGroup, UpcloudRawError>
++  readonly delete: (clusterUuid: string, name: string) => Effect.Effect<void, UpcloudRawError>
++  readonly deleteNode: (clusterUuid: string, name: string, nodeName: string) => Effect.Effect<void, UpcloudRawError>
++}
++
++const _base = (clusterUuid: string): string => `/1.3/kubernetes/${clusterUuid}/node-groups`
++const _one = (clusterUuid: string, name: string): string => `${_base(clusterUuid)}/${name}`
++
++/** Hand-written client (D1) over `/1.3/kubernetes/{uuid}/node-groups*`. */
++export const makeNodeGroupsClient = (httpClient: HttpClient.HttpClient): NodeGroupsClient => ({
++  list: (clusterUuid) =>
++    httpClient.execute(HttpClientRequest.get(_base(clusterUuid))).pipe(
++      Effect.flatMap(_decodeNodeGroups),
++      Effect.map((r) => r.node_groups)
++    ),
++  get: (clusterUuid, name) => httpClient.execute(HttpClientRequest.get(_one(clusterUuid, name))).pipe(Effect.flatMap(_decodeNodeGroup)),
++  create: (clusterUuid, body) =>
++    httpClient.execute(HttpClientRequest.post(_base(clusterUuid)).pipe(HttpClientRequest.bodyJsonUnsafe(body))).pipe(
++      Effect.flatMap(_decodeNodeGroup)
++    ),
++  patch: (clusterUuid, name, body) =>
++    httpClient.execute(HttpClientRequest.patch(_one(clusterUuid, name)).pipe(HttpClientRequest.bodyJsonUnsafe(body))).pipe(
++      Effect.flatMap(_decodeNodeGroup)
++    ),
++  delete: (clusterUuid, name) => httpClient.execute(HttpClientRequest.delete(_one(clusterUuid, name))).pipe(Effect.flatMap(decodeVoid)),
++  // kumulo: does DELETE drain the node first? plan.md Q7 is unanswered
++  // without a live probe — `distro-upcloud-uks` must not assume it does.
++  deleteNode: (clusterUuid, name, nodeName) =>
++    httpClient.execute(HttpClientRequest.delete(`${_one(clusterUuid, name)}/${nodeName}`)).pipe(Effect.flatMap(decodeVoid))
++})
+diff --git a/packages/upcloud/src/client/uks.ts b/packages/upcloud/src/client/uks.ts
+new file mode 100644
+index 0000000..661b603
+--- /dev/null
++++ b/packages/upcloud/src/client/uks.ts
+@@ -0,0 +1,116 @@
++/**
++ * Hand-written client (D1) over UpCloud's `/1.3/kubernetes` UKS endpoints
++ * (R2). Every response is Schema-decoded (R4) — a shape mismatch surfaces as
++ * a `SchemaError` that `mapUpcloudError` turns into `ResponseDecodeError`,
++ * never a silent `undefined`.
++ *
++ * kumulo: the exact response envelope (bare object vs `{"cluster": {...}}`)
++ * is undocumented (plan.md Q8 — no live probe run yet); this transcribes
++ * `upcloud-go-api`'s `kubernetes.go`, which returns clusters bare and lists
++ * enveloped under a plural key. Node group and cluster `state` share one
++ * literal union per the requirements doc; UpCloud's docs do not confirm the
++ * cluster enum is identical to the node group one.
++ */
++import { Effect } from "effect"
++import * as Schema from "effect/Schema"
++import type * as HttpClient from "effect/unstable/http/HttpClient"
++import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
++import { decodeOn2xx, decodeVoid, UpcloudLabel } from "./common.ts"
++import type { UpcloudRawError } from "./common.ts"
++
++export const UksState = Schema.Literals(["pending", "running", "scaling-up", "scaling-down", "terminating", "failed", "unknown"])
++export type UksState = typeof UksState.Type
++
++export const UksCluster = Schema.Struct({
++  uuid: Schema.String,
++  name: Schema.String,
++  zone: Schema.String,
++  network: Schema.String,
++  network_cidr: Schema.String,
++  version: Schema.String,
++  plan: Schema.String,
++  state: UksState,
++  control_plane_ip_filter: Schema.optionalKey(Schema.Array(Schema.String)),
++  storage_encryption: Schema.optionalKey(Schema.String),
++  private_node_groups: Schema.optionalKey(Schema.Boolean),
++  labels: Schema.optionalKey(Schema.Array(UpcloudLabel))
++})
++export type UksCluster = typeof UksCluster.Type
++
++export const UksPlan = Schema.Struct({ name: Schema.String, description: Schema.optionalKey(Schema.String) })
++export type UksPlan = typeof UksPlan.Type
++
++const _ClustersResponse = Schema.Struct({ clusters: Schema.Array(UksCluster) })
++const _PlansResponse = Schema.Struct({ plans: Schema.Array(UksPlan) })
++const _UpgradesResponse = Schema.Struct({ versions: Schema.Array(Schema.String) })
++const _KubeconfigResponse = Schema.Struct({ kubeconfig: Schema.String })
++
++const _decodeCluster = decodeOn2xx(UksCluster)
++const _decodeClusters = decodeOn2xx(_ClustersResponse)
++const _decodePlans = decodeOn2xx(_PlansResponse)
++const _decodeUpgrades = decodeOn2xx(_UpgradesResponse)
++const _decodeKubeconfig = decodeOn2xx(_KubeconfigResponse)
++
++/** Fields accepted by `POST /1.3/kubernetes` (intent.md's create table). */
++export interface UksClusterCreateInput {
++  readonly name: string
++  readonly zone: string
++  /** D7: minor-only (`"1.31"`). Required — a cluster created without it lands on whatever UpCloud defaults to. */
++  readonly version: string
++  readonly network: string
++  readonly network_cidr: string
++  readonly plan?: string
++  readonly node_groups?: ReadonlyArray<unknown>
++  readonly private_node_groups?: boolean
++  readonly control_plane_ip_filter?: ReadonlyArray<string>
++  readonly labels?: ReadonlyArray<UpcloudLabel>
++  readonly storage_encryption?: string
++}
++
++/** D8: `PATCH /1.3/kubernetes/{uuid}` accepts only these two fields. */
++export interface UksClusterPatchInput {
++  readonly control_plane_ip_filter?: ReadonlyArray<string>
++  readonly labels?: ReadonlyArray<UpcloudLabel>
++}
++
++export interface UksClient {
++  readonly list: () => Effect.Effect<ReadonlyArray<UksCluster>, UpcloudRawError>
++  readonly get: (uuid: string) => Effect.Effect<UksCluster, UpcloudRawError>
++  readonly create: (body: UksClusterCreateInput) => Effect.Effect<UksCluster, UpcloudRawError>
++  readonly patch: (uuid: string, body: UksClusterPatchInput) => Effect.Effect<UksCluster, UpcloudRawError>
++  readonly delete: (uuid: string) => Effect.Effect<void, UpcloudRawError>
++  readonly availableUpgrades: (uuid: string) => Effect.Effect<ReadonlyArray<string>, UpcloudRawError>
++  readonly upgrade: (uuid: string, body: { readonly version: string; readonly strategy: string }) => Effect.Effect<void, UpcloudRawError>
++  readonly kubeconfig: (uuid: string) => Effect.Effect<string, UpcloudRawError>
++  readonly plans: () => Effect.Effect<ReadonlyArray<UksPlan>, UpcloudRawError>
++}
++
++const _base = "/1.3/kubernetes"
++
++/** Hand-written client (D1) over `/1.3/kubernetes*`. */
++export const makeUksClient = (httpClient: HttpClient.HttpClient): UksClient => ({
++  list: () => httpClient.execute(HttpClientRequest.get(_base)).pipe(Effect.flatMap(_decodeClusters), Effect.map((r) => r.clusters)),
++  get: (uuid) => httpClient.execute(HttpClientRequest.get(`${_base}/${uuid}`)).pipe(Effect.flatMap(_decodeCluster)),
++  create: (body) =>
++    httpClient.execute(HttpClientRequest.post(_base).pipe(HttpClientRequest.bodyJsonUnsafe(body))).pipe(Effect.flatMap(_decodeCluster)),
++  patch: (uuid, body) =>
++    httpClient.execute(HttpClientRequest.patch(`${_base}/${uuid}`).pipe(HttpClientRequest.bodyJsonUnsafe(body))).pipe(
++      Effect.flatMap(_decodeCluster)
++    ),
++  delete: (uuid) => httpClient.execute(HttpClientRequest.delete(`${_base}/${uuid}`)).pipe(Effect.flatMap(decodeVoid)),
++  availableUpgrades: (uuid) =>
++    httpClient.execute(HttpClientRequest.get(`${_base}/${uuid}/available-upgrades`)).pipe(
++      Effect.flatMap(_decodeUpgrades),
++      Effect.map((r) => r.versions)
++    ),
++  upgrade: (uuid, body) =>
++    httpClient.execute(HttpClientRequest.post(`${_base}/${uuid}/upgrade`).pipe(HttpClientRequest.bodyJsonUnsafe(body))).pipe(
++      Effect.flatMap(decodeVoid)
++    ),
++  kubeconfig: (uuid) =>
++    httpClient.execute(HttpClientRequest.get(`${_base}/${uuid}/kubeconfig`)).pipe(
++      Effect.flatMap(_decodeKubeconfig),
++      Effect.map((r) => r.kubeconfig)
++    ),
++  plans: () => httpClient.execute(HttpClientRequest.get(`${_base}/plans`)).pipe(Effect.flatMap(_decodePlans), Effect.map((r) => r.plans))
++})
+diff --git a/packages/upcloud/src/client/zone.ts b/packages/upcloud/src/client/zone.ts
+new file mode 100644
+index 0000000..ccd5594
+--- /dev/null
++++ b/packages/upcloud/src/client/zone.ts
+@@ -0,0 +1,38 @@
++/**
++ * Hand-written client (D1) over `/1.3/zone`.
++ *
++ * kumulo: exists so the zone doctor check asks UpCloud instead of comparing
++ * against a hand-kept list. UpCloud adds zones (Madrid, Warsaw, Stockholm and
++ * Sydney all post-date the docs page's own sample response), and a stale
++ * hardcoded set fails a config that is actually valid — the worst kind of
++ * doctor result, since it reads as a real diagnosis.
++ */
++import { Effect } from "effect"
++import * as Schema from "effect/Schema"
++import type * as HttpClient from "effect/unstable/http/HttpClient"
++import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
++import { decodeOn2xx } from "./common.ts"
++import type { UpcloudRawError } from "./common.ts"
++
++export const Zone = Schema.Struct({
++  id: Schema.String,
++  description: Schema.optionalKey(Schema.String),
++  /** `"yes"`/`"no"` — private-cloud zones are not orderable by a normal account. */
++  public: Schema.optionalKey(Schema.String)
++})
++export type Zone = typeof Zone.Type
++
++const _ZonesResponse = Schema.Struct({ zones: Schema.Struct({ zone: Schema.Array(Zone) }) })
++const _decodeZones = decodeOn2xx(_ZonesResponse)
++
++export interface ZoneClient {
++  readonly list: () => Effect.Effect<ReadonlyArray<Zone>, UpcloudRawError>
++}
++
++export const makeZoneClient = (httpClient: HttpClient.HttpClient): ZoneClient => ({
++  list: () =>
++    httpClient.execute(HttpClientRequest.get("/1.3/zone")).pipe(
++      Effect.flatMap(_decodeZones),
++      Effect.map((response) => response.zones.zone)
++    )
++})
+diff --git a/packages/upcloud/src/errors/index.ts b/packages/upcloud/src/errors/index.ts
+new file mode 100644
+index 0000000..a250211
+--- /dev/null
++++ b/packages/upcloud/src/errors/index.ts
+@@ -0,0 +1,102 @@
++/**
++ * HTTP status -> core tagged error (R5). UpCloud's exact 4xx error body shape
++ * is an open question (plan.md Q8, needs a live probe) — until then, quota
++ * detection is status-only (402, per R5) rather than body-sniffed the way
++ * hcloud's `_isQuota` inspects a machine-readable error code.
++ */
++import { Effect } from "effect"
++import type { SchemaError } from "effect/Schema"
++import * as HttpClientError from "effect/unstable/http/HttpClientError"
++import type * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
++import {
++  AuthenticationFailed,
++  HttpTransportError,
++  ProviderApiError,
++  QuotaExceeded,
++  RateLimited,
++  ResourceConflict,
++  ResourceNotFound,
++  ResponseDecodeError
++} from "@kumulo/core"
++
++/** Exactly the tags this package can raise (R5). */
++export type UpcloudError =
++  | AuthenticationFailed
++  | QuotaExceeded
++  | RateLimited
++  | ProviderApiError
++  | ResourceNotFound
++  | ResourceConflict
++  | ResponseDecodeError
++  | HttpTransportError
++
++/** Failure channel of every client operation before mapping. */
++export type UpcloudCause = HttpClientError.HttpClientError | SchemaError
++
++export interface ErrorContext {
++  readonly kind: string
++  readonly ref: string
++}
++
++const _op = (ctx: ErrorContext): string => `${ctx.kind} ${ctx.ref}`
++
++export interface Classified extends ErrorContext {
++  readonly status: number
++  readonly body: string
++  readonly retryAfter: string | undefined
++}
++
++// Status -> tagged error, keyed by code (no `switch`, per project lint rule).
++// 402 is UpCloud's payment-required signal, used here for quota exhaustion
++// (R5); anything unlisted — every other 4xx and every 5xx — falls through to
++// `ProviderApiError`, which carries the real status and body instead of
++// guessing.
++const _byStatus: Record<number, (c: Classified) => UpcloudError> = {
++  401: (c) => new AuthenticationFailed({ hint: `${_op(c)}: UpCloud rejected the API token` }),
++  402: (c) => new QuotaExceeded({ resource: c.kind }),
++  403: (c) => new AuthenticationFailed({ hint: `${_op(c)}: UpCloud API token lacks permission` }),
++  404: (c) => new ResourceNotFound({ kind: c.kind, ref: c.ref }),
++  409: (c) => new ResourceConflict({ kind: c.kind, ref: c.ref }),
++  429: (c) => new RateLimited({ kind: c.kind, ref: c.ref, retryAfter: c.retryAfter })
++}
++
++/** Maps a classified HTTP status onto its tagged error — pure, total over the whole status space. */
++export const statusError = (c: Classified): UpcloudError => {
++  const mapped = _byStatus[c.status]
++  return mapped === undefined
++    ? new ProviderApiError({ operation: _op(c), status: c.status, body: c.body.slice(0, 512) })
++    : mapped(c)
++}
++
++// `Retry-After` (relative seconds) is preferred over `RateLimit-Reset` (an
++// absolute UNIX timestamp) — both are passed through verbatim, undecorated.
++const _retryAfter = (response: HttpClientResponse.HttpClientResponse): string | undefined =>
++  response.headers["retry-after"] ?? response.headers["ratelimit-reset"]
++
++const _bodyText = (response: HttpClientResponse.HttpClientResponse): Effect.Effect<string> =>
++  Effect.orElseSucceed(response.text, () => "")
++
++/** Maps a client-call failure (`HttpClientError | SchemaError`) onto `UpcloudError` (R5). */
++export const toUpcloudError = (
++  { cause, ctx }: { readonly cause: UpcloudCause; readonly ctx: ErrorContext }
++): Effect.Effect<UpcloudError> => {
++  if (!HttpClientError.isHttpClientError(cause)) {
++    return Effect.succeed(new ResponseDecodeError({ endpoint: _op(ctx), issue: cause.issue }))
++  }
++  const response = cause.response
++  if (response === undefined) return Effect.succeed(new HttpTransportError({ cause }))
++  return Effect.map(
++    _bodyText(response),
++    (body) => statusError({ ...ctx, status: response.status, body, retryAfter: _retryAfter(response) })
++  )
++}
++
++/** Maps every failure of `self` (`HttpClientError | SchemaError`) onto `UpcloudError` (R5). */
++export const mapUpcloudError = <A, R>(
++  { self, ctx }: { readonly self: Effect.Effect<A, UpcloudCause, R>; readonly ctx: ErrorContext }
++): Effect.Effect<A, UpcloudError, R> =>
++  Effect.catch(self, (cause) => Effect.flatMap(toUpcloudError({ cause, ctx }), Effect.fail))
++
++/** Deleting an already-gone resource is a success, not a failure. */
++export const ignoreMissing = <A, R>(self: Effect.Effect<A, UpcloudError, R>): Effect.Effect<void, UpcloudError, R> =>
++  Effect.asVoid(Effect.catchTag(self, "ResourceNotFound", () => Effect.void))
+diff --git a/packages/upcloud/src/index.ts b/packages/upcloud/src/index.ts
+new file mode 100644
+index 0000000..bd7b66d
+--- /dev/null
++++ b/packages/upcloud/src/index.ts
+@@ -0,0 +1,29 @@
++/** @kumulo/upcloud — package barrel. */
++export const packageName = "@kumulo/upcloud"
++
++export {
++  transportMaxRetries,
++  transportRetrySchedule,
++  UPCLOUD_API_BASE_URL,
++  UpcloudHttpLive,
++  makeUpcloudHttpClient
++} from "./transport/http-client.ts"
++export type { UpcloudHttpClientOptions } from "./transport/http-client.ts"
++
++export { ignoreMissing, mapUpcloudError, statusError, toUpcloudError } from "./errors/index.ts"
++export type { Classified, ErrorContext, UpcloudCause, UpcloudError } from "./errors/index.ts"
++
++export { UpcloudLabel } from "./client/common.ts"
++export type { UpcloudRawError } from "./client/common.ts"
++
++export { makeUksClient, UksCluster, UksPlan, UksState } from "./client/uks.ts"
++export type { UksClient, UksClusterCreateInput, UksClusterPatchInput } from "./client/uks.ts"
++
++export { makeNodeGroupsClient, NodeGroup, NodeGroupState, NodeGroupStorage, NodeGroupTaint } from "./client/node-groups.ts"
++export type { NodeGroupCreateInput, NodeGroupPatchInput, NodeGroupsClient } from "./client/node-groups.ts"
++
++export { IpNetwork, makeNetworkClient, makeRouterClient, Network, Router } from "./client/network.ts"
++export type { NetworkClient, NetworkCreateInput, RouterClient } from "./client/network.ts"
++
++export { makeZoneClient, Zone } from "./client/zone.ts"
++export type { ZoneClient } from "./client/zone.ts"
+diff --git a/packages/upcloud/src/transport/http-client.ts b/packages/upcloud/src/transport/http-client.ts
+new file mode 100644
+index 0000000..abf2b47
+--- /dev/null
++++ b/packages/upcloud/src/transport/http-client.ts
+@@ -0,0 +1,53 @@
++/**
++ * Static-bearer-token auth + retry-on-429/5xx transport wrapper (R1, R6).
++ * UpCloud API tokens are static (D1 — hand-written client, no OAuth2 dance),
++ * so the token is read once at Layer construction and never logged: only
++ * `Redacted.value` unwraps it, and only inside the request builder.
++ *
++ * kumulo: same exp-backoff+jitter shape as `dns-hetzner/transport/http-client.ts`'s
++ * `transportRetrySchedule` — dependency-cruiser forbids importing a sibling
++ * package's `src/` internals, so the constants are copied here, not shared.
++ */
++import { Effect, Layer, Schedule } from "effect"
++import type { Duration, Redacted } from "effect"
++import * as HttpClient from "effect/unstable/http/HttpClient"
++import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
++
++export const UPCLOUD_API_BASE_URL = "https://api.upcloud.com"
++
++const _isRetryableStatus = (status: number): boolean => status === 429 || (status >= 500 && status < 600)
++
++export const transportRetrySchedule: Schedule.Schedule<Duration.Duration> = Schedule.exponential("200 millis", 2).pipe(
++  Schedule.jittered
++)
++export const transportMaxRetries = 5
++
++export interface UpcloudHttpClientOptions {
++  readonly base: HttpClient.HttpClient
++  readonly token: Redacted.Redacted<string>
++  readonly baseUrl?: string
++}
++
++/** Wraps a base `HttpClient` with Bearer-token injection + the UpCloud API base URL, plus bounded retry-on-429/5xx. */
++export const makeUpcloudHttpClient = (options: UpcloudHttpClientOptions): HttpClient.HttpClient => {
++  const baseUrl = options.baseUrl ?? UPCLOUD_API_BASE_URL
++  const authed = options.base.pipe(
++    HttpClient.mapRequest((request) => request.pipe(HttpClientRequest.bearerToken(options.token), HttpClientRequest.prependUrl(baseUrl)))
++  )
++  const schedule = Schedule.passthrough(transportRetrySchedule)
++  // kumulo: `HttpClient.transformResponse` wraps the base client's response
++  // effect in place — reusing its existing request/URL-resolution pipeline —
++  // rather than reconstructing a client from scratch via `HttpClient.make`,
++  // which would need an already-absolute request URL before this layer ever
++  // gets to prepend one.
++  return HttpClient.transformResponse(
++    authed,
++    (effect) => Effect.repeat(effect, { schedule, times: transportMaxRetries, while: (response) => _isRetryableStatus(response.status) })
++  )
++}
++
++/** `HttpClient.HttpClient` in, wrapped `HttpClient.HttpClient` out — feeds straight into a generated/hand-written UpCloud client. */
++export const UpcloudHttpLive = (
++  { token, baseUrl }: { readonly token: Redacted.Redacted<string>; readonly baseUrl?: string }
++): Layer.Layer<HttpClient.HttpClient, never, HttpClient.HttpClient> =>
++  Layer.effect(HttpClient.HttpClient, Effect.map(HttpClient.HttpClient, (base) => makeUpcloudHttpClient({ base, token, baseUrl })))
+diff --git a/packages/upcloud/test/client/capture.ts b/packages/upcloud/test/client/capture.ts
+new file mode 100644
+index 0000000..2f79abf
+--- /dev/null
++++ b/packages/upcloud/test/client/capture.ts
+@@ -0,0 +1,13 @@
++import type * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
++
++/**
++ * The JSON a request carries, for tests that assert on the wire body.
++ *
++ * kumulo: `HttpBody` is a tagged union, so `_tag === "Uint8Array"` narrows to
++ * the variant that has `.body` — no `as` needed (the repo's `no-type-assertion`
++ * rule forbids one, and three client test files had each written the same cast).
++ */
++export const capturedJson = (request: HttpClientRequest.HttpClientRequest): unknown => {
++  const body = request.body
++  return body._tag === "Uint8Array" ? JSON.parse(new TextDecoder().decode(body.body)) : {}
++}
+diff --git a/packages/upcloud/test/client/network.test.ts b/packages/upcloud/test/client/network.test.ts
+new file mode 100644
+index 0000000..7c05d52
+--- /dev/null
++++ b/packages/upcloud/test/client/network.test.ts
+@@ -0,0 +1,79 @@
++import { Effect } from "effect"
++import { assert, it } from "@effect/vitest"
++import * as HttpClient from "effect/unstable/http/HttpClient"
++import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
++import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
++import { makeNetworkClient, makeRouterClient } from "../../src/client/network.ts"
++import { capturedJson } from "./capture.ts"
++
++const _fixtureBaseUrl = "https://fixture.invalid"
++
++const _rawHttpClient = (handle: (request: HttpClientRequest.HttpClientRequest) => Response) =>
++  HttpClient.make((request) => Effect.succeed(HttpClientResponse.fromWeb(request, handle(request)))).pipe(
++    HttpClient.mapRequest(HttpClientRequest.prependUrl(_fixtureBaseUrl))
++  )
++
++const _fixtureHttpClient = (status: number, body: unknown) => _rawHttpClient(() => new Response(JSON.stringify(body), { status }))
++
++const _network = {
++  uuid: "net-1",
++  name: "kumulo-demo",
++  zone: "de-fra1",
++  router: "router-1",
++  ip_networks: [{ address: "10.0.0.0/24", dhcp: true, family: "IPv4" as const }]
++}
++const _router = { uuid: "router-1", name: "kumulo-demo", type: "normal" }
++
++it.effect("POST /1.3/network sends {network: body} and decodes {network: {...}}", () =>
++  Effect.gen(function*() {
++    let captured: unknown
++    const client = makeNetworkClient(
++      _rawHttpClient((request) => {
++        captured = capturedJson(request)
++        return new Response(JSON.stringify({ network: _network }), { status: 200 })
++      })
++    )
++    const created = yield* client.create({
++      name: "kumulo-demo",
++      zone: "de-fra1",
++      ip_networks: [{ address: "10.0.0.0/24", dhcp: true, family: "IPv4" }]
++    })
++    assert.deepStrictEqual(captured, {
++      network: { name: "kumulo-demo", zone: "de-fra1", ip_networks: [{ address: "10.0.0.0/24", dhcp: true, family: "IPv4" }] }
++    })
++    assert.deepStrictEqual(created, _network)
++  }))
++
++it.effect("GET /1.3/network decodes {networks: [...]}", () =>
++  Effect.gen(function*() {
++    const client = makeNetworkClient(_fixtureHttpClient(200, { networks: [_network] }))
++    const networks = yield* client.list()
++    assert.deepStrictEqual(networks, [_network])
++  }))
++
++it.effect("DELETE /1.3/network/{uuid} hits the right path", () =>
++  Effect.gen(function*() {
++    let capturedPath: string | undefined
++    const client = makeNetworkClient(
++      _rawHttpClient((request) => {
++        capturedPath = request.url
++        return new Response(null, { status: 204 })
++      })
++    )
++    yield* client.delete("net-1")
++    assert.strictEqual(capturedPath, `${_fixtureBaseUrl}/1.3/network/net-1`)
++  }))
++
++it.effect("POST /1.3/router decodes {router: {...}}", () =>
++  Effect.gen(function*() {
++    const client = makeRouterClient(_fixtureHttpClient(200, { router: _router }))
++    const router = yield* client.create({ name: "kumulo-demo" })
++    assert.deepStrictEqual(router, _router)
++  }))
++
++it.effect("R4: a missing ip_networks field surfaces as a decode failure", () =>
++  Effect.gen(function*() {
++    const client = makeNetworkClient(_fixtureHttpClient(200, { network: { uuid: "net-1", name: "x", zone: "de-fra1" } }))
++    const failure = yield* Effect.flip(client.get("net-1"))
++    assert.strictEqual(failure._tag, "SchemaError")
++  }))
+diff --git a/packages/upcloud/test/client/node-groups.test.ts b/packages/upcloud/test/client/node-groups.test.ts
+new file mode 100644
+index 0000000..9608e3c
+--- /dev/null
++++ b/packages/upcloud/test/client/node-groups.test.ts
+@@ -0,0 +1,66 @@
++import { Effect } from "effect"
++import { assert, it } from "@effect/vitest"
++import * as HttpClient from "effect/unstable/http/HttpClient"
++import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
++import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
++import { makeNodeGroupsClient } from "../../src/client/node-groups.ts"
++import { capturedJson } from "./capture.ts"
++
++const _fixtureBaseUrl = "https://fixture.invalid"
++
++const _rawHttpClient = (handle: (request: HttpClientRequest.HttpClientRequest) => Response) =>
++  HttpClient.make((request) => Effect.succeed(HttpClientResponse.fromWeb(request, handle(request)))).pipe(
++    HttpClient.mapRequest(HttpClientRequest.prependUrl(_fixtureBaseUrl))
++  )
++
++const _fixtureHttpClient = (status: number, body: unknown) => _rawHttpClient(() => new Response(JSON.stringify(body), { status }))
++
++const _group = { name: "workers-ab12cd34", count: 3, plan: "2xCPU-4GB", state: "running" as const }
++
++it.effect("decodes GET .../node-groups as {node_groups: [...]}", () =>
++  Effect.gen(function*() {
++    const client = makeNodeGroupsClient(_fixtureHttpClient(200, { node_groups: [_group] }))
++    const groups = yield* client.list("c1")
++    assert.deepStrictEqual(groups, [_group])
++  }))
++
++it.effect("decodes GET .../node-groups/{name} bare", () =>
++  Effect.gen(function*() {
++    const client = makeNodeGroupsClient(_fixtureHttpClient(200, _group))
++    const group = yield* client.get("c1", "workers-ab12cd34")
++    assert.deepStrictEqual(group, _group)
++  }))
++
++it.effect("PATCH only sends count (D8)", () =>
++  Effect.gen(function*() {
++    let captured: unknown
++    const client = makeNodeGroupsClient(
++      _rawHttpClient((request) => {
++        captured = capturedJson(request)
++        return new Response(JSON.stringify({ ..._group, count: 5 }), { status: 200 })
++      })
++    )
++    const group = yield* client.patch("c1", "workers-ab12cd34", { count: 5 })
++    assert.deepStrictEqual(captured, { count: 5 })
++    assert.strictEqual(group.count, 5)
++  }))
++
++it.effect("DELETE single node hits .../node-groups/{name}/{node}", () =>
++  Effect.gen(function*() {
++    let capturedPath: string | undefined
++    const client = makeNodeGroupsClient(
++      _rawHttpClient((request) => {
++        capturedPath = request.url
++        return new Response(null, { status: 204 })
++      })
++    )
++    yield* client.deleteNode("c1", "workers-ab12cd34", "node-1")
++    assert.strictEqual(capturedPath, `${_fixtureBaseUrl}/1.3/kubernetes/c1/node-groups/workers-ab12cd34/node-1`)
++  }))
++
++it.effect("R4: an unrecognized state literal surfaces as a decode failure", () =>
++  Effect.gen(function*() {
++    const client = makeNodeGroupsClient(_fixtureHttpClient(200, { ..._group, state: "not-a-real-state" }))
++    const failure = yield* Effect.flip(client.get("c1", "workers-ab12cd34"))
++    assert.strictEqual(failure._tag, "SchemaError")
++  }))
+diff --git a/packages/upcloud/test/client/uks.test.ts b/packages/upcloud/test/client/uks.test.ts
+new file mode 100644
+index 0000000..0b9af88
+--- /dev/null
++++ b/packages/upcloud/test/client/uks.test.ts
+@@ -0,0 +1,92 @@
++import { Effect } from "effect"
++import { assert, it } from "@effect/vitest"
++import * as HttpClient from "effect/unstable/http/HttpClient"
++import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
++import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
++import { makeUksClient } from "../../src/client/uks.ts"
++import { capturedJson } from "./capture.ts"
++
++const _fixtureBaseUrl = "https://fixture.invalid"
++
++const _rawHttpClient = (handle: (request: HttpClientRequest.HttpClientRequest) => Response) =>
++  HttpClient.make((request) => Effect.succeed(HttpClientResponse.fromWeb(request, handle(request)))).pipe(
++    HttpClient.mapRequest(HttpClientRequest.prependUrl(_fixtureBaseUrl))
++  )
++
++const _fixtureHttpClient = (status: number, body: unknown) => _rawHttpClient(() => new Response(JSON.stringify(body), { status }))
++
++const _cluster = {
++  uuid: "c1",
++  name: "demo",
++  zone: "de-fra1",
++  network: "net-uuid",
++  network_cidr: "10.0.0.0/24",
++  version: "1.31",
++  plan: "dev-md",
++  state: "running" as const
++}
++
++it.effect("decodes GET /1.3/kubernetes/{uuid} against the documented cluster shape", () =>
++  Effect.gen(function*() {
++    const client = makeUksClient(_fixtureHttpClient(200, _cluster))
++    const cluster = yield* client.get("c1")
++    assert.deepStrictEqual(cluster, _cluster)
++  }))
++
++it.effect("decodes GET /1.3/kubernetes as {clusters: [...]}", () =>
++  Effect.gen(function*() {
++    const client = makeUksClient(_fixtureHttpClient(200, { clusters: [_cluster] }))
++    const clusters = yield* client.list()
++    assert.strictEqual(clusters.length, 1)
++    assert.strictEqual(clusters[0]?.uuid, "c1")
++  }))
++
++it.effect("POST create sends the full body and decodes the created cluster", () =>
++  Effect.gen(function*() {
++    let captured: unknown
++    const client = makeUksClient(
++      _rawHttpClient((request) => {
++        captured = capturedJson(request)
++        return new Response(JSON.stringify(_cluster), { status: 200 })
++      })
++    )
++    const body = { name: "demo", zone: "de-fra1", version: "1.31", network: "net-uuid", network_cidr: "10.0.0.0/24" }
++    yield* client.create(body)
++    // D7: `version` is part of the create body — a cluster created without it
++    // silently lands on UpCloud's default.
++    assert.deepStrictEqual(captured, body)
++  }))
++
++it.effect("GET available-upgrades decodes {\"versions\": [...]}", () =>
++  Effect.gen(function*() {
++    const client = makeUksClient(_fixtureHttpClient(200, { versions: ["1.31"] }))
++    const versions = yield* client.availableUpgrades("c1")
++    assert.deepStrictEqual(versions, ["1.31"])
++  }))
++
++it.effect("GET kubeconfig decodes {\"kubeconfig\": \"<yaml>\"}", () =>
++  Effect.gen(function*() {
++    const client = makeUksClient(_fixtureHttpClient(200, { kubeconfig: "apiVersion: v1\n" }))
++    const kubeconfig = yield* client.kubeconfig("c1")
++    assert.strictEqual(kubeconfig, "apiVersion: v1\n")
++  }))
++
++it.effect("R4: a shape mismatch surfaces as a decode failure, not undefined", () =>
++  Effect.gen(function*() {
++    const client = makeUksClient(_fixtureHttpClient(200, { uuid: "c1" }))
++    const failure = yield* Effect.flip(client.get("c1"))
++    assert.strictEqual(failure._tag, "SchemaError")
++  }))
++
++it.effect("DELETE /1.3/kubernetes/{uuid} hits the right path", () =>
++  Effect.gen(function*() {
++    let capturedPath: string | undefined
++    const client = makeUksClient(
++      _rawHttpClient((request) => {
++        capturedPath = request.url
++        return new Response(null, { status: 204 })
++      })
++    )
++    yield* client.delete("c1")
++    assert.strictEqual(capturedPath, `${_fixtureBaseUrl}/1.3/kubernetes/c1`)
++  }))
+diff --git a/packages/upcloud/test/client/zone.test.ts b/packages/upcloud/test/client/zone.test.ts
+new file mode 100644
+index 0000000..e7a1000
+--- /dev/null
++++ b/packages/upcloud/test/client/zone.test.ts
+@@ -0,0 +1,27 @@
++import { Effect } from "effect"
++import { assert, it } from "@effect/vitest"
++import * as HttpClient from "effect/unstable/http/HttpClient"
++import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
++import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
++import { makeZoneClient } from "../../src/client/zone.ts"
++
++const _client = (status: number, body: unknown) =>
++  makeZoneClient(
++    HttpClient.make((request) => Effect.succeed(HttpClientResponse.fromWeb(request, new Response(JSON.stringify(body), { status })))).pipe(
++      HttpClient.mapRequest(HttpClientRequest.prependUrl("https://fixture.invalid"))
++    )
++  )
++
++it.effect("GET /1.3/zone decodes UpCloud's nested {zones:{zone:[...]}} envelope", () =>
++  Effect.gen(function*() {
++    const zones = yield* _client(200, {
++      zones: { zone: [{ id: "de-fra1", description: "Frankfurt #1", public: "yes" }, { id: "es-mad1" }] }
++    }).list()
++    assert.deepStrictEqual(zones.map((zone) => zone.id), ["de-fra1", "es-mad1"])
++  }))
++
++it.effect("a response missing the envelope is a decode failure, never an empty list (R4)", () =>
++  Effect.gen(function*() {
++    const result = yield* Effect.result(_client(200, { zones: [{ id: "de-fra1" }] }).list())
++    assert.strictEqual(result._tag, "Failure")
++  }))
+diff --git a/packages/upcloud/test/errors/index.test.ts b/packages/upcloud/test/errors/index.test.ts
+new file mode 100644
+index 0000000..43a2fde
+--- /dev/null
++++ b/packages/upcloud/test/errors/index.test.ts
+@@ -0,0 +1,57 @@
++import {
++  AuthenticationFailed,
++  ProviderApiError,
++  QuotaExceeded,
++  RateLimited,
++  ResourceConflict,
++  ResourceNotFound
++} from "@kumulo/core"
++import { describe, expect, it } from "@effect/vitest"
++import { FastCheck as fc } from "effect/testing"
++import { statusError } from "../../src/errors/index.ts"
++
++const _at = (status: number, retryAfter?: string) => statusError({ status, kind: "cluster", ref: "kumulo-demo", body: "", retryAfter })
++
++const _explicit: Record<number, new(...args: never) => object> = {
++  401: AuthenticationFailed,
++  402: QuotaExceeded,
++  403: AuthenticationFailed,
++  404: ResourceNotFound,
++  409: ResourceConflict,
++  429: RateLimited
++}
++
++describe("statusError", () => {
++  it("maps the statuses R5 gives a distinct meaning", () => {
++    for (const [status, tag] of Object.entries(_explicit)) {
++      expect(_at(Number(status))).toBeInstanceOf(tag)
++    }
++  })
++
++  it("carries the Retry-After verbatim on a 429", () => {
++    expect(_at(429, "30")).toMatchObject({ kind: "cluster", ref: "kumulo-demo", retryAfter: "30" })
++  })
++
++  // R5 + N2: total over the whole HTTP status space — every code lands on
++  // exactly one tagged error, and every status outside the explicit map is a
++  // `ProviderApiError` that carries the real status rather than guessing.
++  it.prop("every status in 100..599 maps to exactly one tagged error", [fc.integer({ min: 100, max: 599 })], ([status]) => {
++    const error = _at(status)
++    const expectedTag = _explicit[status]
++    if (expectedTag === undefined) {
++      expect(error).toBeInstanceOf(ProviderApiError)
++      expect(error).toMatchObject({ status })
++    } else {
++      expect(error).toBeInstanceOf(expectedTag)
++    }
++    // Exactly one: never both the specific tag and the catch-all.
++    const isCatchAll = error instanceof ProviderApiError
++    const isSpecific = expectedTag !== undefined && error instanceof expectedTag
++    expect(isCatchAll !== isSpecific).toBe(true)
++  })
++
++  it("keeps unclassified statuses distinguishable by their real status code", () => {
++    expect(_at(422)).toMatchObject({ status: 422 })
++    expect(_at(500)).toMatchObject({ status: 500 })
++  })
++})
+diff --git a/packages/upcloud/test/transport/http-client.test.ts b/packages/upcloud/test/transport/http-client.test.ts
+new file mode 100644
+index 0000000..bdd4181
+--- /dev/null
++++ b/packages/upcloud/test/transport/http-client.test.ts
+@@ -0,0 +1,57 @@
++import { Effect, Redacted } from "effect"
++import { assert, it } from "@effect/vitest"
++import * as HttpClient from "effect/unstable/http/HttpClient"
++import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
++import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
++import { makeUpcloudHttpClient } from "../../src/transport/http-client.ts"
++
++const _rawHttpClient = (handle: (request: HttpClientRequest.HttpClientRequest) => Response) =>
++  HttpClient.make((request) => Effect.succeed(HttpClientResponse.fromWeb(request, handle(request))))
++
++it.effect("sends the bearer token and prepends the UpCloud API base URL", () =>
++  Effect.gen(function*() {
++    let captured: { readonly url: string; readonly auth: string | undefined } | undefined
++    const base = _rawHttpClient((request) => {
++      captured = { url: request.url, auth: request.headers.authorization }
++      return new Response(null, { status: 200 })
++    })
++    const client = makeUpcloudHttpClient({ base, token: Redacted.make("secret-token"), baseUrl: "https://fixture.invalid" })
++    yield* client.execute(HttpClientRequest.get("/1.3/kubernetes"))
++    assert.strictEqual(captured?.url, "https://fixture.invalid/1.3/kubernetes")
++    assert.strictEqual(captured?.auth, "Bearer secret-token")
++  }))
++
++// R6: the token is a `Redacted<string>` — rendering it (`String`, template
++// literal, JSON.stringify) must never expose the raw secret, including when
++// that render happens as part of an error message built around the client.
++it("never leaks the token when the client (or an error carrying it) is rendered", () => {
++  const token = Redacted.make("super-secret-token")
++  const base = _rawHttpClient(() => new Response(null, { status: 500 }))
++  const client = makeUpcloudHttpClient({ base, token, baseUrl: "https://fixture.invalid" })
++  const rendered = `${String(token)} ${JSON.stringify({ client, token })}`
++  assert.strictEqual(rendered.includes("super-secret-token"), false)
++})
++
++it("retries on 429 and eventually succeeds", async () => {
++  let calls = 0
++  const base = _rawHttpClient(() => {
++    calls++
++    return new Response(null, { status: calls < 3 ? 429 : 200 })
++  })
++  const client = makeUpcloudHttpClient({ base, token: Redacted.make("secret-token"), baseUrl: "https://fixture.invalid" })
++  const response = await Effect.runPromise(client.execute(HttpClientRequest.get("/1.3/kubernetes")))
++  assert.strictEqual(response.status, 200)
++  assert.strictEqual(calls, 3)
++}, 10_000)
++
++it("gives up after the max retry bound on a persistent 5xx", async () => {
++  let calls = 0
++  const base = _rawHttpClient(() => {
++    calls++
++    return new Response(null, { status: 503 })
++  })
++  const client = makeUpcloudHttpClient({ base, token: Redacted.make("secret-token"), baseUrl: "https://fixture.invalid" })
++  const response = await Effect.runPromise(client.execute(HttpClientRequest.get("/1.3/kubernetes")))
++  assert.strictEqual(response.status, 503)
++  assert.strictEqual(calls, 6) // 1 initial + 5 retries
++}, 10_000)
+diff --git a/packages/upcloud/tsconfig.build.json b/packages/upcloud/tsconfig.build.json
+new file mode 100644
+index 0000000..e2c8dc9
+--- /dev/null
++++ b/packages/upcloud/tsconfig.build.json
+@@ -0,0 +1,14 @@
++{
++  "extends": "./tsconfig.json",
++  "compilerOptions": {
++    "noEmit": false,
++    "allowJs": false,
++    "declaration": true,
++    "emitDeclarationOnly": true,
++    "declarationDir": "./dist",
++    "rootDir": "./src",
++    "paths": { "@kumulo/*": ["../*/dist/index.d.ts"] }
++  },
++  "include": ["src"],
++  "exclude": ["src/**/*.test.ts", "dist"]
++}
+diff --git a/packages/upcloud/tsconfig.json b/packages/upcloud/tsconfig.json
+new file mode 100644
+index 0000000..7680f99
+--- /dev/null
++++ b/packages/upcloud/tsconfig.json
+@@ -0,0 +1,4 @@
++{
++  "extends": "../../tsconfig.base.json",
++  "include": ["src", "test"]
++}

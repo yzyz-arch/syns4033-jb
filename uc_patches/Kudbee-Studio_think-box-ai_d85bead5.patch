@@ -1,0 +1,726 @@
+From d85bead5d209abfaa865fe8ad8390b6a04c3402a Mon Sep 17 00:00:00 2001
+From: Kudbee <twd4lifez@gmail.com>
+Date: Tue, 29 Sep 2026 12:15:55 -0500
+Subject: [PATCH] fix(infra): correct upctl tooling; record live UpCloud
+ substrate audit (#280)
+
+verify_upcloud_cli.py could never pass: it ran `upctl --version` (exits
+100) and required ~/.upcloud/config (a file upctl never reads), and it told
+users to `pip install upcloud-cli` (PyPI 404; upctl is a Go binary). The
+rewrite follows the official UpCloudLtd/upcloud-cli docs: `upctl version`,
+auth via UPCLOUD_TOKEN / keyring / ~/.config/upctl.yaml, with the repo's
+THINKBOX_UPCLOUD_API_TOKEN mapped to UPCLOUD_TOKEN and never printed. It is
+live-verified against checksum-verified upctl v3.36.0 and the real API
+(account kudbeex). 10 hermetic tests are added. SECURITY_CHECKLIST install/
+auth steps, the env table and 3 dead (404) doc links are corrected.
+
+Docs record the live substrate audit:
+- two UpCloud accounts (worker-01 lives in `kudbee`, hence
+  SERVER_FORBIDDEN)
+- an orphaned duplicate worker-02 from a retried create POST
+- worker-01's SSH blocker is auth-only
+- the active worker-02 00e300f7 is LIVE VERIFIED
+
+The bridge decision is Option A (a new `upcloud-ssh` substrate in
+governed_job_execution). It is blocked by a pre-existing route shadow:
+backend.main's legacy api_v1 /run handler hides the governed POST
+/api/v1/run in the real app.
+
+Co-authored-by: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ AGENTS.md                             |  76 ++++++++
+ docs/CONTINUITY.md                    |  48 +++++
+ docs/SECURITY_CHECKLIST.md            |  68 ++++---
+ scripts/verify_upcloud_cli.py         | 262 +++++++++++---------------
+ tests/unit/test_verify_upcloud_cli.py | 108 +++++++++++
+ 5 files changed, 387 insertions(+), 175 deletions(-)
+ create mode 100644 tests/unit/test_verify_upcloud_cli.py
+
+diff --git a/AGENTS.md b/AGENTS.md
+index 1451c896..d7fcd40f 100644
+--- a/AGENTS.md
++++ b/AGENTS.md
+@@ -492,6 +492,25 @@ Set up UpCloud infrastructure (see skill: `upcloud-setup`):
+ - Never print or commit a private SSH key. Fingerprint (`ssh-keygen -l -f
+   <path>.pub`) is fine to log; the key body is not.
+ 
++**Accounts, identity, and idempotency (verified 2026-09-29):**
++
++- **There are two UpCloud accounts.** `.env` `THINKBOX_UPCLOUD_API_TOKEN` → account
++  `kudbeex`, which holds the active worker `kudbee-hermes-worker-02`
++  (`00e300f7-4fc9-49cf-af9b-b11c79f76853`, `209.50.51.174`). `.env` `UPCLOUD_API_KEY` →
++  account `kudbee`, which holds `kudbee-hermes-worker-01`. Before any action, run
++  `GET /1.3/account` (or `upctl account show`) to confirm which account you are in.
++  `SERVER_FORBIDDEN` means "exists in another account". `SERVER_NOT_FOUND` means
++  "doesn't exist, or was deleted".
++- **Hostnames are not unique.** Two live servers are both named
++  `kudbee-hermes-worker-02`. Always address servers by UUID.
++- **`POST /1.3/server` is not idempotent.** If you can't parse the UUID out of a
++  create response, **list servers (`GET /1.3/server`) before retrying**. On 2026-09-28
++  a failed UUID extraction followed by a retried POST left a duplicate server
++  (`00068975-59de-4dda-be02-a6b1e9918c33`) running and billing unnoticed.
++- **upctl is a Go binary, not a pip package.** See `docs/SECURITY_CHECKLIST.md` and
++  `scripts/verify_upcloud_cli.py`. It authenticates from `UPCLOUD_TOKEN`, the keyring, or
++  `~/.config/upctl.yaml`. Its version subcommand is `upctl version` (`--version` exits 100).
++
+ ---
+ 
+ ### 13.6 THINK Burst Execution
+@@ -1948,6 +1967,63 @@ Dashboard CLI: `/help`, `/algo`, `/memory`, `/remember`, `/promote`, `/metrics`,
+   `.github/workflows/test.yml` runs `scripts/scan_doc_secrets.py`.) worker-01 (`152.44.37.207`) is still SSH-unreachable and still
+   billing.
+ 
++### 2026-09-29 — UpCloud substrate audit + upctl tooling fix (branch `fix/upctl-install-and-upcloud-infra-audit`)
++
++- **Changed:** `scripts/verify_upcloud_cli.py` (rewritten to match the official upctl docs),
++  `tests/unit/test_verify_upcloud_cli.py` (new, 10 hermetic tests), `docs/SECURITY_CHECKLIST.md`
++  (upctl install/auth, env table, dead links), §13.5 (account/identity/idempotency rules), and CONTINUITY.
++- **upctl fix, evidence:**
++  - `UpCloudLtd/upcloud-cli` is a Go project. PyPI returns 404 for `upcloud-cli`.
++  - Official docs: `.deb`/`.rpm`/tar.gz from releases, `brew tap UpCloudLtd/tap`, or `go install`. Auth via
++    `UPCLOUD_TOKEN`, the keyring, or `~/.config/upctl.yaml`; the version check is `upctl version`.
++  - The old script **could never pass**. Live against the real upctl v3.36.0 (checksum-verified, run from
++    a scratchpad; nothing installed system-wide), `upctl --version` exits 100 and the script told you
++    to `pip install`. It also required `~/.upcloud/config`, a file upctl never reads.
++  - The new script, live, exits 0: authenticated as `kudbeex`, with `THINKBOX_UPCLOUD_API_TOKEN` mapped
++    to `UPCLOUD_TOKEN`. The token appears 0 times in the output.
++  - 3 of the 4 upctl doc links in the checklist returned 404 and were replaced.
++- **Infra audit (real API + SSH):**
++  - There are two accounts (see §13.5).
++  - worker-01 exists, is started, and sits in account `kudbee`. That's why the `kudbeex` token gets
++    `SERVER_FORBIDDEN` and why the founder couldn't find it in the dashboard. SSH is blocked at **auth
++    only**: port 22 answers `OpenSSH_8.9p1`, the firewall is off, only `publickey` is offered, and no
++    key was injected.
++  - worker-02 (`00e300f7`) is LIVE VERIFIED: key SSH works; Ubuntu 22.04.5; kernel 5.15.0-187;
++    1 vCPU; 1382MB free; 5.0G disk free; outbound HTTPS 200; 0 pending security updates. Its
++    snapshot's `origin` equals worker-02's root disk.
++  - It sees **330 failed SSH logins in 24h** (internet scanners). They're harmless because password
++    auth is off, but its firewall is off.
++  - **Orphan found:** `00068975-59de-4dda-be02-a6b1e9918c33` (`152.44.43.154`), also hostnamed
++    `kudbee-hermes-worker-02`, created by my duplicate POST on 2026-09-28. It is still running and
++    billing, and its SSH is blocked (no key). It was not deleted: that needs founder approval.
++  - `investigate_upcloud()` was run per the dashboard contract, rule 9: authenticate and check_ssh
++    passed; discover_capabilities (HTTP 502), verify_gpu (HTTP 400) and check_cloudflare failed.
++    **It still marked the ProviderEntry `verified`**, a pre-existing weakness: `any_blocked` ignores
++    `failed` steps.
++- **Bridge decision (Option A) and blocker:**
++  - The governed Think Job path already has an explicit substrate router,
++    `thinkbox/governed_job_execution.py`: `{local, upstash-box}`, no auto-detect, no silent local
++    fallback. It is fed by `POST /api/v1/run` `execution_substrate` + `exec_command` in
++    `backend/api/v1/router.py`, which already has admission, receipts, `ThinkJobEntry`, and
++    dashboard emit. So Option A means **adding an `upcloud-ssh` substrate there**. No new endpoint;
++    Option B would contradict the explicit-substrate design. This **supersedes PR #279's "no clean
++    insertion point"**: that audit read only `main.py`.
++  - **Blocker:** `backend/main.py`'s legacy `api_v1.post("/run")` (the LLM loop, since `e69bdf27`)
++    is registered first and **shadows** the governed handler in the real `backend.main:app`. A live
++    `TestClient` POST got `main.run_v1`'s `{"error": "No provider configured"}`. The governed e2e
++    tests (f131–f140) build their own app from `api_v1_router`, which is why they never caught it.
++    Every caller found expects the governed behavior.
++- **Four-state:**
++  - upctl verify script: CODE COMPLETE (this branch) / TEST VERIFIED (10/10) / LIVE VERIFIED
++    (real upctl + API).
++  - worker-02 substrate: LIVE VERIFIED.
++  - Bridge: none of the four.
++  - PRODUCTION READY: NO.
++- **Next:**
++  1. Remove the `/api/v1/run` shadow, with a regression test against `backend.main:app`.
++  2. Then add the `upcloud-ssh` substrate and live-prove
++     `POST /api/v1/run → worker-02 → hostname → receipt → ThinkJobEntry`.
++
+ ### Open items / debt (be honest here)
+ 
+ - `cli.ts` has no automated tests (its paths are exercised manually and through
+diff --git a/docs/CONTINUITY.md b/docs/CONTINUITY.md
+index 049f2fc3..cd2c3866 100644
+--- a/docs/CONTINUITY.md
++++ b/docs/CONTINUITY.md
+@@ -3321,3 +3321,51 @@ python3 experiments/verify_swarm_proof.py data/thinkboxmd/big_swarm_<timestamp>.
+ 
+   Only after one of these is LIVE VERIFIED does `apps/web → backend` become the next task.
+ - **Standing by.** Open items: worker-01 is unreachable and still billing. `docs/SECURITY_CHECKLIST.md` and `scripts/verify_upcloud_cli.py` (committed by the founder in `aeba5c58`) still say upctl installs via pip. The official upctl is a Go binary, so both need correcting.
++
++### 2026-09-29 — SAVE POINT: UpCloud substrate audit (real servers), upctl tooling fix, bridge decision = Option A (blocked by a route shadow)
++
++- **Scope:** branch `fix/upctl-install-and-upcloud-infra-audit`. Tooling fix, tests, and docs; no runtime/application code changed. **Founder directive (2026-09-29): the only server to work in is `00e300f7-4fc9-49cf-af9b-b11c79f76853` (`209.50.51.174`).**
++- **Infrastructure, verified live via API and SSH:**
++
++  | Server | Account | UUID | IPv4 | State | SSH |
++  |---|---|---|---|---|---|
++  | worker-02 (**active**) | `kudbeex` (`THINKBOX_UPCLOUD_API_TOKEN`) | `00e300f7-4fc9-49cf-af9b-b11c79f76853` | `209.50.51.174` | started | **LIVE VERIFIED** (key auth) |
++  | worker-02 **orphan** | `kudbeex` | `00068975-59de-4dda-be02-a6b1e9918c33` | `152.44.43.154` | started, billing | blocked: publickey only, no key |
++  | worker-01 | `kudbee` (`UPCLOUD_API_KEY`) | `00f08f70-f805-4fca-ba34-c066addde26c` | `152.44.37.207` | started, billing | blocked: publickey only, no key |
++
++  - **worker-02 (active):** Ubuntu 22.04.5, kernel 5.15.0-187, 1 vCPU, 1382MB free RAM, 5.0G free disk, outbound HTTPS 200, 0 pending security updates. Snapshot `010bc170-…` has `origin` = worker-02's root disk `012ccf9a-…`. It sees 330 failed SSH logins per 24h from internet scanners. That's harmless because password auth is off, but the firewall is off.
++  - **worker-01** is **not deleted**: it lives in the other account. The `kudbeex` token gets `SERVER_FORBIDDEN`, while a deleted or random UUID gets `SERVER_NOT_FOUND`. That also explains the earlier dashboard "discrepancy". Its blocker is **authentication only**: port 22 is open (`OpenSSH_8.9p1`), the firewall is off, only `publickey` is offered, and no key was injected.
++  - **The orphan** came from my duplicate `POST /1.3/server` on 2026-09-28 (my UUID parse failed, so I retried). The previous save points said the first worker-02 attempt was a single server, `003bc8e7`; **that was incomplete**. The founder pasted this UUID mid-task and I missed it. Deleting it needs founder approval.
++- **upctl, corrected from authoritative evidence:**
++  - `UpCloudLtd/upcloud-cli` is a Go project (GitHub API). PyPI returns HTTP 404 for `upcloud-cli`. The official docs (`docs/index.md`) list `.deb`/`.rpm`/tar.gz releases, a Homebrew tap, `go install`, and more. Auth is via `UPCLOUD_TOKEN`, the keyring, or `~/.config/upctl.yaml`.
++  - **The old `scripts/verify_upcloud_cli.py` could never pass.** Live against real upctl v3.36.0 (checksum-verified from the release's `checksums.txt`, run from a scratchpad, no system install), `upctl --version` exits 100 and the script advised `pip install`. It also required `~/.upcloud/config`, which upctl never uses.
++  - The rewritten script passes live: exit 0, `Username: kudbeex`, with `THINKBOX_UPCLOUD_API_TOKEN` mapped to `UPCLOUD_TOKEN`. The token value appears 0 times in the output.
++  - `docs/SECURITY_CHECKLIST.md` is corrected. Its env table now names both accounts and marks the tokens as write-capable (they created and deleted servers), and 3 dead doc links (404) were replaced.
++- **Tests:** `python3 -m unittest tests.unit.test_verify_upcloud_cli -v` → 10/10 OK. All 10 error against the old script, because its API differs; they don't pass vacuously. The strongest evidence is the live comparison above.
++- **Governance rule 9:** `investigate_upcloud()` was run against worker-02 (env `UPCLOUD_SERVER_IP=209.50.51.174`).
++  - authenticate (`kudbeex`) and check_ssh (`ok`) passed. discover_capabilities (HTTP 502), verify_gpu (HTTP 400; there's no GPU) and check_cloudflare failed.
++  - **It still upserted `ProviderEntry(UpCloud, status="verified")`**, because `any_blocked` ignores `failed` steps. That's a pre-existing classification weakness, recorded here and not fixed.
++  - The dashboard state was in-process only; no backend server was running.
++- **Bridge decision: Option A, with evidence. This supersedes the PR #279 "no clean insertion point" conclusion, which came from reading only `backend/main.py`.**
++  - `thinkbox/governed_job_execution.py` is an explicit substrate router: `_SUPPORTED={local, upstash-box}`, an `_ExecutionAdapter.execute(job_id, command, artifact_name)` protocol, "never auto-detect", and "local fallback is prohibited".
++  - It is reached through `backend/api/v1/router.py` `POST /api/v1/run`, via `execution_substrate` + `exec_command`. That path already runs governance admission, `open_http_run_receipt`, `ThinkJobEntry` upsert, dashboard `TASK_STARTED` emit, `admit_and_queue_http_run`, and `execute_governed_run_background`.
++  - Existing worker config lives in `UpCloudConfig` env: `UPCLOUD_SERVER_IP`, `UPCLOUD_SSH_USER`, `UPCLOUD_SSH_KEY_PATH`.
++  - So the bridge is **one new substrate (`upcloud-ssh`) plus an adapter wrapping `SSHCloudExecutionProvider`**, with no new endpoint. Option B (an LLM-callable tool) would bypass the explicit-substrate design and is rejected on architectural grounds.
++- **Blocker found (pre-existing bug):** in the real `backend.main:app`, `POST /api/v1/run` resolves to **`backend.main.run_v1`**, the legacy LLM loop added in `e69bdf27` (2026-09-01). It is registered before `api_v1_router`, so it shadows the governed `backend.api.v1.router.run_goal`.
++  - Evidence: a flattened route walk shows two POST `/api/v1/run` handlers, main's first. A live `TestClient` POST returned main's `{"success": false, "error": "No provider configured"}`.
++  - The governed e2e tests (f131, f132, f133, f136, f137, f140, `api_run_hermetic.py`) build their own app from `api_v1_router`, so they never exercise the real app.
++  - Every caller found (control-plane `receipts.html`, `run_governed.py`, the e2e tests) expects the governed behavior.
++- **CI:** not run. This is the known runner outage; `main` itself fails the same way. Do not read local results as CI-green.
++- **FOUR-STATE:**
++  - `verify_upcloud_cli.py`: CODE COMPLETE (this branch) / TEST VERIFIED / LIVE VERIFIED.
++  - worker-02 substrate: LIVE VERIFIED.
++  - Governed-run HTTP path in the real app: **broken (shadowed)**.
++  - UpCloud bridge: none of the four.
++  - **PRODUCTION READY: NO.**
++- **NEXT LARGER IMPROVEMENT (concrete, in order):**
++  1. Remove `main.py`'s shadowing `api_v1.post("/run")`, keeping the unversioned legacy `/run`. Add a regression test that posts to the **real** `backend.main:app` and asserts the governed handler answers.
++  2. Add an `upcloud-ssh` substrate plus adapter in `governed_job_execution.py`, backed by `SSHCloudExecutionProvider` and configured from the `UpCloudConfig` env vars. Live-prove `POST /api/v1/run {execution_substrate: upcloud-ssh, exec_command: hostname}` → worker-02 `00e300f7` → receipt → `ThinkJobEntry`.
++- **Founder decisions pending:**
++  - Delete the orphan `00068975` (it bills, holds nothing, and is unreachable).
++  - Keep or delete worker-01 (account `kudbee`).
++  - Consider enabling the UpCloud firewall on worker-02 with SSH-only ingress.
+diff --git a/docs/SECURITY_CHECKLIST.md b/docs/SECURITY_CHECKLIST.md
+index 27caac35..e18f3ed0 100644
+--- a/docs/SECURITY_CHECKLIST.md
++++ b/docs/SECURITY_CHECKLIST.md
+@@ -2,7 +2,7 @@
+ 
+ **Purpose:** Every agent session MUST run this checklist before committing code or accessing production systems.
+ 
+-**Last updated:** 2026-09-28  
++**Last updated:** 2026-09-29  
+ **Canonical location:** `docs/SECURITY_CHECKLIST.md`
+ 
+ ---
+@@ -28,22 +28,47 @@ ls -la .env | awk '{print $1, $NF}' | grep "600 .env" && echo "✅ .env has secu
+ 
+ #### UpCloud (Preferred: Use Official CLI)
+ 
+-```bash
+-# Install UpCloud CLI (one-time)
+-python3 -m pip install upcloud-cli
+-
+-# Configure (one-time)
+-upctl account show  # Will prompt for credentials, saves to ~/.upcloud/config
+-
+-# Verify in future sessions (official method - RECOMMENDED)
+-python3 scripts/verify_upcloud_cli.py
+-# Exit code: 0 = valid, 1 = not installed, 2 = not authenticated
++`upctl` is a **Go binary**. It is **not** on PyPI: `pip install upcloud-cli` fails, because
++PyPI returns 404 for that project. The install methods below come from the official
++docs (`UpCloudLtd/upcloud-cli`, `docs/index.md`); last checked 2026-09-29 against
++release v3.36.0.
+ 
+-# Or test directly with CLI
+-upctl account show       # Show account info
+-upctl server list        # List all servers
++```bash
++# Install (one-time). Ubuntu/Debian: .deb from GitHub releases
++VER=3.36.0   # latest: https://github.com/UpCloudLtd/upcloud-cli/releases
++curl -Lo upcloud-cli_${VER}_amd64.deb \
++  https://github.com/UpCloudLtd/upcloud-cli/releases/download/v${VER}/upcloud-cli_${VER}_amd64.deb
++# Verify against checksums.txt from the same release, then:
++sudo apt install ./upcloud-cli_${VER}_amd64.deb
++# No root? Use upcloud-cli_${VER}_linux_x86_64.tar.gz from the same release
++# (verify with checksums.txt), extract `upctl`, and put it on PATH.
++# macOS: brew tap UpCloudLtd/tap && brew install upcloud-cli
++# From source: go install github.com/UpCloudLtd/upcloud-cli/v3/...@latest
++upctl version
++
++# Authenticate: upctl reads UPCLOUD_TOKEN, the system keyring, or ~/.config/upctl.yaml.
++# The verify script passes THINKBOX_UPCLOUD_API_TOKEN to upctl as UPCLOUD_TOKEN if
++# UPCLOUD_TOKEN is unset, so no extra setup is needed.
++# To store a token in the keyring instead:
++upctl account login --with-token
++
++# Verify in future sessions
++python3 scripts/verify_upcloud_cli.py            # add --install for install help
++# Exit code: 0 = ready, 1 = not installed, 2 = not authenticated
++
++# Or test directly with the CLI
++upctl account show       # Account username, credits, limits
++upctl server list        # Servers in *this token's* account (see Accounts below)
+ ```
+ 
++> **Two UpCloud accounts.** `THINKBOX_UPCLOUD_API_TOKEN` authenticates as account
++> `kudbeex`, which holds the active worker `kudbee-hermes-worker-02`
++> (`00e300f7-4fc9-49cf-af9b-b11c79f76853`, `209.50.51.174`). `UPCLOUD_API_KEY`
++> authenticates as account `kudbee`, which holds `kudbee-hermes-worker-01`. A server
++> in the other account returns `SERVER_FORBIDDEN`, not `SERVER_NOT_FOUND`. Always
++> check which account you're in (`upctl account show`) before acting, and address
++> servers by UUID: hostnames are not unique.
++
+ #### UpCloud (Fallback: HTTP API)
+ 
+ ```bash
+@@ -63,7 +88,7 @@ python3 scripts/verify_upcloud_credentials.py
+ # python3 scripts/verify_upstash_vector_credentials.py  # (TBD)
+ ```
+ 
+-**Recommendation:** Use `upctl` for production work. It's the official UpCloud CLI and handles authentication, certificate validation, and rate limiting automatically.
++**Recommendation:** Use `upctl` for interactive and operational work. It is UpCloud's official CLI. Use `scripts/verify_upcloud_credentials.py` (stdlib HTTP, no install) when upctl is not available.
+ 
+ ### 3. Scan for Leaked Secrets Before Committing
+ 
+@@ -97,7 +122,9 @@ Before closing a session, check:
+ 
+ | Variable | Purpose | Scope | Rotation |
+ |----------|---------|-------|----------|
+-| `THINKBOX_UPCLOUD_API_TOKEN` | UpCloud API (control plane) | Read-only test; no SSH | 90 days |
++| `THINKBOX_UPCLOUD_API_TOKEN` | UpCloud API, account `kudbeex` (active worker-02) | **Full account access**: it has created and deleted servers. Treat it as write-capable, not read-only. | 90 days |
++| `UPCLOUD_API_KEY` | UpCloud API, account `kudbee` (worker-01 only) | Full account access; a separate account from `kudbeex` | 90 days |
++| `UPCLOUD_SERVER_IP` / `UPCLOUD_SERVER_HOSTNAME` / `UPCLOUD_SSH_USER` / `UPCLOUD_SSH_KEY_PATH` | Worker SSH target (read by `thinkbox/upcloud.py` `UpCloudConfig`) | A key **path** only. Never put private-key contents in env or code. | On key rotation |
+ | `UPSTASH_PUBLIC_BOX_URL` | Upstash Box execution endpoint | Execution substrate | On access deny |
+ | `UPSTASH_PUBLIC_BOX_TOKEN` | Upstash Box authentication | Execution substrate | On access deny |
+ | `INCEPTION_API_KEY` | Mercury-2 model inference | Hermetic only (no live in CI) | 90 days |
+@@ -286,10 +313,9 @@ python3 scripts/scan_doc_secrets.py docs/my_file.md
+ 
+ ## External References
+ 
+-- **UpCloud CLI (upctl):** https://upcloudltd.github.io/upcloud-cli/latest/
+-  - Installation: https://upcloudltd.github.io/upcloud-cli/latest/install/
+-  - Configuration: https://upcloudltd.github.io/upcloud-cli/latest/config/
+-  - Commands: https://upcloudltd.github.io/upcloud-cli/latest/commands/
++- **UpCloud CLI (upctl):** https://upcloudltd.github.io/upcloud-cli/latest/ (getting started: install + credentials)
++  - Source and releases (binaries, `checksums.txt`): https://github.com/UpCloudLtd/upcloud-cli/releases
++  - (The earlier `/latest/install/`, `/latest/config/` and `/latest/commands/` links returned 404 on 2026-09-29 and were removed.)
+ - **UpCloud API:** https://developers.upcloud.com/
+ 
+ ---
+@@ -306,5 +332,5 @@ python3 scripts/scan_doc_secrets.py docs/my_file.md
+ 
+ ---
+ 
+-**Last verified:** 2026-09-28  
++**Last verified:** 2026-09-29 (upctl section live-checked against v3.36.0)  
+ **Next review:** 2026-10-28 (30 days)
+diff --git a/scripts/verify_upcloud_cli.py b/scripts/verify_upcloud_cli.py
+index 3b95e337..cd4dca57 100644
+--- a/scripts/verify_upcloud_cli.py
++++ b/scripts/verify_upcloud_cli.py
+@@ -1,196 +1,150 @@
+ #!/usr/bin/env python3
+ """
+-Verify UpCloud CLI (upctl) is installed and configured correctly.
++Verify the official UpCloud CLI (upctl) is installed and can authenticate.
+ 
+ Usage:
+   python3 scripts/verify_upcloud_cli.py [--install]
+ 
+ Options:
+-  --install    Provide installation instructions if upctl is missing
++  --install    Print official installation instructions if upctl is missing
+ 
+ Returns:
+-  0 - upctl installed and configured
+-  1 - upctl not installed or misconfigured
+-  2 - upctl installed but no valid credentials
++  0 - upctl installed and authenticated
++  1 - upctl not installed (or not runnable)
++  2 - upctl installed but not authenticated
+ 
+-Environment:
+-  THINKBOX_UPCLOUD_API_TOKEN - UpCloud API token (optional; upctl can load from ~/.upcloud/config)
++Credentials (per the official upctl docs, any one of):
++  UPCLOUD_TOKEN                       - API token (recommended)
++  `upctl account login --with-token`  - saves the token to the system keyring
++  ~/.config/upctl.yaml                - `token: ...` (or --config /path/to/upctl.yaml)
++  UPCLOUD_USERNAME / UPCLOUD_PASSWORD - legacy username/password
++
++  If UPCLOUD_TOKEN is unset but this repo's THINKBOX_UPCLOUD_API_TOKEN is set,
++  it is passed to upctl as UPCLOUD_TOKEN for this check only. The value is never
++  printed.
++
++upctl is a Go binary. It is NOT on PyPI: `pip install upcloud-cli` fails, because
++PyPI returns 404 for that project.
+ 
+ References:
+-  Official CLI: https://upcloudltd.github.io/upcloud-cli/latest/
+-  Installation: https://upcloudltd.github.io/upcloud-cli/latest/install/
++  Source + releases: https://github.com/UpCloudLtd/upcloud-cli
++  Docs:              https://upcloudltd.github.io/upcloud-cli/
+ """
+ 
+-import sys
++from __future__ import annotations
++
+ import os
+ import subprocess
+-import json
+-from pathlib import Path
++import sys
++
++REPO_TOKEN_VAR = "THINKBOX_UPCLOUD_API_TOKEN"
++
++INSTALL_INSTRUCTIONS = """\
++UpCloud CLI (upctl) installation -- official methods
++(source: https://github.com/UpCloudLtd/upcloud-cli, docs/index.md)
++
++upctl is a Go binary. There is no PyPI package, so do not use pip.
++
++Ubuntu / Debian (.deb from GitHub releases):
++  VER=<latest, see https://github.com/UpCloudLtd/upcloud-cli/releases>
++  curl -Lo upcloud-cli_${VER}_amd64.deb \\
++    https://github.com/UpCloudLtd/upcloud-cli/releases/download/v${VER}/upcloud-cli_${VER}_amd64.deb
++  # verify against checksums.txt from the same release before installing
++  sudo apt install ./upcloud-cli_${VER}_amd64.deb
++
++No root: download upcloud-cli_${VER}_linux_x86_64.tar.gz from the same release,
++  verify it against checksums.txt, extract, and put `upctl` on your PATH.
++
++macOS (Homebrew tap):
++  brew tap UpCloudLtd/tap
++  brew install upcloud-cli
++
++From source:
++  go install github.com/UpCloudLtd/upcloud-cli/v3/...@latest
++
++Verify the install:   upctl version
+ 
++Authenticate (pick one):
++  export UPCLOUD_TOKEN=...             # or rely on THINKBOX_UPCLOUD_API_TOKEN (see above)
++  upctl account login --with-token     # saves to the system keyring
+ 
+-def check_upctl_installed():
+-    """Check if upctl is installed and accessible."""
++Verify API access:    upctl account show
++"""
++
++
++def upctl_env(environ: dict[str, str] | None = None) -> dict[str, str]:
++    """Environment for upctl subprocesses: map the repo token to UPCLOUD_TOKEN if needed."""
++    env = dict(os.environ if environ is None else environ)
++    if not env.get("UPCLOUD_TOKEN") and env.get(REPO_TOKEN_VAR):
++        env["UPCLOUD_TOKEN"] = env[REPO_TOKEN_VAR]
++    return env
++
++
++def check_upctl_installed() -> bool:
+     try:
+-        result = subprocess.run(
+-            ["upctl", "--version"],
+-            capture_output=True,
+-            text=True,
+-            timeout=5
+-        )
+-        if result.returncode == 0:
+-            version = result.stdout.strip().split('\n')[0]
+-            print(f"✅ upctl installed: {version}")
+-            return True
+-        else:
+-            print(f"❌ upctl not working (exit code {result.returncode})")
+-            return False
++        result = subprocess.run(["upctl", "version"], capture_output=True, text=True, timeout=10, check=False)
+     except FileNotFoundError:
+         print("❌ upctl not found in PATH")
+         return False
+     except subprocess.TimeoutExpired:
+-        print("❌ upctl command timed out")
++        print("❌ `upctl version` timed out")
+         return False
+-    except Exception as e:
+-        print(f"❌ Error checking upctl: {e}")
++    if result.returncode != 0:
++        print(f"❌ `upctl version` exited {result.returncode}")
+         return False
+-
+-
+-def check_upctl_config():
+-    """Check if upctl has valid configuration."""
+-    config_path = Path.home() / ".upcloud" / "config"
+-
+-    if not config_path.exists():
+-        print(f"⚠️  No UpCloud config found at {config_path}")
+-        print("   Run: upctl account show  (will create config)")
+-        return False
+-
+-    print(f"✅ Config exists: {config_path}")
+-
+-    # Try to run a simple read-only command
++    first = (result.stdout.strip().splitlines() or ["(no output)"])[0]
++    print(f"✅ upctl installed: {first}")
++    return True
++
++
++def check_upctl_authenticated(environ: dict[str, str] | None = None) -> bool:
++    """Authentication is proven only by a successful `upctl account show`.
++
++    No config-file check: upctl may authenticate from UPCLOUD_TOKEN, the system
++    keyring, or ~/.config/upctl.yaml, and any of them is valid.
++    """
++    env = upctl_env(environ)
++    source = (
++        "UPCLOUD_TOKEN"
++        if (environ if environ is not None else os.environ).get("UPCLOUD_TOKEN")
++        else (f"{REPO_TOKEN_VAR} (mapped to UPCLOUD_TOKEN)" if env.get("UPCLOUD_TOKEN") else "upctl config/keyring")
++    )
+     try:
+         result = subprocess.run(
+-            ["upctl", "account", "show"],
+-            capture_output=True,
+-            text=True,
+-            timeout=10
++            ["upctl", "account", "show"], capture_output=True, text=True, timeout=20, env=env, check=False
+         )
+-
+-        if result.returncode == 0:
+-            print("✅ upctl authenticated and responsive")
+-            # Parse output for account info (safe to log)
+-            for line in result.stdout.split('\n'):
+-                if 'username' in line.lower() or 'credits' in line.lower():
+-                    print(f"   {line.strip()}")
+-            return True
+-        else:
+-            print(f"❌ upctl command failed: {result.stderr[:100]}")
+-            return False
+-
+     except subprocess.TimeoutExpired:
+-        print("❌ upctl account show timed out (network issue?)")
++        print("❌ `upctl account show` timed out (network?)")
+         return False
+-    except Exception as e:
+-        print(f"❌ Error testing upctl: {e}")
++    if result.returncode != 0:
++        print(f"❌ `upctl account show` failed (credential source: {source})")
++        print(f"   {result.stderr.strip()[:160]}")
+         return False
++    print(f"✅ upctl authenticated (credential source: {source})")
++    for line in result.stdout.splitlines():
++        if line.strip().lower().startswith(("username", "credits")):
++            print(f"   {line.strip()}")
++    return True
+ 
+ 
+-def print_install_instructions():
+-    """Print installation instructions for upctl."""
+-    print("\n" + "="*60)
+-    print("UpCloud CLI (upctl) Installation")
+-    print("="*60 + "\n")
+-
+-    print("Option 1: Using pip (Recommended)")
+-    print("-" * 40)
+-    print("""
+-  python3 -m pip install upcloud-cli
+-
+-  Then authenticate:
+-  upctl account show
+-
+-  This will prompt for API username/password and save to ~/.upcloud/config
+-    """)
+-
+-    print("\nOption 2: Using system package manager")
+-    print("-" * 40)
+-    print("""
+-  macOS:
+-    brew install upcloud-cli
+-
+-  Linux (Debian/Ubuntu):
+-    sudo apt-get install upcloud-cli
+-
+-  See: https://upcloudltd.github.io/upcloud-cli/latest/install/
+-    """)
+-
+-    print("\nOption 3: From source")
+-    print("-" * 40)
+-    print("""
+-  git clone https://github.com/UpCloudLtd/upcloud-cli.git
+-  cd upcloud-cli
+-  python3 -m pip install -e .
+-    """)
+-
+-    print("\nAfter installation:")
+-    print("-" * 40)
+-    print("""
+-  1. Authenticate:
+-     upctl account show
+-
+-  2. Test credentials:
+-     python3 scripts/verify_upcloud_cli.py
+-
+-  3. Common commands:
+-     upctl server list          # List all servers
+-     upctl server show <uuid>   # Show server details
+-     upctl price list           # Show current pricing
+-    """)
+-
+-    print("="*60 + "\n")
+-
+-
+-def verify_upctl():
+-    """Full verification of upctl setup."""
+-
+-    print("\n" + "="*60)
+-    print("UpCloud CLI (upctl) Verification")
+-    print("="*60 + "\n")
+-
+-    # Step 1: Check if upctl is installed
++def verify_upctl(environ: dict[str, str] | None = None) -> int:
+     if not check_upctl_installed():
+-        print("\nℹ️  upctl not installed. Run: pip install upcloud-cli")
++        print("ℹ️  Run with --install for official installation instructions (upctl is not a pip package)")
+         return 1
+-
+-    print()
+-
+-    # Step 2: Check configuration
+-    if not check_upctl_config():
+-        print("\nℹ️  Run: upctl account show  (to create config)")
++    if not check_upctl_authenticated(environ):
++        print("ℹ️  Set UPCLOUD_TOKEN (or THINKBOX_UPCLOUD_API_TOKEN), or run: upctl account login --with-token")
+         return 2
+-
+-    print("\n" + "="*60)
+-    print("✅ UpCloud CLI is ready for use")
+-    print("="*60 + "\n")
+-
+-    print("Next steps:")
+-    print("  upctl server list      # List all servers")
+-    print("  upctl server show <id> # Get server details")
+-    print("  upctl price list       # Show pricing")
+-    print("\n")
+-
++    print("✅ UpCloud CLI is ready")
+     return 0
+ 
+ 
+-def main():
+-    """Run verification."""
+-    show_install = "--install" in sys.argv
+-
+-    exit_code = verify_upctl()
+-
+-    if exit_code != 0 and show_install:
+-        print_install_instructions()
+-
+-    return exit_code
++def main(argv: list[str] | None = None) -> int:
++    args = sys.argv[1:] if argv is None else argv
++    code = verify_upctl()
++    if code != 0 and "--install" in args:
++        print()
++        print(INSTALL_INSTRUCTIONS)
++    return code
+ 
+ 
+ if __name__ == "__main__":
+diff --git a/tests/unit/test_verify_upcloud_cli.py b/tests/unit/test_verify_upcloud_cli.py
+new file mode 100644
+index 00000000..9db43c7e
+--- /dev/null
++++ b/tests/unit/test_verify_upcloud_cli.py
+@@ -0,0 +1,108 @@
++"""Hermetic tests for scripts/verify_upcloud_cli.py (subprocess mocked; no network, no upctl needed)."""
++
++from __future__ import annotations
++
++import contextlib
++import importlib.util
++import io
++import subprocess
++import tempfile
++import unittest
++from pathlib import Path
++from unittest.mock import patch
++
++SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "verify_upcloud_cli.py"
++FAKE_TOKEN = "ucat_FAKE_TOKEN_FOR_TESTS_0000"
++
++
++def _load():
++    spec = importlib.util.spec_from_file_location("verify_upcloud_cli", SCRIPT)
++    mod = importlib.util.module_from_spec(spec)
++    spec.loader.exec_module(mod)
++    return mod
++
++
++def _cp(returncode: int, stdout: str = "", stderr: str = "") -> subprocess.CompletedProcess:
++    return subprocess.CompletedProcess(args=["upctl"], returncode=returncode, stdout=stdout, stderr=stderr)
++
++
++class TestVerifyUpcloudCli(unittest.TestCase):
++    def setUp(self) -> None:
++        self.mod = _load()
++
++    def _run(self, side_effect, environ=None):
++        buf = io.StringIO()
++        with patch.object(self.mod.subprocess, "run", side_effect=side_effect) as run, contextlib.redirect_stdout(buf):
++            code = self.mod.verify_upctl(environ if environ is not None else {})
++        return code, buf.getvalue(), run
++
++    def test_uses_official_version_subcommand(self) -> None:
++        code, _, run = self._run([_cp(0, "Upctl v3.36.0"), _cp(0, "Username: kudbeex")])
++        self.assertEqual(code, 0)
++        self.assertEqual(run.call_args_list[0].args[0], ["upctl", "version"])
++
++    def test_not_installed_returns_1(self) -> None:
++        code, out, _ = self._run(FileNotFoundError("upctl"))
++        self.assertEqual(code, 1)
++        self.assertIn("not found", out)
++
++    def test_version_nonzero_returns_1(self) -> None:
++        code, _, _ = self._run([_cp(2)])
++        self.assertEqual(code, 1)
++
++    def test_authenticated_without_legacy_config_file(self) -> None:
++        # Regression: the old script required ~/.upcloud/config, a path upctl never uses,
++        # so it failed every correctly configured install.
++        with tempfile.TemporaryDirectory() as empty_home, patch.dict("os.environ", {"HOME": empty_home}):
++            code, out, _ = self._run([_cp(0, "Upctl v3.36.0"), _cp(0, "Username: kudbeex\nCredits: 1")])
++        self.assertEqual(code, 0)
++        self.assertIn("authenticated", out)
++        self.assertIn("Username: kudbeex", out)
++
++    def test_auth_failure_returns_2(self) -> None:
++        code, out, _ = self._run([_cp(0, "Upctl v3.36.0"), _cp(1, stderr="Authentication failed")])
++        self.assertEqual(code, 2)
++        self.assertIn("failed", out)
++
++    def test_repo_token_mapped_to_upcloud_token_and_never_printed(self) -> None:
++        code, out, run = self._run(
++            [_cp(0, "Upctl v3.36.0"), _cp(0, "Username: kudbeex")],
++            environ={"THINKBOX_UPCLOUD_API_TOKEN": FAKE_TOKEN},
++        )
++        self.assertEqual(code, 0)
++        passed_env = run.call_args_list[1].kwargs["env"]
++        self.assertEqual(passed_env["UPCLOUD_TOKEN"], FAKE_TOKEN)
++        self.assertNotIn(FAKE_TOKEN, out)
++        self.assertIn("mapped to UPCLOUD_TOKEN", out)
++
++    def test_explicit_upcloud_token_not_overridden(self) -> None:
++        env = self.mod.upctl_env({"UPCLOUD_TOKEN": "explicit", "THINKBOX_UPCLOUD_API_TOKEN": "repo"})
++        self.assertEqual(env["UPCLOUD_TOKEN"], "explicit")
++
++    def test_no_token_leaves_upctl_to_config_or_keyring(self) -> None:
++        env = self.mod.upctl_env({})
++        self.assertNotIn("UPCLOUD_TOKEN", env)
++
++    def test_install_instructions_are_official_not_pip(self) -> None:
++        text = self.mod.INSTALL_INSTRUCTIONS
++        self.assertNotRegex(text, r"(?m)^\s*(python3 -m )?pip install")
++        self.assertIn("brew tap UpCloudLtd/tap", text)
++        self.assertIn("_amd64.deb", text)
++        self.assertIn("go install github.com/UpCloudLtd/upcloud-cli/v3/...@latest", text)
++        self.assertIn("upctl account login --with-token", text)
++
++    def test_install_flag_prints_instructions_only_on_failure(self) -> None:
++        buf = io.StringIO()
++        with patch.object(self.mod.subprocess, "run", side_effect=FileNotFoundError("upctl")), contextlib.redirect_stdout(buf):
++            self.assertEqual(self.mod.main(["--install"]), 1)
++        self.assertIn("brew tap UpCloudLtd/tap", buf.getvalue())
++
++        buf = io.StringIO()
++        with patch.object(self.mod.subprocess, "run", side_effect=[_cp(0, "v"), _cp(0, "Username: x")]), \
++                patch.dict("os.environ", {}, clear=False), contextlib.redirect_stdout(buf):
++            self.assertEqual(self.mod.main(["--install"]), 0)
++        self.assertNotIn("brew tap", buf.getvalue())
++
++
++if __name__ == "__main__":
++    unittest.main()

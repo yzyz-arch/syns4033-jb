@@ -1,0 +1,1882 @@
+From 2a46fa3d5953f29c66d6d072b084429ecb666c80 Mon Sep 17 00:00:00 2001
+From: Harry Winner <142835718+harrywinner2@users.noreply.github.com>
+Date: Sun, 18 Oct 2026 12:34:55 -0500
+Subject: [PATCH] Add the prod reap: DNS records and demo servers of accounts
+ no longer in D1
+
+The pre-GA scrub deletes D1 rows only, so the wiped accounts' records stay
+in the flagship.services zone (200-record cap, ~70 leftovers) and their demo
+UpCloud servers keep billing. The Cloudflare DNS and UpCloud tokens live only
+as .com secrets, so the reap is admin-secret routes (/api/admin/reap/list,
+classify, delete-one) driven by scripts/reap-orphans.mjs.
+
+An item is an orphan only if its name is a shape Flagship publishes, its
+account label is a valid non-reserved username and D1 knows no account of
+that name (usernames, aliases, servers, demo users, auth codes). Apex,
+system, gym, unrecognised shapes, the store-review account and its server are
+always kept, and a D1 without the protected account is refused outright.
+Dry run is the default and saves a plan; --apply needs a terminal, a typed
+count, a plan under a day old, deletes one item at a time with a 30 s retry,
+and the Worker re-verifies each against D1 immediately before deleting.
+
+Needs a .com deploy before the owner can run it.
+---
+ AGENTS.md                      |   9 +-
+ apps/com/src/prodReap.ts       | 495 +++++++++++++++++++++++++++++++
+ apps/com/src/route.ts          |  14 +
+ apps/com/src/upcloud.ts        |  18 ++
+ apps/com/test/prodReap.test.ts | 515 +++++++++++++++++++++++++++++++++
+ apps/com/test/route.test.ts    |  12 +
+ apps/com/test/upcloud.test.ts  |  12 +
+ docs/runbooks/pre-ga-scrub.md  | 123 +++++---
+ package.json                   |   1 +
+ scripts/reap-orphans.mjs       | 323 +++++++++++++++++++++
+ scripts/reap-orphans.test.ts   | 168 +++++++++++
+ 11 files changed, 1654 insertions(+), 36 deletions(-)
+ create mode 100644 apps/com/src/prodReap.ts
+ create mode 100644 apps/com/test/prodReap.test.ts
+ create mode 100644 scripts/reap-orphans.mjs
+ create mode 100644 scripts/reap-orphans.test.ts
+
+diff --git a/AGENTS.md b/AGENTS.md
+index e63cb7fee..45de5e7cc 100644
+--- a/AGENTS.md
++++ b/AGENTS.md
+@@ -253,7 +253,14 @@ of the last check here: **not yet checked**.
+   on the account name: ~3 per account); the gym on its own registered domain
+   (also frees the shared Let's Encrypt budget: `flagship.services` isn't on
+   the PSL yet, so gym and prod certificates share 50 a week); reap the
+-  leftovers. The live gym now refuses to start when its fleet won't fit.
++  leftovers.
++  **Reap tool built (2026-10-18, not deployed):** `scripts/reap-orphans.mjs`
++  (dry run by default, saved plan, `--apply --plan`, typed confirmation) over new
++  admin routes `/api/admin/reap/{list,classify,delete-one}` on `.com`
++  (`apps/com/src/prodReap.ts`): it removes DNS records and demo UpCloud servers
++  of accounts that no longer exist in D1, re-checking each against D1 right
++  before deleting. Needs a `.com` deploy, then the owner's dry run; steps in
++  `docs/runbooks/pre-ga-scrub.md`. The live gym now refuses to start when its fleet won't fit.
+ 
+ ### In flight
+ 
+diff --git a/apps/com/src/prodReap.ts b/apps/com/src/prodReap.ts
+new file mode 100644
+index 000000000..59f94494c
+--- /dev/null
++++ b/apps/com/src/prodReap.ts
+@@ -0,0 +1,495 @@
++/**
++ * Prod reap: removes what the pre-GA scrub (docs/runbooks/pre-ga-scrub.md)
++ * leaves behind. The scrub deletes D1 rows only; the wiped accounts' DNS
++ * records in the `flagship.services` zone (the zone is capped at 200) and
++ * their demo UpCloud servers stay until reaped here.
++ *
++ * Three admin routes (x-admin-secret, like /api/admin/rate-limits), driven by
++ * scripts/reap-orphans.mjs. Nothing here deletes by itself: only `delete-one`
++ * writes, one DNS record or one server per call, and it re-checks the item
++ * against D1 right then.
++ *
++ *   GET  /api/admin/reap/list       the zone's records and the Flagship-labelled
++ *                                   UpCloud servers, unclassified
++ *   GET  /api/admin/reap/classify   the same, each marked KEEP or ORPHAN with a
++ *                                   reason, plus per-account counts (the plan)
++ *   POST /api/admin/reap/delete-one {kind:"dns",id,name,type} or
++ *                                   {kind:"server",id,owner}
++ *
++ * An item is ORPHAN only when ALL hold: its name has exactly a shape that
++ * Flagship publishes, the account label is a valid, non-reserved username, and
++ * no account of that name is known to D1 (usernames, aliases, servers, demo
++ * users, auth codes). Everything else (apex, system records, gym, anything
++ * unrecognised, any account still in D1, the protected store-review account)
++ * is KEEP. A D1 that does not hold every protected account is refused
++ * outright: that is the wrong database or the wipe went too far.
++ */
++
++import { authorizeAdmin, validateServerLabel, validateUserLabel } from "@flagship/control-plane";
++import type { D1Database } from "@flagship/storage";
++
++export const REAP_PATH_PREFIX = "/api/admin/reap/";
++export const DEFAULT_PROTECTED_ACCOUNTS = ["playstore-test-0725"];
++/** UpCloud label every Worker-created demo/sample-user server carries. */
++export const REAP_DEMO_LABEL = "flagship-demo";
++/** Label of the gym (and any other parallel environment); never reaped here. */
++export const REAP_ENV_LABEL = "flagship-env";
++
++export interface ReapDnsRecord {
++  id: string;
++  name: string;
++  type: string;
++  content?: string;
++}
++
++export interface ReapDnsClient {
++  listAll(): Promise<ReapDnsRecord[]>;
++  getById(id: string): Promise<ReapDnsRecord | null>;
++  deleteById(id: string): Promise<boolean>;
++}
++
++export interface ReapServer {
++  serverId: string;
++  title: string;
++  state: string;
++  labels: Record<string, string>;
++}
++
++export interface ReapCloudClient {
++  listServersByLabelKey(key: string): Promise<ReapServer[]>;
++  getServerLabels(serverId: string): Promise<Record<string, string> | null>;
++  destroyServer(serverId: string): Promise<void>;
++}
++
++export interface ReapEnv {
++  DB?: D1Database;
++  FLAGSHIP_ADMIN_SECRET?: string;
++  SERVICES_APEX?: string;
++  CLOUDFLARE_DNS_API_TOKEN?: string;
++  CLOUDFLARE_SERVICES_ZONE_ID?: string;
++  UPCLOUD_TOKEN?: string;
++  /** Comma list overriding DEFAULT_PROTECTED_ACCOUNTS (empty = none). */
++  REAP_PROTECTED_ACCOUNTS?: string;
++}
++
++export interface ReapDeps {
++  db: D1Database;
++  dns: ReapDnsClient | undefined;
++  cloud: ReapCloudClient | undefined;
++  apex: string;
++  protectedAccounts: readonly string[];
++  now?: () => number;
++  log?: (line: string) => void;
++}
++
++export interface KnownAccounts {
++  names: Set<string>;
++  serverIds: Set<string>;
++}
++
++export type ReapAction = "keep" | "orphan";
++
++export interface DnsVerdict {
++  action: ReapAction;
++  /** The account label the name belongs to, when it has a recognisable shape. */
++  owner: string | null;
++  reason: string;
++}
++
++const NAME_CHARS = /^[a-z0-9_*.-]+$/;
++
++/** Record shapes Flagship publishes under `<user>.<apex>`, by (labels, kind). */
++const ALLOWED: Record<string, readonly string[]> = {
++  "1:plain": ["CAA"],
++  "1:wild": ["CAA", "A", "AAAA"],
++  "1:acme": ["TXT"],
++  "2:plain": ["A", "AAAA"],
++  "2:wild": ["A", "AAAA"],
++  "2:acme": ["TXT"],
++};
++
++export function classifyDnsRecord(
++  rec: { name: string; type: string },
++  apexIn: string,
++  known: KnownAccounts,
++  protectedAccounts: readonly string[],
++): DnsVerdict {
++  const apex = apexIn.toLowerCase().replace(/\.$/, "");
++  const name = rec.name.toLowerCase().replace(/\.$/, "");
++  const type = rec.type.toUpperCase();
++  if (name === apex) return { action: "keep", owner: null, reason: "the zone apex" };
++  if (!name.endsWith(`.${apex}`)) return { action: "keep", owner: null, reason: "outside the services zone apex" };
++  const rel = name.slice(0, -(apex.length + 1));
++  if (!NAME_CHARS.test(rel)) return { action: "keep", owner: null, reason: "unrecognised name" };
++  let labels = rel.split(".");
++  if (labels.some((l) => l === "")) return { action: "keep", owner: null, reason: "unrecognised name" };
++  let kind: "plain" | "wild" | "acme" = "plain";
++  if (labels[0] === "*") {
++    kind = "wild";
++    labels = labels.slice(1);
++  } else if (labels[0] === "_acme-challenge") {
++    kind = "acme";
++    labels = labels.slice(1);
++  }
++  if (labels.length < 1 || labels.length > 2 || labels.some((l) => l.includes("*") || l.startsWith("_"))) {
++    return { action: "keep", owner: null, reason: "unrecognised name" };
++  }
++  const ownerLabel = labels[labels.length - 1]!;
++  const user = validateUserLabel(ownerLabel);
++  if (!user.ok) return { action: "keep", owner: null, reason: "system or reserved label" };
++  const owner = user.label;
++  if (labels.length === 2 && !validateServerLabel(labels[0]!).ok) {
++    return { action: "keep", owner: null, reason: "unrecognised name" };
++  }
++  const allowed = ALLOWED[`${labels.length}:${kind}`];
++  if (!allowed || !allowed.includes(type)) {
++    return { action: "keep", owner: null, reason: `not a record Flagship publishes (${type})` };
++  }
++  if (protectedAccounts.includes(owner)) return { action: "keep", owner, reason: "protected account" };
++  if (known.names.has(owner)) return { action: "keep", owner, reason: "account still exists in D1" };
++  return { action: "orphan", owner, reason: "no account of this name in D1" };
++}
++
++export interface ServerVerdict {
++  action: ReapAction;
++  owner: string | null;
++  reason: string;
++}
++
++export function classifyServer(
++  s: { serverId: string; labels: Record<string, string> },
++  known: KnownAccounts,
++  protectedAccounts: readonly string[],
++): ServerVerdict {
++  if (s.labels[REAP_ENV_LABEL] !== undefined) {
++    return { action: "keep", owner: null, reason: "belongs to another environment (gym sweep handles it)" };
++  }
++  const raw = s.labels[REAP_DEMO_LABEL];
++  if (raw === undefined) return { action: "keep", owner: null, reason: "not a Flagship demo server" };
++  const user = validateUserLabel(raw.toLowerCase());
++  if (!user.ok) return { action: "keep", owner: null, reason: "unrecognised account label" };
++  const owner = user.label;
++  if (protectedAccounts.includes(owner)) return { action: "keep", owner, reason: "protected account" };
++  if (known.names.has(owner)) return { action: "keep", owner, reason: "account still exists in D1" };
++  if (known.serverIds.has(s.serverId.toLowerCase())) {
++    return { action: "keep", owner, reason: "a demo user in D1 still points at this server" };
++  }
++  return { action: "orphan", owner, reason: "no account of this name in D1" };
++}
++
++const KNOWN_QUERIES: { sql: string; kind: "name" | "serverId"; primary?: true }[] = [
++  { sql: "SELECT username AS v FROM usernames", kind: "name", primary: true },
++  { sql: "SELECT old_username AS v FROM usernames_aliases", kind: "name" },
++  { sql: "SELECT new_username AS v FROM usernames_aliases", kind: "name" },
++  { sql: "SELECT username AS v FROM servers", kind: "name" },
++  { sql: "SELECT username AS v FROM demo_users", kind: "name" },
++  { sql: "SELECT username AS v FROM auth_codes", kind: "name" },
++  { sql: "SELECT active_server_id AS v FROM demo_users WHERE active_server_id IS NOT NULL", kind: "serverId" },
++];
++
++export class ReapRefusal extends Error {
++  constructor(
++    readonly status: number,
++    readonly code: string,
++    message: string,
++  ) {
++    super(message);
++  }
++}
++
++/** Every account name D1 still knows. A query error other than a missing table fails closed. */
++export async function loadKnownAccounts(db: D1Database, protectedAccounts: readonly string[]): Promise<KnownAccounts> {
++  const names = new Set<string>();
++  const serverIds = new Set<string>();
++  let usernameRows = 0;
++  for (const q of KNOWN_QUERIES) {
++    let rows: { v: unknown }[];
++    try {
++      rows = (await db.prepare(q.sql).all<{ v: unknown }>()).results;
++    } catch (e) {
++      if (/no such (table|column)/i.test(e instanceof Error ? e.message : String(e))) continue;
++      throw new ReapRefusal(502, "d1-unavailable", "Could not read the account tables; nothing was classified.");
++    }
++    for (const r of rows) {
++      if (typeof r.v !== "string" || r.v === "") continue;
++      if (q.kind === "name") names.add(r.v.toLowerCase());
++      else serverIds.add(r.v.toLowerCase());
++    }
++    if (q.primary) usernameRows = rows.length;
++  }
++  if (usernameRows === 0) {
++    throw new ReapRefusal(409, "d1-has-no-accounts", "D1 holds no accounts at all: wrong database? Nothing was classified.");
++  }
++  const missing = protectedAccounts.filter((p) => !names.has(p));
++  if (missing.length > 0) {
++    throw new ReapRefusal(
++      409,
++      "protected-account-missing",
++      `D1 does not hold the protected account ${missing.join(", ")}: wrong database, or the review login is gone. Nothing was classified.`,
++    );
++  }
++  return { names, serverIds };
++}
++
++export function protectedAccountsFrom(env: ReapEnv): string[] {
++  if (env.REAP_PROTECTED_ACCOUNTS === undefined) return [...DEFAULT_PROTECTED_ACCOUNTS];
++  return env.REAP_PROTECTED_ACCOUNTS.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
++}
++
++export interface PlanDnsEntry extends ReapDnsRecord, DnsVerdict {}
++export interface PlanServerEntry extends ReapServer, ServerVerdict {}
++
++export interface ReapAccountSummary {
++  owner: string;
++  status: "orphan" | "kept";
++  dnsOrphans: number;
++  serverOrphans: number;
++  dnsKept: number;
++}
++
++export interface ReapPlan {
++  version: 1;
++  generatedAt: string;
++  apex: string;
++  zoneRecords: number;
++  knownAccounts: number;
++  protectedAccounts: string[];
++  /** False when the UpCloud token is not configured: servers were not looked at. */
++  serversChecked: boolean;
++  summary: {
++    dnsTotal: number;
++    dnsKeep: number;
++    dnsOrphan: number;
++    serversTotal: number;
++    serversKeep: number;
++    serversOrphan: number;
++    zoneRecordsAfter: number;
++  };
++  accounts: ReapAccountSummary[];
++  dns: PlanDnsEntry[];
++  servers: PlanServerEntry[];
++}
++
++export async function buildPlan(deps: ReapDeps): Promise<ReapPlan> {
++  if (!deps.dns) {
++    throw new ReapRefusal(503, "dns-not-configured", "CLOUDFLARE_DNS_API_TOKEN and CLOUDFLARE_SERVICES_ZONE_ID are required.");
++  }
++  const known = await loadKnownAccounts(deps.db, deps.protectedAccounts);
++  const records = await deps.dns.listAll();
++  const dns: PlanDnsEntry[] = records.map((r) => ({
++    id: r.id,
++    name: r.name,
++    type: r.type,
++    ...(r.content !== undefined ? { content: r.content } : {}),
++    ...classifyDnsRecord(r, deps.apex, known, deps.protectedAccounts),
++  }));
++  const servers: PlanServerEntry[] = deps.cloud
++    ? (await deps.cloud.listServersByLabelKey(REAP_DEMO_LABEL)).map((s) => ({
++        ...s,
++        ...classifyServer(s, known, deps.protectedAccounts),
++      }))
++    : [];
++  const accounts = new Map<string, ReapAccountSummary>();
++  const row = (owner: string): ReapAccountSummary => {
++    let a = accounts.get(owner);
++    if (!a) {
++      a = { owner, status: "kept", dnsOrphans: 0, serverOrphans: 0, dnsKept: 0 };
++      accounts.set(owner, a);
++    }
++    return a;
++  };
++  for (const d of dns) {
++    if (!d.owner) continue;
++    const a = row(d.owner);
++    if (d.action === "orphan") {
++      a.status = "orphan";
++      a.dnsOrphans += 1;
++    } else a.dnsKept += 1;
++  }
++  for (const s of servers) {
++    if (!s.owner) continue;
++    const a = row(s.owner);
++    if (s.action === "orphan") {
++      a.status = "orphan";
++      a.serverOrphans += 1;
++    }
++  }
++  const dnsOrphan = dns.filter((d) => d.action === "orphan").length;
++  const serversOrphan = servers.filter((s) => s.action === "orphan").length;
++  return {
++    version: 1,
++    generatedAt: new Date((deps.now ?? Date.now)()).toISOString(),
++    apex: deps.apex,
++    zoneRecords: dns.length,
++    knownAccounts: known.names.size,
++    protectedAccounts: [...deps.protectedAccounts],
++    serversChecked: deps.cloud !== undefined,
++    summary: {
++      dnsTotal: dns.length,
++      dnsKeep: dns.length - dnsOrphan,
++      dnsOrphan,
++      serversTotal: servers.length,
++      serversKeep: servers.length - serversOrphan,
++      serversOrphan,
++      zoneRecordsAfter: dns.length - dnsOrphan,
++    },
++    accounts: [...accounts.values()].sort(
++      (a, b) => Number(b.status === "orphan") - Number(a.status === "orphan") || a.owner.localeCompare(b.owner),
++    ),
++    dns,
++    servers,
++  };
++}
++
++export interface DeleteOneBody {
++  kind?: unknown;
++  id?: unknown;
++  name?: unknown;
++  type?: unknown;
++  owner?: unknown;
++}
++
++export interface DeleteOneResult {
++  status: number;
++  body: Record<string, unknown>;
++}
++
++const DNS_ID_RE = /^[0-9a-f]{32}$/i;
++const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
++
++function errText(e: unknown): string {
++  return (e instanceof Error ? e.message : String(e)).slice(0, 240);
++}
++
++/**
++ * Deletes exactly one item after re-reading it and re-deciding from D1 as of
++ * now. A plan is never trusted: an account that came back since, a record that
++ * changed, or a shape the rules do not know all answer 409 and delete nothing.
++ */
++export async function deleteOne(deps: ReapDeps, body: DeleteOneBody | undefined): Promise<DeleteOneResult> {
++  const log = deps.log ?? (() => undefined);
++  const kind = body?.kind;
++  if (kind !== "dns" && kind !== "server") {
++    return { status: 400, body: { error: "kind must be dns or server" } };
++  }
++  const id = body?.id;
++  if (typeof id !== "string" || !(kind === "dns" ? DNS_ID_RE.test(id) : UUID_RE.test(id))) {
++    return { status: 400, body: { error: kind === "dns" ? "id must be a Cloudflare record id" : "id must be an UpCloud server UUID" } };
++  }
++  let known: KnownAccounts;
++  try {
++    known = await loadKnownAccounts(deps.db, deps.protectedAccounts);
++  } catch (e) {
++    if (e instanceof ReapRefusal) return { status: e.status, body: { error: e.message, code: e.code } };
++    throw e;
++  }
++
++  if (kind === "dns") {
++    if (!deps.dns) return { status: 503, body: { error: "DNS is not configured", code: "dns-not-configured" } };
++    const name = body?.name;
++    const type = body?.type;
++    if (typeof name !== "string" || typeof type !== "string") {
++      return { status: 400, body: { error: "name and type are required" } };
++    }
++    let live: ReapDnsRecord | null;
++    try {
++      live = await deps.dns.getById(id);
++    } catch (e) {
++      return { status: 502, body: { error: errText(e), code: "dns-read-failed", retryable: true } };
++    }
++    if (live === null) return { status: 200, body: { result: "gone", kind, id, name } };
++    if (live.name.toLowerCase() !== name.toLowerCase() || live.type.toUpperCase() !== type.toUpperCase()) {
++      return { status: 409, body: { error: "the record is not the one in the plan", code: "mismatch" } };
++    }
++    const verdict = classifyDnsRecord(live, deps.apex, known, deps.protectedAccounts);
++    if (verdict.action !== "orphan") {
++      log(`reap refused dns ${live.type} ${live.name}: ${verdict.reason}`);
++      return { status: 409, body: { error: `not an orphan: ${verdict.reason}`, code: "not-orphan", reason: verdict.reason } };
++    }
++    try {
++      await deps.dns.deleteById(id);
++    } catch (e) {
++      return { status: 502, body: { error: errText(e), code: "dns-delete-failed", retryable: true } };
++    }
++    log(`reap deleted dns ${live.type} ${live.name} (${verdict.owner})`);
++    return { status: 200, body: { result: "deleted", kind, id, name: live.name, type: live.type, owner: verdict.owner } };
++  }
++
++  if (!deps.cloud) return { status: 503, body: { error: "UpCloud is not configured", code: "cloud-not-configured" } };
++  let labels: Record<string, string> | null;
++  try {
++    labels = await deps.cloud.getServerLabels(id);
++  } catch (e) {
++    return { status: 502, body: { error: errText(e), code: "server-read-failed", retryable: true } };
++  }
++  if (labels === null) return { status: 200, body: { result: "gone", kind, id } };
++  const verdict = classifyServer({ serverId: id, labels }, known, deps.protectedAccounts);
++  if (verdict.action !== "orphan") {
++    log(`reap refused server ${id}: ${verdict.reason}`);
++    return { status: 409, body: { error: `not an orphan: ${verdict.reason}`, code: "not-orphan", reason: verdict.reason } };
++  }
++  if (typeof body?.owner === "string" && body.owner.toLowerCase() !== verdict.owner) {
++    return { status: 409, body: { error: "the server is not the one in the plan", code: "mismatch" } };
++  }
++  try {
++    await deps.cloud.destroyServer(id);
++  } catch (e) {
++    return { status: 502, body: { error: errText(e), code: "server-delete-failed", retryable: true } };
++  }
++  log(`reap destroyed server ${id} (${verdict.owner})`);
++  return { status: 200, body: { result: "deleted", kind, id, owner: verdict.owner } };
++}
++
++function json(body: unknown, status: number): Response {
++  return new Response(JSON.stringify(body), {
++    status,
++    headers: { "content-type": "application/json", "cache-control": "no-store" },
++  });
++}
++
++export interface ReapRouteOptions {
++  makeDns?: (env: ReapEnv) => ReapDnsClient | undefined;
++  makeCloud?: (env: ReapEnv) => ReapCloudClient | undefined;
++}
++
++export async function handleReapRoute(
++  request: Request,
++  env: ReapEnv,
++  opts: Required<ReapRouteOptions>,
++): Promise<Response> {
++  const auth = authorizeAdmin({ expected: env.FLAGSHIP_ADMIN_SECRET, provided: request.headers.get("x-admin-secret") });
++  if (auth) return json(auth.body, auth.status);
++  const path = new URL(request.url).pathname.slice(REAP_PATH_PREFIX.length);
++  const wantsPost = path === "delete-one";
++  if (path !== "list" && path !== "classify" && !wantsPost) return json({ error: "not found" }, 404);
++  if (request.method !== (wantsPost ? "POST" : "GET")) return json({ error: "method not allowed" }, 405);
++  if (!env.DB) return json({ error: "database unavailable" }, 503);
++  const deps: ReapDeps = {
++    db: env.DB,
++    dns: opts.makeDns(env),
++    cloud: opts.makeCloud(env),
++    apex: (env.SERVICES_APEX ?? "flagship.services").toLowerCase(),
++    protectedAccounts: protectedAccountsFrom(env),
++    log: (line) => console.log(line),
++  };
++  try {
++    if (path === "list") {
++      if (!deps.dns) return json({ error: "DNS is not configured", code: "dns-not-configured" }, 503);
++      const dns = await deps.dns.listAll();
++      const servers = deps.cloud ? await deps.cloud.listServersByLabelKey(REAP_DEMO_LABEL) : [];
++      return json({ apex: deps.apex, zoneRecords: dns.length, serversChecked: deps.cloud !== undefined, dns, servers }, 200);
++    }
++    if (path === "classify") return json(await buildPlan(deps), 200);
++    let body: DeleteOneBody | undefined;
++    try {
++      body = (await request.json()) as DeleteOneBody;
++    } catch {
++      return json({ error: "body must be JSON" }, 400);
++    }
++    const r = await deleteOne(deps, body);
++    return json(r.body, r.status);
++  } catch (e) {
++    if (e instanceof ReapRefusal) return json({ error: e.message, code: e.code }, e.status);
++    return json({ error: errText(e), code: "upstream-failed", retryable: true }, 502);
++  }
++}
+diff --git a/apps/com/src/route.ts b/apps/com/src/route.ts
+index 2fec63245..bcd9a5310 100644
+--- a/apps/com/src/route.ts
++++ b/apps/com/src/route.ts
+@@ -35,6 +35,9 @@ import { handleInferenceModelRoutes, isInferenceModelPath } from "./inferenceMod
+ import { handleSecurityNotices, isSecurityNoticesPath } from "./securityNotices.js";
+ import { handlePeerBackupNetRoute, isPeerBackupNetPath } from "./peerBackupNetworkRoutes.js";
+ import { handleRateLimitReport, RATE_LIMIT_REPORT_PATH } from "./rateLimitReport.js";
++import { handleReapRoute, REAP_PATH_PREFIX } from "./prodReap.js";
++import { CloudflareDnsClient } from "@flagship/control-plane";
++import { createUpCloudClient } from "./upcloud.js";
+ import {
+   recordRateLimited,
+   recordUpgrade,
+@@ -704,6 +707,17 @@ async function routeImpl(
+   if (url.pathname === RATE_LIMIT_REPORT_PATH) {
+     return handleRateLimitReport(request, env);
+   }
++  // Owner-run prod reap of what the pre-GA scrub leaves (DNS + demo servers);
++  // docs/runbooks/pre-ga-scrub.md. Admin secret; classifies, deletes one item.
++  if (url.pathname.startsWith(REAP_PATH_PREFIX)) {
++    return handleReapRoute(request, env, {
++      makeDns: (e) =>
++        e.CLOUDFLARE_DNS_API_TOKEN && e.CLOUDFLARE_SERVICES_ZONE_ID
++          ? new CloudflareDnsClient({ apiToken: e.CLOUDFLARE_DNS_API_TOKEN, zoneId: e.CLOUDFLARE_SERVICES_ZONE_ID })
++          : undefined,
++      makeCloud: (e) => (e.UPCLOUD_TOKEN ? createUpCloudClient({ token: e.UPCLOUD_TOKEN }) : undefined),
++    });
++  }
+   if (isInferenceModelPath(url.pathname)) {
+     return handleInferenceModelRoutes(request, env);
+   }
+diff --git a/apps/com/src/upcloud.ts b/apps/com/src/upcloud.ts
+index 23a9b2150..4e7ec0b0f 100644
+--- a/apps/com/src/upcloud.ts
++++ b/apps/com/src/upcloud.ts
+@@ -63,6 +63,8 @@ export interface UpCloudLabeledServer {
+ export interface UpCloudClient {
+   findServerByName(name: string): Promise<UpCloudServerResult | null>;
+   listServersByLabel(key: string, value: string): Promise<UpCloudLabeledServer[]>;
++  /** Every server that has the label key, whatever its value (prod reap). */
++  listServersByLabelKey(key: string): Promise<UpCloudLabeledServer[]>;
+   createServerWithUserData(args: UpCloudCreateServerArgs): Promise<UpCloudServerResult>;
+   getServerLabels(serverId: string): Promise<Record<string, string> | null>;
+   getServerStatus(serverId: string): Promise<{ status: string; ipv4: string | null }>;
+@@ -171,6 +173,22 @@ export function createUpCloudClient(opts: UpCloudClientOptions): UpCloudClient {
+       return out;
+     },
+ 
++    async listServersByLabelKey(key) {
++      const path = `/server?label=${encodeURIComponent(key)}`;
++      const { status, text } = await call("GET", path);
++      if (status < 200 || status >= 300) fail("GET", "/server", status, text);
++      const servers = (safeJsonParse(text) as { servers?: { server?: UpCloudServerBody[] } } | null)
++        ?.servers?.server ?? [];
++      const out: UpCloudLabeledServer[] = [];
++      for (const s of servers) {
++        if (typeof s.uuid !== "string") continue;
++        const labels = labelMap(s);
++        if (labels[key] === undefined) continue;
++        out.push({ serverId: s.uuid, title: typeof s.title === "string" ? s.title : "", state: String(s.state ?? ""), labels });
++      }
++      return out;
++    },
++
+     async getServerLabels(serverId: string) {
+       const server = await getServer(serverId);
+       return server ? labelMap(server) : null;
+diff --git a/apps/com/test/prodReap.test.ts b/apps/com/test/prodReap.test.ts
+new file mode 100644
+index 000000000..c061a1948
+--- /dev/null
++++ b/apps/com/test/prodReap.test.ts
+@@ -0,0 +1,515 @@
++import { describe, expect, it } from "vitest";
++import type { D1Database } from "@flagship/storage";
++import {
++  buildPlan,
++  classifyDnsRecord,
++  classifyServer,
++  deleteOne,
++  handleReapRoute,
++  loadKnownAccounts,
++  type KnownAccounts,
++  type ReapCloudClient,
++  type ReapDeps,
++  type ReapDnsClient,
++  type ReapDnsRecord,
++  type ReapServer,
++} from "../src/prodReap.js";
++
++const APEX = "flagship.services";
++const PROTECTED = ["playstore-test-0725"];
++const SECRET = "admin-secret-for-test";
++
++const S_ORPHAN = "00000000-0000-4000-8000-0000000000a1";
++const S_KEPT = "00000000-0000-4000-8000-0000000000a2";
++const S_PROTECTED = "00000000-0000-4000-8000-0000000000a3";
++const S_GYM = "00000000-0000-4000-8000-0000000000a4";
++const S_POINTED = "00000000-0000-4000-8000-0000000000a5";
++const S_FOREIGN = "00000000-0000-4000-8000-0000000000a6";
++
++interface World {
++  usernames: string[];
++  aliases: [string, string][];
++  servers: string[];
++  demoUsers: { username: string; active_server_id: string | null }[];
++  authCodes: string[];
++  missingTables: Set<string>;
++  failQuery: boolean;
++}
++
++function newWorld(over: Partial<World> = {}): World {
++  return {
++    usernames: ["playstore-test-0725", "alice"],
++    aliases: [],
++    servers: ["alice"],
++    demoUsers: [],
++    authCodes: [],
++    missingTables: new Set(),
++    failQuery: false,
++    ...over,
++  };
++}
++
++function fakeDb(w: World): D1Database {
++  const rowsFor = (sql: string): { v: string | null }[] => {
++    const table = /FROM (\w+)/.exec(sql)![1]!;
++    if (w.missingTables.has(table)) throw new Error(`D1_ERROR: no such table: ${table}`);
++    if (w.failQuery) throw new Error("D1_ERROR: network connection lost");
++    if (table === "usernames") return w.usernames.map((v) => ({ v }));
++    if (table === "usernames_aliases") return w.aliases.map(([o, n]) => ({ v: sql.includes("old_username") ? o : n }));
++    if (table === "servers") return w.servers.map((v) => ({ v }));
++    if (table === "auth_codes") return w.authCodes.map((v) => ({ v }));
++    if (table === "demo_users") {
++      return sql.includes("active_server_id")
++        ? w.demoUsers.filter((d) => d.active_server_id).map((d) => ({ v: d.active_server_id }))
++        : w.demoUsers.map((d) => ({ v: d.username }));
++    }
++    throw new Error(`unexpected table ${table}`);
++  };
++  return {
++    prepare: (sql: string) => {
++      const st = {
++        bind: () => st,
++        first: async () => null,
++        run: async () => {
++          throw new Error("the reap must never write to D1");
++        },
++        all: async () => ({ results: rowsFor(sql), success: true, meta: {} }),
++      };
++      return st;
++    },
++    batch: async () => {
++      throw new Error("the reap must never write to D1");
++    },
++  } as unknown as D1Database;
++}
++
++const rec = (id: string, name: string, type = "A", content = "1.2.3.4"): ReapDnsRecord => ({ id, name, type, content });
++const hex = (n: number) => n.toString(16).padStart(32, "0");
++
++function zone(): ReapDnsRecord[] {
++  return [
++    rec(hex(1), APEX, "A"),
++    rec(hex(2), `*.${APEX}`, "A"),
++    rec(hex(3), APEX, "MX", "mail.example.com"),
++    rec(hex(4), `_dmarc.${APEX}`, "TXT", "v=DMARC1"),
++    rec(hex(5), `hub.${APEX}`, "A"),
++    rec(hex(6), `gym.${APEX}`, "A"),
++    rec(hex(7), `x.gym.${APEX}`, "A"),
++    // kept account alice
++    rec(hex(10), `alice.${APEX}`, "CAA", '0 issue "letsencrypt.org"'),
++    rec(hex(11), `*.alice.${APEX}`, "A"),
++    rec(hex(12), `home.alice.${APEX}`, "A"),
++    rec(hex(13), `*.home.alice.${APEX}`, "AAAA"),
++    // protected review account
++    rec(hex(20), `playstore-test-0725.${APEX}`, "CAA"),
++    rec(hex(21), `home.playstore-test-0725.${APEX}`, "A"),
++    // orphan account bob
++    rec(hex(30), `bob.${APEX}`, "CAA"),
++    rec(hex(31), `*.bob.${APEX}`, "CAA"),
++    rec(hex(32), `*.bob.${APEX}`, "A"),
++    rec(hex(33), `*.bob.${APEX}`, "AAAA"),
++    rec(hex(34), `home.bob.${APEX}`, "A"),
++    rec(hex(35), `*.home.bob.${APEX}`, "A"),
++    rec(hex(36), `_acme-challenge.home.bob.${APEX}`, "TXT", "token"),
++    // orphan account carol-2 (dash)
++    rec(hex(40), `carol-2.${APEX}`, "CAA"),
++    rec(hex(41), `box.carol-2.${APEX}`, "A"),
++    // shapes the rules do not know: kept even though bob is an orphan
++    rec(hex(50), `bob.${APEX}`, "A"),
++    rec(hex(51), `svc.home.bob.${APEX}`, "A"),
++    rec(hex(52), `broadcast--bob.${APEX}`, "A"),
++    rec(hex(53), `home.bob.${APEX}`, "TXT", "something"),
++    rec(hex(54), `foo.example.org`, "A"),
++  ];
++}
++
++function fakeDns(records: ReapDnsRecord[]): ReapDnsClient & { deleted: string[]; failures: Map<string, number>; reads: number } {
++  const live = new Map(records.map((r) => [r.id, r]));
++  const c = {
++    deleted: [] as string[],
++    failures: new Map<string, number>(),
++    reads: 0,
++    async listAll() {
++      c.reads += 1;
++      return [...live.values()];
++    },
++    async getById(id: string) {
++      return live.get(id) ?? null;
++    },
++    async deleteById(id: string) {
++      const left = c.failures.get(id) ?? 0;
++      if (left > 0) {
++        c.failures.set(id, left - 1);
++        throw new Error("Cloudflare DNS deleteById failed: rate limited");
++      }
++      c.deleted.push(id);
++      return live.delete(id);
++    },
++  };
++  return c;
++}
++
++function fakeCloud(servers: ReapServer[]): ReapCloudClient & { destroyed: string[] } {
++  const c = {
++    destroyed: [] as string[],
++    async listServersByLabelKey(key: string) {
++      return servers.filter((s) => s.labels[key] !== undefined);
++    },
++    async getServerLabels(id: string) {
++      return servers.find((s) => s.serverId === id)?.labels ?? null;
++    },
++    async destroyServer(id: string) {
++      c.destroyed.push(id);
++    },
++  };
++  return c;
++}
++
++const srv = (serverId: string, labels: Record<string, string>): ReapServer => ({ serverId, title: `t-${serverId.slice(-2)}`, state: "started", labels });
++
++function servers(): ReapServer[] {
++  return [
++    srv(S_ORPHAN, { "flagship-demo": "bob" }),
++    srv(S_KEPT, { "flagship-demo": "alice" }),
++    srv(S_PROTECTED, { "flagship-demo": "playstore-test-0725" }),
++    srv(S_GYM, { "flagship-demo": "gymuser", "flagship-env": "gym" }),
++    srv(S_POINTED, { "flagship-demo": "dave" }),
++    srv(S_FOREIGN, { "flagship-demo": "UPPER_bad!" }),
++  ];
++}
++
++function known(over: Partial<World> = {}): Promise<KnownAccounts> {
++  return loadKnownAccounts(fakeDb(newWorld(over)), PROTECTED);
++}
++
++function deps(over: Partial<ReapDeps> = {}, world: Partial<World> = {}): ReapDeps & { dnsC: ReturnType<typeof fakeDns>; cloudC: ReturnType<typeof fakeCloud>; lines: string[] } {
++  const dnsC = fakeDns(zone());
++  const cloudC = fakeCloud(servers());
++  const lines: string[] = [];
++  return {
++    db: fakeDb(newWorld({ demoUsers: [{ username: "dave", active_server_id: S_POINTED }], ...world })),
++    dns: dnsC,
++    cloud: cloudC,
++    apex: APEX,
++    protectedAccounts: PROTECTED,
++    log: (l) => lines.push(l),
++    ...over,
++    dnsC,
++    cloudC,
++    lines,
++  };
++}
++
++describe("loadKnownAccounts", () => {
++  it("reads every table that can name an account, lowercased", async () => {
++    const k = await known({
++      usernames: ["playstore-test-0725", "Alice"],
++      aliases: [["old-name", "new-name"]],
++      servers: ["srvowner"],
++      demoUsers: [{ username: "demo1", active_server_id: S_POINTED }],
++      authCodes: ["codeowner"],
++    });
++    for (const n of ["alice", "old-name", "new-name", "srvowner", "demo1", "codeowner"]) expect(k.names.has(n)).toBe(true);
++    expect(k.serverIds.has(S_POINTED)).toBe(true);
++  });
++
++  it("skips a table that does not exist but fails closed on any other error", async () => {
++    const k = await known({ missingTables: new Set(["usernames_aliases", "auth_codes"]) });
++    expect(k.names.has("alice")).toBe(true);
++    await expect(known({ failQuery: true })).rejects.toMatchObject({ status: 502, code: "d1-unavailable" });
++  });
++
++  it("refuses an empty database and one missing a protected account", async () => {
++    await expect(known({ usernames: [] })).rejects.toMatchObject({ status: 409, code: "d1-has-no-accounts" });
++    await expect(known({ usernames: ["alice"] })).rejects.toMatchObject({ status: 409, code: "protected-account-missing" });
++  });
++});
++
++describe("classifyDnsRecord", () => {
++  const verdict = async (name: string, type: string, world: Partial<World> = {}) =>
++    classifyDnsRecord({ name, type }, APEX, await known(world), PROTECTED);
++
++  it("keeps apex and system records", async () => {
++    for (const [n, t] of [[APEX, "A"], [`*.${APEX}`, "A"], [APEX, "MX"], [`_dmarc.${APEX}`, "TXT"], [`hub.${APEX}`, "A"], ["foo.example.org", "A"]] as const) {
++      expect((await verdict(n, t)).action, `${t} ${n}`).toBe("keep");
++    }
++  });
++
++  it("keeps the gym subtree and every reserved label", async () => {
++    for (const n of [`gym.${APEX}`, `x.gym.${APEX}`, `*.gym.${APEX}`, `home.x.gym.${APEX}`, `api.${APEX}`, `broadcast.${APEX}`]) {
++      expect((await verdict(n, "A")).action, n).toBe("keep");
++    }
++  });
++
++  it("keeps everything of an account that still exists in D1, in any spelling", async () => {
++    for (const [n, t] of [
++      [`alice.${APEX}`, "CAA"], [`*.alice.${APEX}`, "CAA"], [`*.alice.${APEX}`, "AAAA"],
++      [`home.alice.${APEX}`, "A"], [`*.home.alice.${APEX}`, "A"], [`_acme-challenge.home.alice.${APEX}`, "TXT"],
++      [`HOME.Alice.${APEX}.`, "A"],
++    ] as const) {
++      const v = await verdict(n, t);
++      expect(v.action, `${t} ${n}`).toBe("keep");
++      expect(v.owner).toBe("alice");
++    }
++  });
++
++  it("keeps an account known only through an alias, a server row, a demo row or an auth code", async () => {
++    expect((await verdict(`oldie.${APEX}`, "CAA", { aliases: [["oldie", "alice"]] })).action).toBe("keep");
++    expect((await verdict(`oldie.${APEX}`, "CAA", { servers: ["oldie"] })).action).toBe("keep");
++    expect((await verdict(`oldie.${APEX}`, "CAA", { demoUsers: [{ username: "oldie", active_server_id: null }] })).action).toBe("keep");
++    expect((await verdict(`oldie.${APEX}`, "CAA", { authCodes: ["oldie"] })).action).toBe("keep");
++  });
++
++  it("keeps the store-review account even if D1 forgot the name", async () => {
++    const k: KnownAccounts = { names: new Set(["alice"]), serverIds: new Set() };
++    const v = classifyDnsRecord({ name: `home.playstore-test-0725.${APEX}`, type: "A" }, APEX, k, PROTECTED);
++    expect(v).toMatchObject({ action: "keep", reason: "protected account" });
++  });
++
++  it("marks the record shapes Flagship publishes for a missing account as orphans", async () => {
++    for (const [n, t] of [
++      [`bob.${APEX}`, "CAA"], [`*.bob.${APEX}`, "CAA"], [`*.bob.${APEX}`, "A"], [`*.bob.${APEX}`, "AAAA"],
++      [`home.bob.${APEX}`, "A"], [`home.bob.${APEX}`, "AAAA"], [`*.home.bob.${APEX}`, "A"],
++      [`_acme-challenge.home.bob.${APEX}`, "TXT"], [`_acme-challenge.bob.${APEX}`, "TXT"], [`box.carol-2.${APEX}`, "A"],
++    ] as const) {
++      const v = await verdict(n, t);
++      expect(v.action, `${t} ${n}`).toBe("orphan");
++    }
++  });
++
++  it("keeps shapes it does not recognise, even under a missing account", async () => {
++    for (const [n, t] of [
++      [`bob.${APEX}`, "A"], [`bob.${APEX}`, "TXT"], [`home.bob.${APEX}`, "TXT"], [`home.bob.${APEX}`, "CAA"],
++      [`svc.home.bob.${APEX}`, "A"], [`broadcast--bob.${APEX}`, "A"], [`_acme-challenge.*.bob.${APEX}`, "TXT"],
++      [`*.*.bob.${APEX}`, "A"], [`bad_name.bob.${APEX}`, "A"], [`-x.bob.${APEX}`, "A"], [`.bob.${APEX}`, "A"],
++    ] as const) {
++      expect((await verdict(n, t)).action, `${t} ${n}`).toBe("keep");
++    }
++  });
++
++  it("keeps a name that merely ends like the apex", async () => {
++    expect((await verdict(`bob.not${APEX}`, "CAA")).action).toBe("keep");
++    expect((await verdict(`bob.${APEX}.evil.com`, "CAA")).action).toBe("keep");
++  });
++});
++
++describe("classifyServer", () => {
++  it("orphans only an unlabelled-for-env demo server whose account is gone", async () => {
++    const k = await known({ demoUsers: [{ username: "dave", active_server_id: S_POINTED }] });
++    const by = Object.fromEntries(servers().map((s) => [s.serverId, classifyServer(s, k, PROTECTED)]));
++    expect(by[S_ORPHAN]).toMatchObject({ action: "orphan", owner: "bob" });
++    expect(by[S_KEPT]!.action).toBe("keep");
++    expect(by[S_PROTECTED]).toMatchObject({ action: "keep", reason: "protected account" });
++    expect(by[S_GYM]!.action).toBe("keep");
++    expect(by[S_POINTED]!.action).toBe("keep");
++    expect(by[S_FOREIGN]!.action).toBe("keep");
++  });
++
++  it("keeps a server without the demo label", async () => {
++    const k = await known();
++    expect(classifyServer({ serverId: S_ORPHAN, labels: { team: "x" } }, k, PROTECTED).action).toBe("keep");
++  });
++
++  it("keeps a server a demo row in D1 still points at, even under another name", async () => {
++    const k = await known({ demoUsers: [{ username: "someone", active_server_id: S_ORPHAN }] });
++    expect(classifyServer({ serverId: S_ORPHAN, labels: { "flagship-demo": "bob" } }, k, PROTECTED).action).toBe("keep");
++  });
++});
++
++describe("buildPlan", () => {
++  it("lists and classifies without writing, with per-account counts", async () => {
++    const d = deps();
++    const plan = await buildPlan(d);
++    expect(plan.zoneRecords).toBe(zone().length);
++    expect(plan.summary.dnsOrphan).toBe(9);
++    expect(plan.summary.zoneRecordsAfter).toBe(zone().length - 9);
++    expect(plan.summary.serversOrphan).toBe(1);
++    expect(plan.serversChecked).toBe(true);
++    const bob = plan.accounts.find((a) => a.owner === "bob")!;
++    expect(bob).toMatchObject({ status: "orphan", dnsOrphans: 7, serverOrphans: 1 });
++    expect(plan.accounts.find((a) => a.owner === "carol-2")).toMatchObject({ status: "orphan", dnsOrphans: 2 });
++    expect(plan.accounts.find((a) => a.owner === "alice")).toMatchObject({ status: "kept", dnsOrphans: 0 });
++    expect(plan.accounts.map((a) => a.status)).toEqual([...plan.accounts.map((a) => a.status)].sort((a, b) => (a === b ? 0 : a === "orphan" ? -1 : 1)));
++    // building a plan is read-only
++    expect(d.dnsC.deleted).toEqual([]);
++    expect(d.cloudC.destroyed).toEqual([]);
++  });
++
++  it("works without an UpCloud token and says servers were not checked", async () => {
++    const plan = await buildPlan(deps({ cloud: undefined }));
++    expect(plan.serversChecked).toBe(false);
++    expect(plan.servers).toEqual([]);
++  });
++
++  it("needs DNS", async () => {
++    await expect(buildPlan(deps({ dns: undefined }))).rejects.toMatchObject({ status: 503 });
++  });
++
++  it("refuses to classify against the wrong database", async () => {
++    await expect(buildPlan(deps({}, { usernames: ["alice"] }))).rejects.toMatchObject({ code: "protected-account-missing" });
++  });
++});
++
++describe("deleteOne", () => {
++  it("deletes an orphan record and logs it", async () => {
++    const d = deps();
++    const r = await deleteOne(d, { kind: "dns", id: hex(30), name: `bob.${APEX}`, type: "CAA" });
++    expect(r).toMatchObject({ status: 200, body: { result: "deleted", owner: "bob" } });
++    expect(d.dnsC.deleted).toEqual([hex(30)]);
++    expect(d.lines.join("\n")).toContain(`reap deleted dns CAA bob.${APEX}`);
++  });
++
++  it("re-verifies against D1 right now: an account that came back is not touched", async () => {
++    const d = deps({}, { usernames: ["playstore-test-0725", "alice", "bob"] });
++    const r = await deleteOne(d, { kind: "dns", id: hex(30), name: `bob.${APEX}`, type: "CAA" });
++    expect(r).toMatchObject({ status: 409, body: { code: "not-orphan" } });
++    expect(d.dnsC.deleted).toEqual([]);
++  });
++
++  it("refuses every keep record by id, even if the caller names it", async () => {
++    const d = deps();
++    for (const r of zone().filter((x) => !["30", "31", "32", "33", "34", "35", "36", "40", "41"].includes(String(parseInt(x.id, 16))))) {
++      const res = await deleteOne(d, { kind: "dns", id: r.id, name: r.name, type: r.type });
++      expect(res.status, `${r.type} ${r.name}`).toBe(409);
++    }
++    expect(d.dnsC.deleted).toEqual([]);
++  });
++
++  it("refuses a record whose name or type differs from the plan", async () => {
++    const d = deps();
++    expect((await deleteOne(d, { kind: "dns", id: hex(30), name: `alice.${APEX}`, type: "CAA" })).body.code).toBe("mismatch");
++    expect((await deleteOne(d, { kind: "dns", id: hex(30), name: `bob.${APEX}`, type: "A" })).body.code).toBe("mismatch");
++    expect(d.dnsC.deleted).toEqual([]);
++  });
++
++  it("answers gone for a record that is already deleted", async () => {
++    const d = deps();
++    const r = await deleteOne(d, { kind: "dns", id: hex(999), name: `bob.${APEX}`, type: "CAA" });
++    expect(r).toMatchObject({ status: 200, body: { result: "gone" } });
++  });
++
++  it("reports a Cloudflare failure as retryable and deletes nothing", async () => {
++    const d = deps();
++    d.dnsC.failures.set(hex(30), 1);
++    const first = await deleteOne(d, { kind: "dns", id: hex(30), name: `bob.${APEX}`, type: "CAA" });
++    expect(first).toMatchObject({ status: 502, body: { retryable: true } });
++    expect(d.dnsC.deleted).toEqual([]);
++    const second = await deleteOne(d, { kind: "dns", id: hex(30), name: `bob.${APEX}`, type: "CAA" });
++    expect(second.status).toBe(200);
++  });
++
++  it("validates its input", async () => {
++    const d = deps();
++    expect((await deleteOne(d, undefined)).status).toBe(400);
++    expect((await deleteOne(d, { kind: "zone", id: "x" })).status).toBe(400);
++    expect((await deleteOne(d, { kind: "dns", id: "not-hex", name: "a", type: "A" })).status).toBe(400);
++    expect((await deleteOne(d, { kind: "dns", id: hex(30) })).status).toBe(400);
++    expect((await deleteOne(d, { kind: "server", id: "nope" })).status).toBe(400);
++    expect(d.dnsC.deleted).toEqual([]);
++  });
++
++  it("destroys only an orphan demo server, re-checked", async () => {
++    const d = deps();
++    expect(await deleteOne(d, { kind: "server", id: S_ORPHAN, owner: "bob" })).toMatchObject({ status: 200, body: { result: "deleted" } });
++    expect(d.cloudC.destroyed).toEqual([S_ORPHAN]);
++    for (const id of [S_KEPT, S_PROTECTED, S_GYM, S_POINTED, S_FOREIGN]) {
++      expect((await deleteOne(d, { kind: "server", id })).status, id).toBe(409);
++    }
++    expect(d.cloudC.destroyed).toEqual([S_ORPHAN]);
++  });
++
++  it("refuses a server whose owner differs from the plan's", async () => {
++    const d = deps();
++    expect((await deleteOne(d, { kind: "server", id: S_ORPHAN, owner: "alice" })).body.code).toBe("mismatch");
++    expect(d.cloudC.destroyed).toEqual([]);
++  });
++
++  it("answers gone for a server that no longer exists, and 503 without a token", async () => {
++    const d = deps();
++    expect((await deleteOne(d, { kind: "server", id: "00000000-0000-4000-8000-0000000000ff" })).body.result).toBe("gone");
++    expect((await deleteOne(deps({ cloud: undefined }), { kind: "server", id: S_ORPHAN })).status).toBe(503);
++  });
++
++  it("deletes nothing when D1 cannot be read", async () => {
++    const d = deps({}, { failQuery: true });
++    expect((await deleteOne(d, { kind: "dns", id: hex(30), name: `bob.${APEX}`, type: "CAA" })).status).toBe(502);
++    expect(d.dnsC.deleted).toEqual([]);
++  });
++});
++
++describe("handleReapRoute", () => {
++  const dnsC = fakeDns(zone());
++  const cloudC = fakeCloud(servers());
++  const world = newWorld({ demoUsers: [{ username: "dave", active_server_id: S_POINTED }] });
++  const env = { DB: fakeDb(world), FLAGSHIP_ADMIN_SECRET: SECRET, CLOUDFLARE_DNS_API_TOKEN: "t", CLOUDFLARE_SERVICES_ZONE_ID: "z", UPCLOUD_TOKEN: "u" };
++  const opts = { makeDns: () => dnsC, makeCloud: () => cloudC };
++  const call = (path: string, init: RequestInit = {}, secret: string | null = SECRET, e = env) =>
++    handleReapRoute(
++      new Request(`https://flagshipserver.com/api/admin/reap/${path}`, {
++        ...init,
++        headers: { ...(secret ? { "x-admin-secret": secret } : {}), "content-type": "application/json" },
++      }),
++      e,
++      opts,
++    );
++
++  it("needs the admin secret on every route", async () => {
++    expect((await call("list", {}, null)).status).toBe(401);
++    expect((await call("classify", {}, "wrong")).status).toBe(403);
++    expect((await call("delete-one", { method: "POST", body: "{}" }, null)).status).toBe(401);
++    expect((await call("list", {}, SECRET, { ...env, FLAGSHIP_ADMIN_SECRET: undefined as unknown as string })).status).toBe(503);
++    expect(dnsC.deleted).toEqual([]);
++  });
++
++  it("dry run: list and classify only read", async () => {
++    const list = await call("list");
++    expect(list.status).toBe(200);
++    expect(((await list.json()) as { zoneRecords: number }).zoneRecords).toBe(zone().length);
++    const plan = await call("classify");
++    expect(plan.status).toBe(200);
++    expect(((await plan.json()) as { summary: { dnsOrphan: number } }).summary.dnsOrphan).toBe(9);
++    expect(dnsC.deleted).toEqual([]);
++    expect(cloudC.destroyed).toEqual([]);
++  });
++
++  it("checks method and path", async () => {
++    expect((await call("list", { method: "POST", body: "{}" })).status).toBe(405);
++    expect((await call("delete-one", { method: "GET" })).status).toBe(405);
++    expect((await call("everything")).status).toBe(404);
++    expect((await call("delete-one", { method: "POST", body: "not json" })).status).toBe(400);
++  });
++
++  it("delete-one deletes one orphan and refuses a kept record", async () => {
++    const ok = await call("delete-one", { method: "POST", body: JSON.stringify({ kind: "dns", id: hex(34), name: `home.bob.${APEX}`, type: "A" }) });
++    expect(ok.status).toBe(200);
++    const no = await call("delete-one", { method: "POST", body: JSON.stringify({ kind: "dns", id: hex(12), name: `home.alice.${APEX}`, type: "A" }) });
++    expect(no.status).toBe(409);
++    expect(dnsC.deleted).toEqual([hex(34)]);
++  });
++
++  it("answers 503 when DNS is not configured", async () => {
++    const r = await handleReapRoute(
++      new Request("https://flagshipserver.com/api/admin/reap/classify", { headers: { "x-admin-secret": SECRET } }),
++      env,
++      { makeDns: () => undefined, makeCloud: () => cloudC },
++    );
++    expect(r.status).toBe(503);
++  });
++
++  it("turns an unexpected upstream failure into a retryable 502", async () => {
++    const broken: ReapDnsClient = {
++      listAll: async () => {
++        throw new Error("Cloudflare DNS listAll failed: boom");
++      },
++      getById: async () => null,
++      deleteById: async () => false,
++    };
++    const r = await handleReapRoute(
++      new Request("https://flagshipserver.com/api/admin/reap/classify", { headers: { "x-admin-secret": SECRET } }),
++      env,
++      { makeDns: () => broken, makeCloud: () => cloudC },
++    );
++    expect(r.status).toBe(502);
++    expect(((await r.json()) as { retryable: boolean }).retryable).toBe(true);
++  });
++});
+diff --git a/apps/com/test/route.test.ts b/apps/com/test/route.test.ts
+index 4f31d8b76..194fff856 100644
+--- a/apps/com/test/route.test.ts
++++ b/apps/com/test/route.test.ts
+@@ -475,6 +475,18 @@ describe("/api/health", () => {
+   });
+ });
+ 
++describe("/api/admin/reap/* (prod reap, owner-run)", () => {
++  it("is answered by the Worker itself and needs the admin secret", async () => {
++    const env = makeEnv({ FLAGSHIP_ADMIN_SECRET: "adm" });
++    const url = "https://flagshipserver.com/api/admin/reap/classify";
++    expect((await route(new Request(url), env)).status).toBe(401);
++    expect((await route(new Request(url, { headers: { "x-admin-secret": "no" } }), env)).status).toBe(403);
++    const noDb = await route(new Request(url, { headers: { "x-admin-secret": "adm" } }), env);
++    expect(noDb.status).toBe(503);
++    expect(calls).toHaveLength(0);
++  });
++});
++
+ describe(".com control-plane routes (Worker + D1)", () => {
+   it("falls through to upstream when DB binding is missing", async () => {
+     nextResp = new Response(JSON.stringify({ ok: true, fromUpstream: true }), {
+diff --git a/apps/com/test/upcloud.test.ts b/apps/com/test/upcloud.test.ts
+index 9e2d51e4c..ac3103abe 100644
+--- a/apps/com/test/upcloud.test.ts
++++ b/apps/com/test/upcloud.test.ts
+@@ -126,6 +126,18 @@ describe("UpCloud client", () => {
+     expect(await client.findServerByName("flagship-demo-openai-build-00000000")).toBeNull();
+   });
+ 
++  it("lists every server that carries a label key, whatever its value", async () => {
++    const { fn, calls } = fakeFetch(() => ({ status: 200, body: { servers: { server: [
++      { uuid: UUID, title: "a", state: "started", labels: { label: [{ key: "flagship-demo", value: "bob" }] } },
++      { uuid: "11111111-1111-4111-8111-111111111111", title: "b", state: "stopped", labels: { label: [{ key: "other", value: "x" }] } },
++    ] } } }));
++    const client = createUpCloudClient({ token: "t", fetch: fn });
++    const found = await client.listServersByLabelKey("flagship-demo");
++    expect(found.map((s) => s.serverId)).toEqual([UUID]);
++    expect(found[0]!.labels).toEqual({ "flagship-demo": "bob" });
++    expect(calls[0]!.url).toBe("https://api.upcloud.com/1.3/server?label=flagship-demo");
++  });
++
+   it("maps UpCloud states onto the poller's vocabulary", async () => {
+     for (const [state, mapped] of [["started", "running"], ["stopped", "off"], ["maintenance", "initializing"], ["error", "unknown"]]) {
+       const { fn } = fakeFetch(() => ({ status: 200, body: serverBody(state!) }));
+diff --git a/docs/runbooks/pre-ga-scrub.md b/docs/runbooks/pre-ga-scrub.md
+index 3118ef6c1..c26a198ad 100644
+--- a/docs/runbooks/pre-ga-scrub.md
++++ b/docs/runbooks/pre-ga-scrub.md
+@@ -172,35 +172,82 @@ No orphaned server, DNS or R2 objects: D1 is only part of the picture, see
+ "Reaping" next. The orphan check for those is the reap's own dry run coming
+ back empty.
+ 
+-## Reaping what the wipe leaves behind (dry-run first)
++## Reaping what the wipe leaves behind (the step AFTER the D1 scrub)
+ 
+-The wipe deletes rows only. The wiped accounts' cloud servers, their
+-`<server>.<user>.flagship.services` DNS records (the zone is near its 200-record
+-cap: about 154 used, about 70 of them leftovers) and any R2 objects stay until
+-you reap them. **Keep the dry-run output from step 1: once the rows are gone,
+-that list of usernames is the only record of what to reap.**
++The wipe deletes rows only. The wiped accounts' demo cloud servers and their
++`<server>.<user>.flagship.services` DNS records (the zone is capped at 200
++records: about 154 used, about 70 of them leftovers from accounts that are
++already gone) stay until you reap them. R2 objects and Fly state are not
++covered by any tool; Hetzner is not covered (its account is suspended).
+ 
+-1. **Demo accounts with a running cloud server: before the wipe.**
++1. **Demo accounts with a running cloud server: before the wipe, optional.**
+    `node scripts/sample-user.mjs cleanup <username>` (needs `FLAGSHIP_ADMIN_SECRET`
+-   in your shell; it has no dry-run, so work from the read-only list in "Before
+-   you start" step 4 and run it one account at a time). It tears down the
+-   provider server and the account's cloud-side state while the rows still exist
+-   to find them. Do this for each demo account that is on the delete list.
++   in your shell; no dry-run, so work from the read-only list in "Before you
++   start" step 4, one account at a time). The prod reap below also finds these
++   servers afterwards, so this is only for ones you want gone first.
+ 2. **Gym leftovers (the shared zone's gym records and gym servers).** Dry run,
+-   which lists what it would remove and the zone's record count, then destroy;
+-   only when no live gym run is in progress:
++   then destroy; only when no live gym run is in progress:
+    `npx tsx tools/live-e2e/sweep-cli.ts` then `npx tsx tools/live-e2e/sweep-cli.ts --destroy`
+    (the gym Worker's `/api/gym/teardown`; it touches only `flagship-env=gym`
+    servers and records under the gym apex, never prod's).
+-3. **Prod DNS records and non-demo servers of wiped accounts: no tool exists
+-   yet.** Nothing in the repo reaps prod's `flagship.services` records for
+-   removed accounts (the gym teardown is deliberately gym-only), and boxes on
+-   UpCloud/Hetzner that are not demo accounts are deleted by hand in the
+-   provider console. Until a prod reap tool with a dry run exists (open task:
+-   mirror `apps/com/src/gymCloud.ts`'s dry-run/destroy for named usernames
+-   under the prod apex, owner-run), list the wiped usernames from your saved
+-   dry run and remove their records in the Cloudflare dashboard by hand, then
+-   confirm the zone count dropped. Never reap by pattern; reap by the saved list.
++3. **Prod DNS records and demo servers of removed accounts: `scripts/reap-orphans.mjs`.**
++   It talks to the `.com` Worker's admin routes (`/api/admin/reap/list`,
++   `/classify`, `/delete-one`, `apps/com/src/prodReap.ts`), because the
++   Cloudflare DNS token and the UpCloud token live only there. **The Worker
++   must be deployed with those routes first** (`npx tsc -b && (cd apps/com && npm run deploy)`
++   by the owner; nothing is deployed from this runbook). Run it after the D1
++   scrub has been verified (step 4): a record is an ORPHAN when its account no
++   longer exists in D1, so the same tool can also be run before the scrub to
++   clear the leftovers of accounts that are already gone.
++
++   Needs `FLAGSHIP_ADMIN_SECRET` (prod) in your shell. Nothing else is read.
++
++   **a. Dry run** (writes nothing in Cloudflare, UpCloud or D1; saves a plan file):
++
++   ```sh
++   cd /Users/harrywinner/flagship
++   node scripts/reap-orphans.mjs --show --out ~/pre-ga-reap-plan.json
++   ```
++
++   It prints the zone and server counts, a table of accounts that are gone
++   from D1 with how many records and servers each has, the kept accounts, and
++   with `--show` every orphan plus the records it kept because it did not
++   recognise their shape. Read it. What it keeps, always: the apex and
++   wildcard, every system or reserved name (`api`, `www`, `gym`, ...), the gym
++   subtree, `playstore-test-0725` and its server, every account that D1 still
++   knows (usernames, aliases, servers, demo users, auth codes), any record
++   shape Flagship does not publish, and any UpCloud server without the
++   `flagship-demo` label or with a `flagship-env` label. Sanity checks: the
++   orphan accounts are the ones you wiped (and the older leftovers listed
++   under "Urgent" in AGENTS.md); `zone after the reap` is well under 200; the
++   "kept accounts" list is exactly the accounts you kept. The route refuses to
++   classify at all if D1 does not hold `playstore-test-0725` (wrong database,
++   or the review login is gone), so a bad scrub cannot turn into a wide reap.
++
++   **b. Apply** (a real terminal only; deletes ONLY the orphans in that saved
++   plan, and only if the plan is under 24 hours old):
++
++   ```sh
++   node scripts/reap-orphans.mjs --apply --plan ~/pre-ga-reap-plan.json
++   ```
++
++   It prints the plan again, then asks you to type
++   `delete N records and M servers` (the real counts). It deletes one item at
++   a time. Before each one the Worker re-reads the record or server, re-checks
++   D1 as of that moment and refuses (409, "refused by the re-check") anything
++   that is not an orphan any more, that differs from the plan, or that touches
++   the apex or a protected account. A failed call (Cloudflare rate limit,
++   network) is retried every 30 seconds, up to 6 attempts, then marked
++   failed. Every outcome is appended to `~/pre-ga-reap-plan.json.log.jsonl`
++   (the Worker also logs each deletion). It ends by re-running the
++   classification and printing what is left and the zone's record count. Exit
++   0 means nothing failed or was stopped; rerun the dry run and apply again
++   for stragglers.
++
++   **c. Verify**: rerun the dry run. It should report 0 orphaned records and 0
++   orphaned servers, and the zone count should match `zone after the reap`.
++   Check `playstore-test-0725` still resolves (its box answers over HTTPS) and
++   a kept account's box still has its three record groups. Note the date here.
+ 
+ ## Final step: retire the wipe tooling (only after the run is verified)
+ 
+@@ -209,24 +256,29 @@ owner confirms the scrub happened **and** the verification in step 4 passed
+ (only `playstore-test-0725` is left, four zero orphan counts, the review login
+ signs in). Until then the tooling stays; after it, it must not exist.
+ 
+-A ready commit is prepared on the local branch `chore/delete-wipe-tooling` in
+-the worktree this runbook was written in (it was not pushed). It deletes the
+-script, its table list, harness, fixture and tests, replaces the release-guard
+-wipe checks with a rule that fails every build (dev included) if any
++A ready commit sits on the branch `chore/delete-wipe-tooling` (rebased on
++`main` on 2026-10-18 and pushed to `origin`; **it is deliberately not on
++`main`**). **Do not land it until the owner confirms that the scrub ran, was
++verified (step 4) and the reap (above) is done.** It deletes the script, its
++table list, harness, fixture and tests, replaces the release-guard wipe checks
++with a rule that fails every build (dev included) if any
+ `scripts/wipe-all-users*` file reappears, drops GA close-out item 1 from
+-AGENTS.md and adds the rule "Accounts are never bulk-wiped after GA". To land it:
++AGENTS.md and adds the rule "Accounts are never bulk-wiped after GA". Landing
++it also removes this runbook's scrub steps (it becomes a short historical
++note), so copy the reap commands first if you still need them; the reap tool
++(`scripts/reap-orphans.mjs`) stays. To land it, after rebasing it again:
+ 
+ ```sh
+-cd <that worktree>
+ git fetch origin && git checkout chore/delete-wipe-tooling && git rebase origin/main
+ npx tsc -b && npx vitest run scripts && RELEASE=1 bash scripts/release-guard.sh
+ bash <scratchpad>/land-main.sh "retire wipe tooling" "npx tsc -b && npx vitest run scripts"
+-# or, without that helper: git push origin chore/delete-wipe-tooling:main
+ ```
+ 
+ Git history keeps the script (`git log --diff-filter=D -- scripts/wipe-all-users.sh`).
+-The branch also needs the owner's decision on how the weekly gym zeroes its own
+-database now that this script is gone; see the branch's commit message.
++The gym no longer needs it: the owner decided on 2026-10-18 that the weekly gym
++does not zero its database (unique account names, `/api/gym/teardown` and the
++fleet sweep instead); `scripts/gym-weekly.sh` no longer calls the script, and
++nothing else in the tree does.
+ 
+ ## If the dry run shows an unexpected account
+ 
+@@ -245,9 +297,10 @@ If a *kept* name shows `MISSING`, fix the spelling (the script already refused).
+ 
+ - Already-installed servers of wiped accounts are **not** scrubbed. They keep
+   running; their registrations are gone, so they simply stop working and age
+-  out. Delete the cloud ones you pay for (UpCloud, Hetzner) by hand.
+-- Cloudflare DNS records, R2 objects and Fly state of wiped accounts are not
+-  touched: see "Reaping" above.
++  out. Demo cloud servers are removed by the reap; delete any other cloud
++  server you pay for (Hetzner, or UpCloud without the `flagship-demo` label) by hand.
++- Cloudflare DNS records and demo servers of wiped accounts: run the reap
++  (above). R2 objects and Fly state are not touched by anything.
+ - Note the date here and, in **AGENTS.md**, update GA close-out item 1 ("wipe
+   script guard"): the scrub is done, and the script can now be guarded further or
+   removed per that item. The release guard (`scripts/release-guard.sh`) still
+@@ -256,7 +309,7 @@ If a *kept* name shows `MISSING`, fix the spelling (the script already refused).
+ ## Rehearsing
+ 
+ Never rehearse against prod. Against the gym database (zeroes it, the keep list
+-still applies; the gym has no review account):
++still applies; the gym has no review account; the weekly gym no longer does this):
+ 
+ ```sh
+ WIPE_ENV=gym WIPE_D1=flagship-state-gym WIPE_WRANGLER_CONFIG=wrangler.gym.toml \
+diff --git a/package.json b/package.json
+index 69ac5381e..76c2fa846 100644
+--- a/package.json
++++ b/package.json
+@@ -38,6 +38,7 @@
+     "build-eval": "npm --workspace=@flagship/build-eval run eval --",
+     "parity": "node scripts/parity-check.mjs",
+     "rate-limits": "node scripts/rate-limit-report.mjs",
++    "reap-orphans": "node scripts/reap-orphans.mjs",
+     "inference-settings": "node scripts/inference-settings.mjs",
+     "ready": "node scripts/release-readiness.mjs"
+   },
+diff --git a/scripts/reap-orphans.mjs b/scripts/reap-orphans.mjs
+new file mode 100644
+index 000000000..7dac0d9c5
+--- /dev/null
++++ b/scripts/reap-orphans.mjs
+@@ -0,0 +1,323 @@
++#!/usr/bin/env node
++/**
++ * reap-orphans: removes the DNS records and demo servers that the pre-GA
++ * scrub (docs/runbooks/pre-ga-scrub.md) leaves behind for accounts that no
++ * longer exist. The tokens for Cloudflare DNS and UpCloud live only on the
++ * `.com` Worker, so this talks to its admin routes
++ * (apps/com/src/prodReap.ts). Run it AFTER the D1 scrub.
++ *
++ *   node scripts/reap-orphans.mjs                      dry run: classify every
++ *                                                      record and server, print
++ *                                                      per-account counts, save a plan
++ *   node scripts/reap-orphans.mjs --out plan.json      pick where the plan is saved
++ *   node scripts/reap-orphans.mjs --show               also list each orphan
++ *   node scripts/reap-orphans.mjs --apply --plan plan.json
++ *                                                      delete ONLY the orphans in that
++ *                                                      saved plan (typed confirmation,
++ *                                                      terminal only)
++ *
++ * The dry run never writes. --apply refuses a plan older than 24 hours, asks
++ * you to type the counts, then deletes one item at a time; the Worker
++ * re-checks each against D1 right before deleting and refuses anything that
++ * is no longer an orphan. A failed call (Cloudflare rate limit, network) is
++ * retried after 30 seconds. Every outcome is appended to <plan>.log.jsonl.
++ *
++ * Env: FLAGSHIP_ADMIN_SECRET (required), FLAGSHIP_BASE_URL (default
++ * https://flagshipserver.com).
++ */
++
++import { appendFileSync, chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
++import { homedir } from "node:os";
++import { join, resolve } from "node:path";
++import { createInterface } from "node:readline";
++import { fileURLToPath } from "node:url";
++
++export const PLAN_MAX_AGE_MS = 24 * 3600 * 1000;
++export const RETRY_WAIT_MS = 30_000;
++export const MAX_ATTEMPTS = 6;
++const USERNAME_RE = /^[a-z0-9][a-z0-9-]{1,28}[a-z0-9]$/;
++const DNS_ID_RE = /^[0-9a-f]{32}$/i;
++const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
++const NEVER_ORPHAN = ["playstore-test-0725"];
++const DNS_TYPES = new Set(["CAA", "A", "AAAA", "TXT"]);
++
++export function parseArgs(argv) {
++  const opts = { apply: false, show: false, json: false, plan: null, out: null };
++  for (let i = 0; i < argv.length; i++) {
++    const a = argv[i];
++    if (a === "--apply") opts.apply = true;
++    else if (a === "--show") opts.show = true;
++    else if (a === "--json") opts.json = true;
++    else if (a === "--plan") opts.plan = argv[++i];
++    else if (a === "--out") opts.out = argv[++i];
++    else if (a === "-h" || a === "--help") opts.help = true;
++    else throw new Error(`unknown argument: ${a}`);
++  }
++  if (opts.apply && !opts.plan) throw new Error("--apply needs --plan <file> (run the dry run first and review the plan)");
++  if (!opts.apply && opts.plan) throw new Error("--plan is only used with --apply");
++  if (opts.apply && opts.out) throw new Error("--out is only used for the dry run");
++  return opts;
++}
++
++function pad(s, n) {
++  s = String(s);
++  return s.length >= n ? s : s + " ".repeat(n - s.length);
++}
++function lpad(s, n) {
++  s = String(s);
++  return s.length >= n ? s : " ".repeat(n - s.length) + s;
++}
++
++export function formatPlan(plan, { show = false } = {}) {
++  const s = plan.summary;
++  const lines = [];
++  lines.push(`Reap plan for ${plan.apex} (${plan.generatedAt})`);
++  lines.push(`  accounts known to D1: ${plan.knownAccounts}; protected: ${plan.protectedAccounts.join(", ") || "none"}`);
++  lines.push(`  DNS records: ${s.dnsTotal} in the zone, ${s.dnsKeep} kept, ${s.dnsOrphan} orphaned`);
++  lines.push(
++    plan.serversChecked
++      ? `  UpCloud demo servers: ${s.serversTotal} found, ${s.serversKeep} kept, ${s.serversOrphan} orphaned`
++      : "  UpCloud demo servers: NOT CHECKED (the Worker has no UPCLOUD_TOKEN)",
++  );
++  lines.push(`  zone after the reap: ${s.zoneRecordsAfter} of 200 records`);
++  const orphans = plan.accounts.filter((a) => a.status === "orphan");
++  lines.push("");
++  if (orphans.length === 0) {
++    lines.push("Nothing to reap.");
++  } else {
++    lines.push(`${pad("account (gone from D1)", 28)}  ${lpad("records", 7)}  ${lpad("servers", 7)}`);
++    for (const a of orphans) lines.push(`${pad(a.owner, 28)}  ${lpad(a.dnsOrphans, 7)}  ${lpad(a.serverOrphans, 7)}`);
++  }
++  const kept = plan.accounts.filter((a) => a.status === "kept");
++  if (kept.length > 0) {
++    lines.push("");
++    lines.push(`Kept accounts with records: ${kept.map((a) => `${a.owner} (${a.dnsKept})`).join(", ")}`);
++  }
++  const unknown = plan.dns.filter((d) => !d.owner);
++  lines.push("");
++  lines.push(`Kept without an account (apex, system, gym, unrecognised): ${unknown.length} records`);
++  if (show) {
++    lines.push("");
++    for (const d of plan.dns.filter((x) => x.action === "orphan")) lines.push(`  dns    ${pad(d.type, 5)} ${d.name}`);
++    for (const v of plan.servers.filter((x) => x.action === "orphan")) lines.push(`  server ${v.serverId}  ${v.title} (${v.owner})`);
++    lines.push("");
++    lines.push("Unrecognised records (kept, worth a look):");
++    for (const d of unknown.filter((x) => x.reason.startsWith("unrecognised") || x.reason.startsWith("not a record"))) {
++      lines.push(`  ${pad(d.type, 5)} ${d.name}  (${d.reason})`);
++    }
++  }
++  return lines.join("\n");
++}
++
++/** The orphans in a saved plan that pass the local rules; everything else is refused here before any call. */
++export function selectOrphans(plan, now = Date.now()) {
++  if (!plan || plan.version !== 1 || !Array.isArray(plan.dns) || !Array.isArray(plan.servers) || typeof plan.apex !== "string") {
++    throw new Error("this is not a reap plan from this tool");
++  }
++  const age = now - Date.parse(plan.generatedAt);
++  if (!Number.isFinite(age) || age < -60_000) throw new Error("the plan has no valid time");
++  if (age > PLAN_MAX_AGE_MS) throw new Error("the plan is older than 24 hours: run the dry run again and review the new one");
++  const apex = plan.apex.toLowerCase();
++  const protectedNames = new Set([...NEVER_ORPHAN, ...(plan.protectedAccounts ?? [])]);
++  const refused = [];
++  const dns = [];
++  const servers = [];
++  for (const d of plan.dns) {
++    if (d.action !== "orphan") continue;
++    const name = String(d.name ?? "").toLowerCase();
++    const labels = name.endsWith(`.${apex}`) ? name.slice(0, -(apex.length + 1)).split(".") : [];
++    const ok =
++      typeof d.id === "string" && DNS_ID_RE.test(d.id) &&
++      labels.length >= 1 && labels.length <= 3 &&
++      d.owner && USERNAME_RE.test(d.owner) && !protectedNames.has(d.owner) &&
++      labels[labels.length - 1] === d.owner &&
++      DNS_TYPES.has(String(d.type).toUpperCase());
++    if (ok) dns.push({ kind: "dns", id: d.id, name: d.name, type: d.type, owner: d.owner });
++    else refused.push(`dns ${d.type} ${d.name}`);
++  }
++  for (const v of plan.servers) {
++    if (v.action !== "orphan") continue;
++    const ok = typeof v.serverId === "string" && UUID_RE.test(v.serverId) && v.owner && USERNAME_RE.test(v.owner) && !protectedNames.has(v.owner);
++    if (ok) servers.push({ kind: "server", id: v.serverId, owner: v.owner, name: v.title });
++    else refused.push(`server ${v.serverId}`);
++  }
++  return { dns, servers, refused };
++}
++
++export function confirmationPhrase(sel) {
++  return `delete ${sel.dns.length} records and ${sel.servers.length} servers`;
++}
++
++/**
++ * Deletes the selection one item at a time through `post(body)`, which
++ * returns {status, body} or throws on a network error. Returns the outcomes.
++ */
++export async function applyPlan(sel, { post, sleep, log, retryWaitMs = RETRY_WAIT_MS, maxAttempts = MAX_ATTEMPTS, pauseMs = 300 }) {
++  const out = { deleted: 0, gone: 0, skipped: 0, failed: 0, aborted: null };
++  const items = [...sel.servers, ...sel.dns];
++  for (const item of items) {
++    const body = item.kind === "dns"
++      ? { kind: "dns", id: item.id, name: item.name, type: item.type }
++      : { kind: "server", id: item.id, owner: item.owner };
++    const label = item.kind === "dns" ? `dns ${item.type} ${item.name}` : `server ${item.id} (${item.owner})`;
++    let done = false;
++    for (let attempt = 1; attempt <= maxAttempts && !done; attempt++) {
++      let res;
++      try {
++        res = await post(body);
++      } catch (e) {
++        res = { status: 0, body: { error: e instanceof Error ? e.message : String(e) } };
++      }
++      const { status } = res;
++      if (status === 200) {
++        const result = res.body?.result === "gone" ? "gone" : "deleted";
++        out[result] += 1;
++        log({ event: result, ...item });
++        done = true;
++      } else if (status === 409) {
++        out.skipped += 1;
++        log({ event: "refused", ...item, code: res.body?.code, reason: res.body?.reason ?? res.body?.error });
++        done = true;
++      } else if (status === 401 || status === 403 || status === 400 || status === 404 || status === 405 || status === 503) {
++        out.aborted = `${label}: ${status} ${String(res.body?.error ?? "").slice(0, 160)}`;
++        log({ event: "abort", ...item, status, error: res.body?.error });
++        return out;
++      } else if (attempt === maxAttempts) {
++        out.failed += 1;
++        log({ event: "failed", ...item, status, error: String(res.body?.error ?? "").slice(0, 160) });
++        done = true;
++      } else {
++        log({ event: "retry", ...item, status, attempt, waitMs: retryWaitMs, error: String(res.body?.error ?? "").slice(0, 160) });
++        await sleep(retryWaitMs);
++      }
++    }
++    await sleep(pauseMs);
++  }
++  return out;
++}
++
++function stamp(d = new Date()) {
++  return d.toISOString().replace(/[:.]/g, "-");
++}
++
++async function ask(question) {
++  const rl = createInterface({ input: process.stdin, output: process.stdout });
++  try {
++    return await new Promise((res) => rl.question(question, res));
++  } finally {
++    rl.close();
++  }
++}
++
++async function api(base, secret, method, path, body) {
++  const res = await fetch(`${base}/api/admin/reap/${path}`, {
++    method,
++    headers: { "x-admin-secret": secret, ...(body ? { "content-type": "application/json" } : {}) },
++    ...(body ? { body: JSON.stringify(body) } : {}),
++  });
++  const text = await res.text();
++  let parsed;
++  try {
++    parsed = JSON.parse(text);
++  } catch {
++    parsed = { error: text.slice(0, 200) };
++  }
++  return { status: res.status, body: parsed };
++}
++
++async function main() {
++  let opts;
++  try {
++    opts = parseArgs(process.argv.slice(2));
++  } catch (err) {
++    console.error(err.message);
++    process.exit(2);
++  }
++  if (opts.help) {
++    console.log("usage: node scripts/reap-orphans.mjs [--out plan.json] [--show] [--json]\n       node scripts/reap-orphans.mjs --apply --plan plan.json");
++    return;
++  }
++  const secret = process.env.FLAGSHIP_ADMIN_SECRET;
++  if (!secret) {
++    console.error("FLAGSHIP_ADMIN_SECRET is not set.");
++    process.exit(2);
++  }
++  const base = (process.env.FLAGSHIP_BASE_URL ?? "https://flagshipserver.com").replace(/\/$/, "");
++
++  if (!opts.apply) {
++    const r = await api(base, secret, "GET", "classify");
++    if (r.status !== 200) {
++      console.error(`${r.status} from ${base}: ${r.body?.error ?? "unexpected answer"}`);
++      process.exit(r.status === 401 || r.status === 403 ? 2 : 1);
++    }
++    const out = resolve(opts.out ?? join(homedir(), `flagship-reap-plan-${stamp()}.json`));
++    writeFileSync(out, JSON.stringify(r.body, null, 2), { mode: 0o600 });
++    try { chmodSync(out, 0o600); } catch { /* best effort */ }
++    console.log(opts.json ? JSON.stringify(r.body, null, 2) : formatPlan(r.body, opts));
++    console.log(`\nPlan saved to ${out}. Nothing was deleted.`);
++    console.log(`To delete exactly what it lists: node scripts/reap-orphans.mjs --apply --plan ${out}`);
++    return;
++  }
++
++  if (!process.stdin.isTTY || !process.stdout.isTTY) {
++    console.error("--apply needs a real terminal (stdin and stdout). Refusing.");
++    process.exit(2);
++  }
++  const planPath = resolve(opts.plan);
++  if (!existsSync(planPath)) {
++    console.error(`no such plan: ${planPath}`);
++    process.exit(2);
++  }
++  let sel;
++  let plan;
++  try {
++    plan = JSON.parse(readFileSync(planPath, "utf8"));
++    sel = selectOrphans(plan);
++  } catch (err) {
++    console.error(err.message);
++    process.exit(2);
++  }
++  console.log(formatPlan(plan));
++  if (sel.refused.length > 0) {
++    console.error(`\nRefusing ${sel.refused.length} plan entr${sel.refused.length === 1 ? "y" : "ies"} that fail the local rules:`);
++    for (const r of sel.refused) console.error(`  ${r}`);
++  }
++  if (sel.dns.length + sel.servers.length === 0) {
++    console.log("\nNothing to delete.");
++    return;
++  }
++  const phrase = confirmationPhrase(sel);
++  console.log(`\nThis deletes ${sel.dns.length} DNS records and ${sel.servers.length} servers on ${base}. It cannot be undone.`);
++  const typed = (await ask(`Type "${phrase}" to go on: `)).trim();
++  if (typed !== phrase) {
++    console.error("Not confirmed. Nothing was deleted.");
++    process.exit(2);
++  }
++  const logPath = `${planPath}.log.jsonl`;
++  const log = (entry) => {
++    const line = JSON.stringify({ at: new Date().toISOString(), ...entry });
++    appendFileSync(logPath, `${line}\n`, { mode: 0o600 });
++    if (entry.event === "retry") console.log(`  retry in ${entry.waitMs / 1000}s: ${entry.kind} ${entry.name ?? entry.id} (${entry.status} ${entry.error ?? ""})`);
++    else console.log(`  ${pad(entry.event, 8)} ${entry.kind} ${entry.type ?? ""} ${entry.name ?? entry.id}${entry.reason ? `  (${entry.reason})` : ""}`);
++  };
++  const result = await applyPlan(sel, {
++    post: (body) => api(base, secret, "POST", "delete-one", body),
++    sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
++    log,
++  });
++  console.log(`\ndeleted ${result.deleted}, already gone ${result.gone}, refused by the re-check ${result.skipped}, failed ${result.failed}`);
++  if (result.aborted) console.error(`stopped: ${result.aborted}`);
++  const after = await api(base, secret, "GET", "classify");
++  if (after.status === 200) {
++    console.log(`left: ${after.body.summary.dnsOrphan} orphaned records, ${after.body.summary.serversOrphan} orphaned servers; zone is at ${after.body.zoneRecords} of 200 records`);
++  }
++  console.log(`log: ${logPath}`);
++  process.exit(result.aborted || result.failed ? 1 : 0);
++}
++
++if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
++  main().catch((err) => {
++    console.error(err instanceof Error ? err.message : String(err));
++    process.exit(1);
++  });
++}
+diff --git a/scripts/reap-orphans.test.ts b/scripts/reap-orphans.test.ts
+new file mode 100644
+index 000000000..9ea14ef1c
+--- /dev/null
++++ b/scripts/reap-orphans.test.ts
+@@ -0,0 +1,168 @@
++import { describe, expect, it } from "vitest";
++import { applyPlan, confirmationPhrase, formatPlan, parseArgs, selectOrphans } from "./reap-orphans.mjs";
++
++const hex = (n: number) => n.toString(16).padStart(32, "0");
++const SRV = "00000000-0000-4000-8000-0000000000a1";
++const NOW = Date.parse("2026-10-18T12:00:00Z");
++
++const dns = (n: number, name: string, type: string, owner: string | null, action = "orphan") => ({
++  id: hex(n), name, type, owner, action, reason: action === "orphan" ? "no account of this name in D1" : "kept",
++});
++
++function plan(over: Record<string, unknown> = {}) {
++  return {
++    version: 1,
++    generatedAt: "2026-10-18T11:00:00Z",
++    apex: "flagship.services",
++    zoneRecords: 6,
++    knownAccounts: 2,
++    protectedAccounts: ["playstore-test-0725"],
++    serversChecked: true,
++    summary: { dnsTotal: 6, dnsKeep: 3, dnsOrphan: 3, serversTotal: 1, serversKeep: 0, serversOrphan: 1, zoneRecordsAfter: 3 },
++    accounts: [
++      { owner: "bob", status: "orphan", dnsOrphans: 3, serverOrphans: 1, dnsKept: 0 },
++      { owner: "alice", status: "kept", dnsOrphans: 0, serverOrphans: 0, dnsKept: 1 },
++    ],
++    dns: [
++      dns(1, "flagship.services", "A", null, "keep"),
++      dns(2, "alice.flagship.services", "CAA", "alice", "keep"),
++      dns(3, "bob.flagship.services", "CAA", "bob"),
++      dns(4, "*.home.bob.flagship.services", "A", "bob"),
++      dns(5, "_acme-challenge.home.bob.flagship.services", "TXT", "bob"),
++      dns(6, "mystery.flagship.services", "A", null, "keep"),
++    ],
++    servers: [{ serverId: SRV, title: "t", state: "started", labels: {}, action: "orphan", owner: "bob", reason: "x" }],
++    ...over,
++  };
++}
++
++describe("parseArgs", () => {
++  it("is a dry run by default and --apply needs a plan", () => {
++    expect(parseArgs([]).apply).toBe(false);
++    expect(() => parseArgs(["--apply"])).toThrow(/--plan/);
++    expect(() => parseArgs(["--plan", "x"])).toThrow(/only used with --apply/);
++    expect(() => parseArgs(["--apply", "--plan", "x", "--out", "y"])).toThrow(/dry run/);
++    expect(() => parseArgs(["--nope"])).toThrow(/unknown/);
++    expect(parseArgs(["--apply", "--plan", "p.json"])).toMatchObject({ apply: true, plan: "p.json" });
++  });
++});
++
++describe("formatPlan", () => {
++  it("prints per-account counts and the zone projection", () => {
++    const text = formatPlan(plan(), { show: true });
++    expect(text).toContain("3 orphaned");
++    expect(text).toMatch(/bob\s+3\s+1/);
++    expect(text).toContain("zone after the reap: 3 of 200");
++    expect(text).toContain("alice (1)");
++    expect(text).toContain("dns    TXT   _acme-challenge.home.bob.flagship.services");
++  });
++  it("says so when servers were not checked or nothing is left", () => {
++    expect(formatPlan(plan({ serversChecked: false }))).toContain("NOT CHECKED");
++    expect(formatPlan(plan({ accounts: [] }))).toContain("Nothing to reap.");
++  });
++});
++
++describe("selectOrphans", () => {
++  it("takes only the orphans, servers and records", () => {
++    const sel = selectOrphans(plan(), NOW);
++    expect(sel.dns.map((d: { id: string }) => d.id)).toEqual([hex(3), hex(4), hex(5)]);
++    expect(sel.servers).toHaveLength(1);
++    expect(sel.refused).toEqual([]);
++    expect(confirmationPhrase(sel)).toBe("delete 3 records and 1 servers");
++  });
++
++  it("refuses an old, foreign or future-dated plan", () => {
++    expect(() => selectOrphans(plan({ generatedAt: "2026-10-16T11:00:00Z" }), NOW)).toThrow(/older than 24 hours/);
++    expect(() => selectOrphans({ version: 2 }, NOW)).toThrow(/not a reap plan/);
++    expect(() => selectOrphans(plan({ generatedAt: "nonsense" }), NOW)).toThrow(/valid time/);
++    expect(() => selectOrphans(plan({ generatedAt: "2026-10-19T11:00:00Z" }), NOW)).toThrow(/valid time/);
++  });
++
++  it("refuses edited entries: the apex, a protected account, an owner that does not match the name, a bad id", () => {
++    const bad = plan({
++      dns: [
++        dns(1, "flagship.services", "A", "bob"),
++        dns(2, "x.playstore-test-0725.flagship.services", "A", "playstore-test-0725"),
++        dns(3, "home.alice.flagship.services", "A", "bob"),
++        { ...dns(4, "bob.flagship.services", "CAA", "bob"), id: "../../zones" },
++        dns(5, "bob.example.org", "A", "bob"),
++        dns(6, "bob.flagship.services", "MX", "bob"),
++        dns(7, "bob.flagship.services", "CAA", "BOB!"),
++        dns(8, "ok.bob.flagship.services", "A", "bob"),
++      ],
++      servers: [
++        { serverId: "../../x", action: "orphan", owner: "bob", title: "" },
++        { serverId: SRV, action: "orphan", owner: "playstore-test-0725", title: "" },
++      ],
++    });
++    const sel = selectOrphans(bad, NOW);
++    expect(sel.dns.map((d: { id: string }) => d.id)).toEqual([hex(8)]);
++    expect(sel.servers).toEqual([]);
++    expect(sel.refused).toHaveLength(9);
++  });
++
++  it("never selects a keep entry, whatever else it says", () => {
++    const sel = selectOrphans(plan({ dns: [dns(3, "bob.flagship.services", "CAA", "bob", "keep")], servers: [] }), NOW);
++    expect(sel.dns).toEqual([]);
++  });
++});
++
++describe("applyPlan", () => {
++  const fastOpts = (post: (b: unknown) => Promise<{ status: number; body: Record<string, unknown> }>, events: unknown[], sleeps: number[]) => ({
++    post,
++    sleep: async (ms: number) => void sleeps.push(ms),
++    log: (e: unknown) => void events.push(e),
++    pauseMs: 0,
++  });
++
++  it("deletes servers and records one by one and logs each", async () => {
++    const sel = selectOrphans(plan(), NOW);
++    const sent: unknown[] = [];
++    const events: { event: string }[] = [];
++    const out = await applyPlan(sel, fastOpts(async (b) => (sent.push(b), { status: 200, body: { result: "deleted" } }), events, []));
++    expect(out).toMatchObject({ deleted: 4, failed: 0, skipped: 0, aborted: null });
++    expect(sent).toHaveLength(4);
++    expect(sent[0]).toEqual({ kind: "server", id: SRV, owner: "bob" });
++    expect(events.map((e) => e.event)).toEqual(["deleted", "deleted", "deleted", "deleted"]);
++  });
++
++  it("waits 30 seconds and retries a failed call, then moves on after the attempts run out", async () => {
++    const sel = selectOrphans(plan({ servers: [] }), NOW);
++    const sleeps: number[] = [];
++    const events: { event: string }[] = [];
++    const calls: Record<string, number> = {};
++    const out = await applyPlan(
++      sel,
++      fastOpts(async (b) => {
++        const id = (b as { id: string }).id;
++        calls[id] = (calls[id] ?? 0) + 1;
++        if (id === hex(3)) return calls[id]! < 3 ? { status: 502, body: { error: "rate limited" } } : { status: 200, body: { result: "deleted" } };
++        if (id === hex(4)) throw new Error("socket hang up");
++        return { status: 200, body: { result: "gone" } };
++      }, events, sleeps),
++    );
++    expect(out).toMatchObject({ deleted: 1, gone: 1, failed: 1 });
++    expect(calls[hex(3)]).toBe(3);
++    expect(calls[hex(4)]).toBe(6);
++    expect(sleeps.filter((s) => s === 30_000)).toHaveLength(2 + 5);
++    expect(events.filter((e) => e.event === "retry")).toHaveLength(7);
++  });
++
++  it("counts a re-check refusal as skipped and carries on", async () => {
++    const sel = selectOrphans(plan({ servers: [] }), NOW);
++    const out = await applyPlan(
++      sel,
++      fastOpts(async (b) => ((b as { id: string }).id === hex(3) ? { status: 409, body: { code: "not-orphan", reason: "account still exists in D1" } } : { status: 200, body: { result: "deleted" } }), [], []),
++    );
++    expect(out).toMatchObject({ deleted: 2, skipped: 1 });
++  });
++
++  it("stops at once on a wrong secret or missing configuration", async () => {
++    const sel = selectOrphans(plan(), NOW);
++    let n = 0;
++    const out = await applyPlan(sel, fastOpts(async () => (n++, { status: 403, body: { error: "x-admin-secret rejected" } }), [], []));
++    expect(n).toBe(1);
++    expect(out.aborted).toContain("403");
++    expect(out.deleted).toBe(0);
++  });
++});

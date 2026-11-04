@@ -1,0 +1,2739 @@
+From 2364458f36fdf1a93fdc7b54139fa305988ddcf9 Mon Sep 17 00:00:00 2001
+From: L <6723574+louisgv@users.noreply.github.com>
+Date: Sat, 7 Feb 2026 21:43:10 -0800
+Subject: [PATCH] Add RunPod GPU cloud provider (#39)
+
+* Add RunPod GPU cloud provider with all 13 agent scripts
+
+- runpod/lib/common.sh: GraphQL API wrapper, pod creation/termination,
+  SSH connectivity (direct TCP or proxy via ssh.runpod.io)
+- 13 agent scripts: claude, openclaw, nanoclaw, aider, goose, codex,
+  interpreter, gemini, amazonq, cline, gptme, opencode, plandex
+- runpod/README.md with usage docs and environment variable reference
+- manifest.json: RunPod cloud entry + all matrix entries as implemented
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+* Add UpCloud cloud provider with all 13 agent scripts
+
+- upcloud/lib/common.sh: UpCloud API wrapper with Basic Auth, server
+  provisioning, SSH connectivity, base tool installation
+- 13 agent scripts: claude, openclaw, nanoclaw, aider, goose, codex,
+  interpreter, gemini, amazonq, cline, gptme, opencode, plandex
+- upcloud/README.md with usage docs and env var reference
+- manifest.json updated with UpCloud cloud entry and 13 matrix entries
+
+UpCloud uses HTTP Basic Auth (username:password) instead of Bearer tokens.
+Servers are provisioned via POST /1.3/server with SSH keys injected via
+login_user. Ubuntu template UUID is dynamically resolved from the API.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+---------
+
+Co-authored-by: Sprite <noreply@sprite.dev>
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+---
+ manifest.json          |  69 ++++++-
+ runpod/README.md       | 118 +++++++++++
+ runpod/aider.sh        |  55 +++++
+ runpod/amazonq.sh      |  49 +++++
+ runpod/claude.sh       |  71 +++++++
+ runpod/cline.sh        |  49 +++++
+ runpod/codex.sh        |  49 +++++
+ runpod/gemini.sh       |  50 +++++
+ runpod/goose.sh        |  54 +++++
+ runpod/gptme.sh        |  54 +++++
+ runpod/interpreter.sh  |  49 +++++
+ runpod/lib/common.sh   | 303 +++++++++++++++++++++++++++
+ runpod/nanoclaw.sh     |  63 ++++++
+ runpod/openclaw.sh     |  56 +++++
+ runpod/opencode.sh     |  47 +++++
+ runpod/plandex.sh      |  53 +++++
+ upcloud/README.md      | 104 ++++++++++
+ upcloud/aider.sh       |  52 +++++
+ upcloud/amazonq.sh     |  47 +++++
+ upcloud/claude.sh      |  73 +++++++
+ upcloud/cline.sh       |  47 +++++
+ upcloud/codex.sh       |  47 +++++
+ upcloud/gemini.sh      |  48 +++++
+ upcloud/goose.sh       |  51 +++++
+ upcloud/gptme.sh       |  52 +++++
+ upcloud/interpreter.sh |  47 +++++
+ upcloud/lib/common.sh  | 457 +++++++++++++++++++++++++++++++++++++++++
+ upcloud/nanoclaw.sh    |  60 ++++++
+ upcloud/openclaw.sh    |  53 +++++
+ upcloud/opencode.sh    |  45 ++++
+ upcloud/plandex.sh     |  50 +++++
+ 31 files changed, 2418 insertions(+), 4 deletions(-)
+ create mode 100644 runpod/README.md
+ create mode 100644 runpod/aider.sh
+ create mode 100644 runpod/amazonq.sh
+ create mode 100644 runpod/claude.sh
+ create mode 100644 runpod/cline.sh
+ create mode 100644 runpod/codex.sh
+ create mode 100644 runpod/gemini.sh
+ create mode 100644 runpod/goose.sh
+ create mode 100644 runpod/gptme.sh
+ create mode 100644 runpod/interpreter.sh
+ create mode 100644 runpod/lib/common.sh
+ create mode 100644 runpod/nanoclaw.sh
+ create mode 100644 runpod/openclaw.sh
+ create mode 100644 runpod/opencode.sh
+ create mode 100644 runpod/plandex.sh
+ create mode 100644 upcloud/README.md
+ create mode 100644 upcloud/aider.sh
+ create mode 100644 upcloud/amazonq.sh
+ create mode 100644 upcloud/claude.sh
+ create mode 100644 upcloud/cline.sh
+ create mode 100644 upcloud/codex.sh
+ create mode 100644 upcloud/gemini.sh
+ create mode 100644 upcloud/goose.sh
+ create mode 100644 upcloud/gptme.sh
+ create mode 100644 upcloud/interpreter.sh
+ create mode 100644 upcloud/lib/common.sh
+ create mode 100644 upcloud/nanoclaw.sh
+ create mode 100644 upcloud/openclaw.sh
+ create mode 100644 upcloud/opencode.sh
+ create mode 100644 upcloud/plandex.sh
+
+diff --git a/manifest.json b/manifest.json
+index e6056e587..d4d86ca96 100644
+--- a/manifest.json
++++ b/manifest.json
+@@ -53,7 +53,9 @@
+       "url": "https://github.com/gavrielc/nanoclaw",
+       "install": "git clone https://github.com/gavrielc/nanoclaw.git ~/nanoclaw && cd ~/nanoclaw && npm install && npm run build",
+       "launch": "cd ~/nanoclaw && npm run dev",
+-      "deps": ["tsx"],
++      "deps": [
++        "tsx"
++      ],
+       "env": {
+         "OPENROUTER_API_KEY": "${OPENROUTER_API_KEY}",
+         "ANTHROPIC_API_KEY": "${OPENROUTER_API_KEY}",
+@@ -332,7 +334,7 @@
+       "defaults": {
+         "template": "base"
+       },
+-      "notes": "No SSH — uses E2B CLI for exec. Sandboxes start in ~150ms. Requires npm install -g @e2b/cli."
++      "notes": "No SSH \u2014 uses E2B CLI for exec. Sandboxes start in ~150ms. Requires npm install -g @e2b/cli."
+     },
+     "modal": {
+       "name": "Modal",
+@@ -346,7 +348,7 @@
+       "defaults": {
+         "image": "debian_slim"
+       },
+-      "notes": "No SSH — uses Modal Python SDK for exec. Sub-second cold starts. Requires pip install modal."
++      "notes": "No SSH \u2014 uses Modal Python SDK for exec. Sub-second cold starts. Requires pip install modal."
+     },
+     "fly": {
+       "name": "Fly.io",
+@@ -412,6 +414,39 @@
+         "disk": 5
+       },
+       "notes": "Sub-90ms sandbox creation. True SSH support via daytona ssh. Requires DAYTONA_API_KEY from https://app.daytona.io."
++    },
++    "runpod": {
++      "name": "RunPod",
++      "description": "RunPod GPU cloud pods via GraphQL API",
++      "url": "https://www.runpod.io/",
++      "type": "api",
++      "auth": "RUNPOD_API_KEY",
++      "provision_method": "GraphQL mutation podFindAndDeployOnDemand",
++      "exec_method": "ssh root@IP -p PORT or ssh PODID@ssh.runpod.io",
++      "interactive_method": "ssh -t root@IP -p PORT",
++      "defaults": {
++        "gpu_type": "NVIDIA RTX A4000",
++        "gpu_count": 1,
++        "image": "runpod/pytorch:2.1.0-py3.10-cuda11.8.0-devel-ubuntu22.04",
++        "volume_gb": 50
++      },
++      "notes": "GPU cloud provider. Uses GraphQL API, SSH via TCP port mapping or proxy. Docker-based pods with CUDA pre-installed."
++    },
++    "upcloud": {
++      "name": "UpCloud",
++      "description": "UpCloud cloud servers via REST API with MaxIOPS storage",
++      "url": "https://upcloud.com/",
++      "type": "api",
++      "auth": "UPCLOUD_USERNAME + UPCLOUD_PASSWORD",
++      "provision_method": "POST /1.3/server with login_user SSH keys",
++      "exec_method": "ssh root@IP",
++      "interactive_method": "ssh -t root@IP",
++      "defaults": {
++        "plan": "1xCPU-2GB",
++        "zone": "de-fra1",
++        "image": "Ubuntu Server 24.04 LTS"
++      },
++      "notes": "European cloud provider with MaxIOPS storage. Uses HTTP Basic Auth (username:password). Requires UPCLOUD_USERNAME and UPCLOUD_PASSWORD."
+     }
+   },
+   "matrix": {
+@@ -596,6 +631,32 @@
+     "fly/plandex": "implemented",
+     "civo/plandex": "implemented",
+     "scaleway/plandex": "implemented",
+-    "daytona/plandex": "implemented"
++    "daytona/plandex": "implemented",
++    "runpod/claude": "implemented",
++    "runpod/openclaw": "implemented",
++    "runpod/nanoclaw": "implemented",
++    "runpod/aider": "implemented",
++    "runpod/goose": "implemented",
++    "runpod/codex": "implemented",
++    "runpod/interpreter": "implemented",
++    "runpod/gemini": "implemented",
++    "runpod/amazonq": "implemented",
++    "runpod/cline": "implemented",
++    "runpod/gptme": "implemented",
++    "runpod/opencode": "implemented",
++    "runpod/plandex": "implemented",
++    "upcloud/claude": "implemented",
++    "upcloud/openclaw": "implemented",
++    "upcloud/nanoclaw": "implemented",
++    "upcloud/aider": "implemented",
++    "upcloud/goose": "implemented",
++    "upcloud/codex": "implemented",
++    "upcloud/interpreter": "implemented",
++    "upcloud/gemini": "implemented",
++    "upcloud/amazonq": "implemented",
++    "upcloud/cline": "implemented",
++    "upcloud/gptme": "implemented",
++    "upcloud/opencode": "implemented",
++    "upcloud/plandex": "implemented"
+   }
+ }
+diff --git a/runpod/README.md b/runpod/README.md
+new file mode 100644
+index 000000000..a2bdb74e3
+--- /dev/null
++++ b/runpod/README.md
+@@ -0,0 +1,118 @@
++# RunPod
++
++RunPod GPU cloud pods via GraphQL API. [RunPod](https://www.runpod.io/)
++
++## Prerequisites
++
++1. A RunPod account with API key from [Settings](https://www.runpod.io/console/user/settings)
++2. SSH public key added to your RunPod account (same settings page)
++
++## Agents
++
++#### Claude Code
++
++```bash
++bash <(curl -fsSL https://openrouter.ai/lab/spawn/runpod/claude.sh)
++```
++
++#### OpenClaw
++
++```bash
++bash <(curl -fsSL https://openrouter.ai/lab/spawn/runpod/openclaw.sh)
++```
++
++#### NanoClaw
++
++```bash
++bash <(curl -fsSL https://openrouter.ai/lab/spawn/runpod/nanoclaw.sh)
++```
++
++#### Aider
++
++```bash
++bash <(curl -fsSL https://openrouter.ai/lab/spawn/runpod/aider.sh)
++```
++
++#### Goose
++
++```bash
++bash <(curl -fsSL https://openrouter.ai/lab/spawn/runpod/goose.sh)
++```
++
++#### Codex CLI
++
++```bash
++bash <(curl -fsSL https://openrouter.ai/lab/spawn/runpod/codex.sh)
++```
++
++#### Open Interpreter
++
++```bash
++bash <(curl -fsSL https://openrouter.ai/lab/spawn/runpod/interpreter.sh)
++```
++
++#### Gemini CLI
++
++```bash
++bash <(curl -fsSL https://openrouter.ai/lab/spawn/runpod/gemini.sh)
++```
++
++#### Amazon Q CLI
++
++```bash
++bash <(curl -fsSL https://openrouter.ai/lab/spawn/runpod/amazonq.sh)
++```
++
++#### Cline
++
++```bash
++bash <(curl -fsSL https://openrouter.ai/lab/spawn/runpod/cline.sh)
++```
++
++#### gptme
++
++```bash
++bash <(curl -fsSL https://openrouter.ai/lab/spawn/runpod/gptme.sh)
++```
++
++#### OpenCode
++
++```bash
++bash <(curl -fsSL https://openrouter.ai/lab/spawn/runpod/opencode.sh)
++```
++
++#### Plandex
++
++```bash
++bash <(curl -fsSL https://openrouter.ai/lab/spawn/runpod/plandex.sh)
++```
++
++## Non-Interactive Mode
++
++```bash
++RUNPOD_SERVER_NAME=dev-gpu \
++RUNPOD_API_KEY=your-api-key \
++OPENROUTER_API_KEY=sk-or-v1-xxxxx \
++  bash <(curl -fsSL https://openrouter.ai/lab/spawn/runpod/claude.sh)
++```
++
++## Environment Variables
++
++| Variable | Description | Default |
++|---|---|---|
++| `RUNPOD_API_KEY` | RunPod API key | _(prompted)_ |
++| `RUNPOD_SERVER_NAME` | Pod name | _(prompted)_ |
++| `RUNPOD_GPU_TYPE` | GPU type ID | `NVIDIA RTX A4000` |
++| `RUNPOD_GPU_COUNT` | Number of GPUs | `1` |
++| `RUNPOD_IMAGE` | Docker image | `runpod/pytorch:2.1.0-py3.10-cuda11.8.0-devel-ubuntu22.04` |
++| `RUNPOD_VOLUME_GB` | Persistent volume size (GB) | `50` |
++| `RUNPOD_CONTAINER_DISK_GB` | Container disk size (GB) | `20` |
++| `RUNPOD_CLOUD_TYPE` | Cloud type (`ALL`, `COMMUNITY`, `SECURE`) | `ALL` |
++| `OPENROUTER_API_KEY` | OpenRouter API key | _(prompted via OAuth)_ |
++
++## Notes
++
++- RunPod is a GPU cloud provider -- pods come with NVIDIA GPUs and CUDA pre-installed
++- SSH keys must be added via the RunPod web console (not via API)
++- Pods use Docker containers; base tools are installed automatically on first run
++- SSH access is via direct TCP port mapping or RunPod's SSH proxy
+diff --git a/runpod/aider.sh b/runpod/aider.sh
+new file mode 100644
+index 000000000..0e670f400
+--- /dev/null
++++ b/runpod/aider.sh
+@@ -0,0 +1,55 @@
++#!/bin/bash
++# shellcheck disable=SC2154
++set -eo pipefail
++
++# Source common functions - try local file first, fall back to remote
++SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
++# shellcheck source=runpod/lib/common.sh
++if [[ -f "${SCRIPT_DIR}/lib/common.sh" ]]; then
++    source "${SCRIPT_DIR}/lib/common.sh"
++else
++    eval "$(curl -fsSL https://raw.githubusercontent.com/OpenRouterTeam/spawn/main/runpod/lib/common.sh)"
++fi
++
++log_info "Aider on RunPod"
++echo ""
++
++ensure_runpod_token
++ensure_ssh_key
++
++SERVER_NAME=$(get_server_name)
++create_server "${SERVER_NAME}"
++verify_server_connectivity
++install_base_tools
++
++log_warn "Installing Aider..."
++run_server "${RUNPOD_POD_ID}" "pip install aider-chat 2>/dev/null || pip3 install aider-chat"
++
++if ! run_server "${RUNPOD_POD_ID}" "command -v aider &> /dev/null && aider --version &> /dev/null"; then
++    log_error "Aider installation verification failed"
++    exit 1
++fi
++log_info "Aider installation verified successfully"
++
++echo ""
++if [[ -n "${OPENROUTER_API_KEY:-}" ]]; then
++    log_info "Using OpenRouter API key from environment"
++else
++    OPENROUTER_API_KEY=$(get_openrouter_api_key_oauth 5180)
++fi
++
++MODEL_ID=$(get_model_id_interactive "openrouter/auto" "Aider") || exit 1
++
++log_warn "Setting up environment variables..."
++inject_env_vars_ssh "${RUNPOD_POD_ID}" upload_file run_server \
++    "OPENROUTER_API_KEY=${OPENROUTER_API_KEY}"
++
++echo ""
++log_info "RunPod pod setup completed successfully!"
++log_info "Pod: ${SERVER_NAME} (ID: ${RUNPOD_POD_ID})"
++echo ""
++
++log_warn "Starting Aider..."
++sleep 1
++clear
++interactive_session "${RUNPOD_POD_ID}" "source ~/.zshrc && aider --model openrouter/${MODEL_ID}"
+diff --git a/runpod/amazonq.sh b/runpod/amazonq.sh
+new file mode 100644
+index 000000000..1d478c073
+--- /dev/null
++++ b/runpod/amazonq.sh
+@@ -0,0 +1,49 @@
++#!/bin/bash
++# shellcheck disable=SC2154
++set -eo pipefail
++
++SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
++# shellcheck source=runpod/lib/common.sh
++if [[ -f "${SCRIPT_DIR}/lib/common.sh" ]]; then
++    source "${SCRIPT_DIR}/lib/common.sh"
++else
++    eval "$(curl -fsSL https://raw.githubusercontent.com/OpenRouterTeam/spawn/main/runpod/lib/common.sh)"
++fi
++
++log_info "Amazon Q on RunPod"
++echo ""
++
++ensure_runpod_token
++ensure_ssh_key
++
++SERVER_NAME=$(get_server_name)
++create_server "${SERVER_NAME}"
++verify_server_connectivity
++install_base_tools
++
++log_warn "Installing Amazon Q CLI..."
++run_server "${RUNPOD_POD_ID}" "curl -fsSL https://desktop-release.q.us-east-1.amazonaws.com/latest/amazon-q-cli-install.sh | bash"
++log_info "Amazon Q CLI installed"
++
++echo ""
++if [[ -n "${OPENROUTER_API_KEY:-}" ]]; then
++    log_info "Using OpenRouter API key from environment"
++else
++    OPENROUTER_API_KEY=$(get_openrouter_api_key_oauth 5180)
++fi
++
++log_warn "Setting up environment variables..."
++inject_env_vars_ssh "${RUNPOD_POD_ID}" upload_file run_server \
++    "OPENROUTER_API_KEY=${OPENROUTER_API_KEY}" \
++    "OPENAI_API_KEY=${OPENROUTER_API_KEY}" \
++    "OPENAI_BASE_URL=https://openrouter.ai/api/v1"
++
++echo ""
++log_info "RunPod pod setup completed successfully!"
++log_info "Pod: ${SERVER_NAME} (ID: ${RUNPOD_POD_ID})"
++echo ""
++
++log_warn "Starting Amazon Q..."
++sleep 1
++clear
++interactive_session "${RUNPOD_POD_ID}" "source ~/.zshrc && q chat"
+diff --git a/runpod/claude.sh b/runpod/claude.sh
+new file mode 100644
+index 000000000..5085ee965
+--- /dev/null
++++ b/runpod/claude.sh
+@@ -0,0 +1,71 @@
++#!/bin/bash
++# shellcheck disable=SC2154
++set -eo pipefail
++
++# Source common functions - try local file first, fall back to remote
++SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
++# shellcheck source=runpod/lib/common.sh
++if [[ -f "${SCRIPT_DIR}/lib/common.sh" ]]; then
++    source "${SCRIPT_DIR}/lib/common.sh"
++else
++    eval "$(curl -fsSL https://raw.githubusercontent.com/OpenRouterTeam/spawn/main/runpod/lib/common.sh)"
++fi
++
++log_info "Claude Code on RunPod"
++echo ""
++
++# 1. Ensure RunPod API key is configured
++ensure_runpod_token
++
++# 2. Ensure SSH key exists (user must add to RunPod console)
++ensure_ssh_key
++
++# 3. Get pod name and create pod
++SERVER_NAME=$(get_server_name)
++create_server "${SERVER_NAME}"
++
++# 4. Wait for SSH connectivity and install base tools
++verify_server_connectivity
++install_base_tools
++
++# 5. Verify Claude Code is installed (fallback to manual install)
++log_warn "Verifying Claude Code installation..."
++if ! run_server "${RUNPOD_POD_ID}" "command -v claude" >/dev/null 2>&1; then
++    log_warn "Claude Code not found, installing manually..."
++    run_server "${RUNPOD_POD_ID}" "curl -fsSL https://claude.ai/install.sh | bash"
++fi
++log_info "Claude Code is installed"
++
++# 6. Get OpenRouter API key
++echo ""
++if [[ -n "${OPENROUTER_API_KEY:-}" ]]; then
++    log_info "Using OpenRouter API key from environment"
++else
++    OPENROUTER_API_KEY=$(get_openrouter_api_key_oauth 5180)
++fi
++
++# 7. Inject environment variables
++log_warn "Setting up environment variables..."
++inject_env_vars_ssh "${RUNPOD_POD_ID}" upload_file run_server \
++    "OPENROUTER_API_KEY=${OPENROUTER_API_KEY}" \
++    "ANTHROPIC_BASE_URL=https://openrouter.ai/api" \
++    "ANTHROPIC_AUTH_TOKEN=${OPENROUTER_API_KEY}" \
++    "ANTHROPIC_API_KEY=" \
++    "CLAUDE_CODE_SKIP_ONBOARDING=1" \
++    "CLAUDE_CODE_ENABLE_TELEMETRY=0"
++
++# 8. Configure Claude Code settings
++setup_claude_code_config "${OPENROUTER_API_KEY}" \
++    "upload_file ${RUNPOD_POD_ID}" \
++    "run_server ${RUNPOD_POD_ID}"
++
++echo ""
++log_info "RunPod pod setup completed successfully!"
++log_info "Pod: ${SERVER_NAME} (ID: ${RUNPOD_POD_ID})"
++echo ""
++
++# 9. Start Claude Code interactively
++log_warn "Starting Claude Code..."
++sleep 1
++clear
++interactive_session "${RUNPOD_POD_ID}" "source ~/.zshrc && claude"
+diff --git a/runpod/cline.sh b/runpod/cline.sh
+new file mode 100644
+index 000000000..2d97ffc46
+--- /dev/null
++++ b/runpod/cline.sh
+@@ -0,0 +1,49 @@
++#!/bin/bash
++# shellcheck disable=SC2154
++set -eo pipefail
++
++SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
++# shellcheck source=runpod/lib/common.sh
++if [[ -f "${SCRIPT_DIR}/lib/common.sh" ]]; then
++    source "${SCRIPT_DIR}/lib/common.sh"
++else
++    eval "$(curl -fsSL https://raw.githubusercontent.com/OpenRouterTeam/spawn/main/runpod/lib/common.sh)"
++fi
++
++log_info "Cline on RunPod"
++echo ""
++
++ensure_runpod_token
++ensure_ssh_key
++
++SERVER_NAME=$(get_server_name)
++create_server "${SERVER_NAME}"
++verify_server_connectivity
++install_base_tools
++
++log_warn "Installing Cline..."
++run_server "${RUNPOD_POD_ID}" "npm install -g cline"
++log_info "Cline installed"
++
++echo ""
++if [[ -n "${OPENROUTER_API_KEY:-}" ]]; then
++    log_info "Using OpenRouter API key from environment"
++else
++    OPENROUTER_API_KEY=$(get_openrouter_api_key_oauth 5180)
++fi
++
++log_warn "Setting up environment variables..."
++inject_env_vars_ssh "${RUNPOD_POD_ID}" upload_file run_server \
++    "OPENROUTER_API_KEY=${OPENROUTER_API_KEY}" \
++    "OPENAI_API_KEY=${OPENROUTER_API_KEY}" \
++    "OPENAI_BASE_URL=https://openrouter.ai/api/v1"
++
++echo ""
++log_info "RunPod pod setup completed successfully!"
++log_info "Pod: ${SERVER_NAME} (ID: ${RUNPOD_POD_ID})"
++echo ""
++
++log_warn "Starting Cline..."
++sleep 1
++clear
++interactive_session "${RUNPOD_POD_ID}" "source ~/.zshrc && cline"
+diff --git a/runpod/codex.sh b/runpod/codex.sh
+new file mode 100644
+index 000000000..64004f26b
+--- /dev/null
++++ b/runpod/codex.sh
+@@ -0,0 +1,49 @@
++#!/bin/bash
++# shellcheck disable=SC2154
++set -eo pipefail
++
++SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
++# shellcheck source=runpod/lib/common.sh
++if [[ -f "${SCRIPT_DIR}/lib/common.sh" ]]; then
++    source "${SCRIPT_DIR}/lib/common.sh"
++else
++    eval "$(curl -fsSL https://raw.githubusercontent.com/OpenRouterTeam/spawn/main/runpod/lib/common.sh)"
++fi
++
++log_info "Codex CLI on RunPod"
++echo ""
++
++ensure_runpod_token
++ensure_ssh_key
++
++SERVER_NAME=$(get_server_name)
++create_server "${SERVER_NAME}"
++verify_server_connectivity
++install_base_tools
++
++log_warn "Installing Codex CLI..."
++run_server "${RUNPOD_POD_ID}" "npm install -g @openai/codex"
++log_info "Codex CLI installed"
++
++echo ""
++if [[ -n "${OPENROUTER_API_KEY:-}" ]]; then
++    log_info "Using OpenRouter API key from environment"
++else
++    OPENROUTER_API_KEY=$(get_openrouter_api_key_oauth 5180)
++fi
++
++log_warn "Setting up environment variables..."
++inject_env_vars_ssh "${RUNPOD_POD_ID}" upload_file run_server \
++    "OPENROUTER_API_KEY=${OPENROUTER_API_KEY}" \
++    "OPENAI_API_KEY=${OPENROUTER_API_KEY}" \
++    "OPENAI_BASE_URL=https://openrouter.ai/api/v1"
++
++echo ""
++log_info "RunPod pod setup completed successfully!"
++log_info "Pod: ${SERVER_NAME} (ID: ${RUNPOD_POD_ID})"
++echo ""
++
++log_warn "Starting Codex..."
++sleep 1
++clear
++interactive_session "${RUNPOD_POD_ID}" "source ~/.zshrc && codex"
+diff --git a/runpod/gemini.sh b/runpod/gemini.sh
+new file mode 100644
+index 000000000..f9dce39af
+--- /dev/null
++++ b/runpod/gemini.sh
+@@ -0,0 +1,50 @@
++#!/bin/bash
++# shellcheck disable=SC2154
++set -eo pipefail
++
++SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
++# shellcheck source=runpod/lib/common.sh
++if [[ -f "${SCRIPT_DIR}/lib/common.sh" ]]; then
++    source "${SCRIPT_DIR}/lib/common.sh"
++else
++    eval "$(curl -fsSL https://raw.githubusercontent.com/OpenRouterTeam/spawn/main/runpod/lib/common.sh)"
++fi
++
++log_info "Gemini CLI on RunPod"
++echo ""
++
++ensure_runpod_token
++ensure_ssh_key
++
++SERVER_NAME=$(get_server_name)
++create_server "${SERVER_NAME}"
++verify_server_connectivity
++install_base_tools
++
++log_warn "Installing Gemini CLI..."
++run_server "${RUNPOD_POD_ID}" "npm install -g @google/gemini-cli"
++log_info "Gemini CLI installed"
++
++echo ""
++if [[ -n "${OPENROUTER_API_KEY:-}" ]]; then
++    log_info "Using OpenRouter API key from environment"
++else
++    OPENROUTER_API_KEY=$(get_openrouter_api_key_oauth 5180)
++fi
++
++log_warn "Setting up environment variables..."
++inject_env_vars_ssh "${RUNPOD_POD_ID}" upload_file run_server \
++    "OPENROUTER_API_KEY=${OPENROUTER_API_KEY}" \
++    "GEMINI_API_KEY=${OPENROUTER_API_KEY}" \
++    "OPENAI_API_KEY=${OPENROUTER_API_KEY}" \
++    "OPENAI_BASE_URL=https://openrouter.ai/api/v1"
++
++echo ""
++log_info "RunPod pod setup completed successfully!"
++log_info "Pod: ${SERVER_NAME} (ID: ${RUNPOD_POD_ID})"
++echo ""
++
++log_warn "Starting Gemini..."
++sleep 1
++clear
++interactive_session "${RUNPOD_POD_ID}" "source ~/.zshrc && gemini"
+diff --git a/runpod/goose.sh b/runpod/goose.sh
+new file mode 100644
+index 000000000..990ecf3e1
+--- /dev/null
++++ b/runpod/goose.sh
+@@ -0,0 +1,54 @@
++#!/bin/bash
++# shellcheck disable=SC2154
++set -eo pipefail
++
++# Source common functions - try local file first, fall back to remote
++SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
++# shellcheck source=runpod/lib/common.sh
++if [[ -f "${SCRIPT_DIR}/lib/common.sh" ]]; then
++    source "${SCRIPT_DIR}/lib/common.sh"
++else
++    eval "$(curl -fsSL https://raw.githubusercontent.com/OpenRouterTeam/spawn/main/runpod/lib/common.sh)"
++fi
++
++log_info "Goose on RunPod"
++echo ""
++
++ensure_runpod_token
++ensure_ssh_key
++
++SERVER_NAME=$(get_server_name)
++create_server "${SERVER_NAME}"
++verify_server_connectivity
++install_base_tools
++
++log_warn "Installing Goose..."
++run_server "${RUNPOD_POD_ID}" "CONFIGURE=false curl -fsSL https://github.com/block/goose/releases/latest/download/download_cli.sh | bash"
++
++if ! run_server "${RUNPOD_POD_ID}" "command -v goose &> /dev/null && goose --version &> /dev/null"; then
++    log_error "Goose installation verification failed"
++    exit 1
++fi
++log_info "Goose installation verified successfully"
++
++echo ""
++if [[ -n "${OPENROUTER_API_KEY:-}" ]]; then
++    log_info "Using OpenRouter API key from environment"
++else
++    OPENROUTER_API_KEY=$(get_openrouter_api_key_oauth 5180)
++fi
++
++log_warn "Setting up environment variables..."
++inject_env_vars_ssh "${RUNPOD_POD_ID}" upload_file run_server \
++    "GOOSE_PROVIDER=openrouter" \
++    "OPENROUTER_API_KEY=${OPENROUTER_API_KEY}"
++
++echo ""
++log_info "RunPod pod setup completed successfully!"
++log_info "Pod: ${SERVER_NAME} (ID: ${RUNPOD_POD_ID})"
++echo ""
++
++log_warn "Starting Goose..."
++sleep 1
++clear
++interactive_session "${RUNPOD_POD_ID}" "source ~/.zshrc && goose"
+diff --git a/runpod/gptme.sh b/runpod/gptme.sh
+new file mode 100644
+index 000000000..01a0f49a2
+--- /dev/null
++++ b/runpod/gptme.sh
+@@ -0,0 +1,54 @@
++#!/bin/bash
++# shellcheck disable=SC2154
++set -eo pipefail
++
++# Source common functions - try local file first, fall back to remote
++SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
++if [[ -f "${SCRIPT_DIR}/lib/common.sh" ]]; then
++    source "${SCRIPT_DIR}/lib/common.sh"
++else
++    eval "$(curl -fsSL https://raw.githubusercontent.com/OpenRouterTeam/spawn/main/runpod/lib/common.sh)"
++fi
++
++log_info "gptme on RunPod"
++echo ""
++
++ensure_runpod_token
++ensure_ssh_key
++
++SERVER_NAME=$(get_server_name)
++create_server "${SERVER_NAME}"
++verify_server_connectivity
++install_base_tools
++
++log_warn "Installing gptme..."
++run_server "${RUNPOD_POD_ID}" "pip install gptme 2>/dev/null || pip3 install gptme"
++
++if ! run_server "${RUNPOD_POD_ID}" "command -v gptme &> /dev/null && gptme --version &> /dev/null"; then
++    log_error "gptme installation verification failed"
++    exit 1
++fi
++log_info "gptme installation verified successfully"
++
++echo ""
++if [[ -n "${OPENROUTER_API_KEY:-}" ]]; then
++    log_info "Using OpenRouter API key from environment"
++else
++    OPENROUTER_API_KEY=$(get_openrouter_api_key_oauth 5180)
++fi
++
++MODEL_ID=$(get_model_id_interactive "openrouter/auto" "gptme") || exit 1
++
++log_warn "Setting up environment variables..."
++inject_env_vars_ssh "${RUNPOD_POD_ID}" upload_file run_server \
++    "OPENROUTER_API_KEY=${OPENROUTER_API_KEY}"
++
++echo ""
++log_info "RunPod pod setup completed successfully!"
++log_info "Pod: ${SERVER_NAME} (ID: ${RUNPOD_POD_ID})"
++echo ""
++
++log_warn "Starting gptme..."
++sleep 1
++clear
++interactive_session "${RUNPOD_POD_ID}" "source ~/.zshrc && gptme -m openrouter/${MODEL_ID}"
+diff --git a/runpod/interpreter.sh b/runpod/interpreter.sh
+new file mode 100644
+index 000000000..aadd47037
+--- /dev/null
++++ b/runpod/interpreter.sh
+@@ -0,0 +1,49 @@
++#!/bin/bash
++# shellcheck disable=SC2154
++set -eo pipefail
++
++SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
++# shellcheck source=runpod/lib/common.sh
++if [[ -f "${SCRIPT_DIR}/lib/common.sh" ]]; then
++    source "${SCRIPT_DIR}/lib/common.sh"
++else
++    eval "$(curl -fsSL https://raw.githubusercontent.com/OpenRouterTeam/spawn/main/runpod/lib/common.sh)"
++fi
++
++log_info "Open Interpreter on RunPod"
++echo ""
++
++ensure_runpod_token
++ensure_ssh_key
++
++SERVER_NAME=$(get_server_name)
++create_server "${SERVER_NAME}"
++verify_server_connectivity
++install_base_tools
++
++log_warn "Installing Open Interpreter..."
++run_server "${RUNPOD_POD_ID}" "pip install open-interpreter 2>/dev/null || pip3 install open-interpreter"
++log_info "Open Interpreter installed"
++
++echo ""
++if [[ -n "${OPENROUTER_API_KEY:-}" ]]; then
++    log_info "Using OpenRouter API key from environment"
++else
++    OPENROUTER_API_KEY=$(get_openrouter_api_key_oauth 5180)
++fi
++
++log_warn "Setting up environment variables..."
++inject_env_vars_ssh "${RUNPOD_POD_ID}" upload_file run_server \
++    "OPENROUTER_API_KEY=${OPENROUTER_API_KEY}" \
++    "OPENAI_API_KEY=${OPENROUTER_API_KEY}" \
++    "OPENAI_BASE_URL=https://openrouter.ai/api/v1"
++
++echo ""
++log_info "RunPod pod setup completed successfully!"
++log_info "Pod: ${SERVER_NAME} (ID: ${RUNPOD_POD_ID})"
++echo ""
++
++log_warn "Starting Open Interpreter..."
++sleep 1
++clear
++interactive_session "${RUNPOD_POD_ID}" "source ~/.zshrc && interpreter"
+diff --git a/runpod/lib/common.sh b/runpod/lib/common.sh
+new file mode 100644
+index 000000000..0bde262f6
+--- /dev/null
++++ b/runpod/lib/common.sh
+@@ -0,0 +1,303 @@
++#!/bin/bash
++# Common bash functions for RunPod spawn scripts
++# Uses RunPod GraphQL API — https://docs.runpod.io/
++
++# Bash safety flags
++set -eo pipefail
++
++# ============================================================
++# Provider-agnostic functions
++# ============================================================
++
++# Source shared provider-agnostic functions (local or remote fallback)
++SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
++if [[ -n "${SCRIPT_DIR}" && -f "${SCRIPT_DIR}/../../shared/common.sh" ]]; then
++    source "${SCRIPT_DIR}/../../shared/common.sh"
++else
++    eval "$(curl -fsSL https://raw.githubusercontent.com/OpenRouterTeam/spawn/main/shared/common.sh)"
++fi
++
++# Note: Provider-agnostic functions (logging, OAuth, browser, nc_listen) are now in shared/common.sh
++
++# ============================================================
++# RunPod specific functions
++# ============================================================
++
++RUNPOD_GRAPHQL_URL="https://api.runpod.io/graphql"
++# SSH_OPTS is defined in shared/common.sh
++
++# Configurable timeout/delay constants
++INSTANCE_STATUS_POLL_DELAY=${INSTANCE_STATUS_POLL_DELAY:-10}  # Delay between instance status checks
++SSH_RETRY_DELAY=${SSH_RETRY_DELAY:-5}  # Delay between SSH connection retry attempts
++
++# RunPod GraphQL API wrapper
++# Usage: runpod_api QUERY
++runpod_api() {
++    local query="${1}"
++
++    local body
++    body=$(python3 -c "
++import json
++q = '''${query}'''
++print(json.dumps({'query': q}))
++")
++
++    curl -s -X POST \
++        -H "Content-Type: application/json" \
++        "${RUNPOD_GRAPHQL_URL}?api_key=${RUNPOD_API_KEY}" \
++        -d "${body}"
++}
++
++test_runpod_token() {
++    local response
++    response=$(runpod_api "query { myself { id } }")
++    if echo "${response}" | grep -q '"errors"'; then
++        local error_msg
++        error_msg=$(echo "${response}" | python3 -c "import json,sys; d=json.loads(sys.stdin.read()); print(d.get('errors',[{}])[0].get('message','Unknown error'))" 2>/dev/null || echo "Unable to parse error")
++        log_error "API Error: ${error_msg}"
++        log_warn "Remediation steps:"
++        log_warn "  1. Verify API key at: https://www.runpod.io/console/user/settings"
++        log_warn "  2. Ensure the key has read/write permissions"
++        log_warn "  3. Check key hasn't been revoked"
++        return 1
++    fi
++    return 0
++}
++
++# Ensure RUNPOD_API_KEY is available (env var -> config file -> prompt+save)
++ensure_runpod_token() {
++    ensure_api_token_with_provider \
++        "RunPod" \
++        "RUNPOD_API_KEY" \
++        "${HOME}/.config/spawn/runpod.json" \
++        "https://www.runpod.io/console/user/settings" \
++        "test_runpod_token"
++}
++
++# RunPod manages SSH keys at the account level via the web console.
++# Users must add their SSH public key at https://www.runpod.io/console/user/settings
++# The key is automatically injected into all new pods.
++ensure_ssh_key() {
++    local key_path="${HOME}/.ssh/id_ed25519"
++    generate_ssh_key_if_missing "${key_path}"
++
++    log_warn "RunPod requires SSH keys to be added via the web console."
++    log_warn "Ensure your public key is added at: https://www.runpod.io/console/user/settings"
++    log_warn ""
++    log_warn "Your public key:"
++    cat "${key_path}.pub" >&2
++    echo "" >&2
++}
++
++get_server_name() {
++    local server_name
++    server_name=$(get_resource_name "RUNPOD_SERVER_NAME" "Enter pod name: ") || return 1
++
++    if ! validate_server_name "${server_name}"; then
++        return 1
++    fi
++
++    echo "${server_name}"
++}
++
++create_server() {
++    local name="${1}"
++    local gpu_type="${RUNPOD_GPU_TYPE:-NVIDIA RTX A4000}"
++    local gpu_count="${RUNPOD_GPU_COUNT:-1}"
++    local image="${RUNPOD_IMAGE:-runpod/pytorch:2.1.0-py3.10-cuda11.8.0-devel-ubuntu22.04}"
++    local volume_gb="${RUNPOD_VOLUME_GB:-50}"
++    local container_disk_gb="${RUNPOD_CONTAINER_DISK_GB:-20}"
++    local cloud_type="${RUNPOD_CLOUD_TYPE:-ALL}"
++
++    log_warn "Creating RunPod pod '${name}' (GPU: ${gpu_type}, image: ${image})..."
++
++    local query='mutation { podFindAndDeployOnDemand(input: { name: "'"${name}"'", imageName: "'"${image}"'", gpuTypeId: "'"${gpu_type}"'", cloudType: '"${cloud_type}"', gpuCount: '"${gpu_count}"', volumeInGb: '"${volume_gb}"', containerDiskInGb: '"${container_disk_gb}"', ports: "22/tcp", volumeMountPath: "/workspace", dockerArgs: "" }) { id imageName machineId } }'
++
++    local response
++    response=$(runpod_api "${query}")
++
++    if echo "${response}" | grep -q '"errors"'; then
++        log_error "Failed to create RunPod pod"
++        local error_msg
++        error_msg=$(echo "${response}" | python3 -c "import json,sys; d=json.loads(sys.stdin.read()); print(d.get('errors',[{}])[0].get('message','Unknown error'))" 2>/dev/null || echo "${response}")
++        log_error "API Error: ${error_msg}"
++        log_warn "Common issues:"
++        log_warn "  - Insufficient account balance"
++        log_warn "  - GPU type unavailable (try different RUNPOD_GPU_TYPE)"
++        log_warn "  - GPU count unavailable"
++        log_warn "Remediation: Check https://www.runpod.io/console/pods"
++        return 1
++    fi
++
++    RUNPOD_POD_ID=$(echo "${response}" | python3 -c "import json,sys; print(json.loads(sys.stdin.read())['data']['podFindAndDeployOnDemand']['id'])")
++    export RUNPOD_POD_ID
++    log_info "Pod created: ID=${RUNPOD_POD_ID}"
++
++    # Wait for pod to become ready and get SSH connection info
++    log_warn "Waiting for pod to become ready..."
++    local max_attempts=60
++    local attempt=1
++    while [[ "${attempt}" -le "${max_attempts}" ]]; do
++        local status_query='query { pod(input: { podId: "'"${RUNPOD_POD_ID}"'" }) { id name desiredStatus runtime { uptimeInSeconds ports { ip isIpPublic privatePort publicPort type } } } }'
++        local status_response
++        status_response=$(runpod_api "${status_query}")
++
++        local runtime
++        runtime=$(echo "${status_response}" | python3 -c "import json,sys; r=json.loads(sys.stdin.read())['data']['pod']['runtime']; print('running' if r else 'pending')" 2>/dev/null || echo "pending")
++
++        if [[ "${runtime}" == "running" ]]; then
++            # Extract SSH connection info from ports
++            local ssh_info
++            ssh_info=$(echo "${status_response}" | python3 -c "
++import json, sys
++data = json.loads(sys.stdin.read())
++ports = data['data']['pod']['runtime']['ports']
++for p in (ports or []):
++    if p['privatePort'] == 22 and p['type'] == 'tcp':
++        print(p['ip'] + ':' + str(p['publicPort']))
++        sys.exit(0)
++# No direct TCP port found, fall back to proxy SSH
++print('proxy')
++" 2>/dev/null || echo "proxy")
++
++            if [[ "${ssh_info}" == "proxy" ]]; then
++                # Use RunPod SSH proxy
++                RUNPOD_SSH_HOST="ssh.runpod.io"
++                RUNPOD_SSH_PORT="22"
++                RUNPOD_SSH_USER="${RUNPOD_POD_ID}"
++                export RUNPOD_SSH_HOST RUNPOD_SSH_PORT RUNPOD_SSH_USER
++                log_info "Pod ready (using SSH proxy: ${RUNPOD_SSH_USER}@${RUNPOD_SSH_HOST})"
++            else
++                RUNPOD_SSH_HOST=$(echo "${ssh_info}" | cut -d: -f1)
++                RUNPOD_SSH_PORT=$(echo "${ssh_info}" | cut -d: -f2)
++                RUNPOD_SSH_USER="root"
++                export RUNPOD_SSH_HOST RUNPOD_SSH_PORT RUNPOD_SSH_USER
++                log_info "Pod ready: SSH at ${RUNPOD_SSH_HOST}:${RUNPOD_SSH_PORT}"
++            fi
++            return 0
++        fi
++
++        local desired_status
++        desired_status=$(echo "${status_response}" | python3 -c "import json,sys; print(json.loads(sys.stdin.read())['data']['pod']['desiredStatus'])" 2>/dev/null || echo "UNKNOWN")
++        log_warn "Pod status: ${desired_status}/${runtime} (${attempt}/${max_attempts})"
++        sleep "${INSTANCE_STATUS_POLL_DELAY}"
++        attempt=$((attempt + 1))
++    done
++
++    log_error "Pod did not become ready in time"
++    return 1
++}
++
++# Build SSH options string for RunPod (may use non-standard port)
++_runpod_ssh_opts() {
++    echo "${SSH_OPTS} -o ConnectTimeout=10 -p ${RUNPOD_SSH_PORT}"
++}
++
++verify_server_connectivity() {
++    local max_attempts=${1:-30}
++    local attempt=1
++    local ssh_target="${RUNPOD_SSH_USER}@${RUNPOD_SSH_HOST}"
++
++    log_warn "Waiting for SSH connectivity to ${ssh_target}:${RUNPOD_SSH_PORT}..."
++    while [[ "${attempt}" -le "${max_attempts}" ]]; do
++        # shellcheck disable=SC2086
++        if ssh $(_runpod_ssh_opts) "${ssh_target}" "echo ok" >/dev/null 2>&1; then
++            log_info "SSH connection established"
++            return 0
++        fi
++        log_warn "Waiting for SSH... (${attempt}/${max_attempts})"
++        sleep "${SSH_RETRY_DELAY}"
++        attempt=$((attempt + 1))
++    done
++    log_error "Pod failed to respond via SSH after ${max_attempts} attempts"
++    return 1
++}
++
++# Install base tools (RunPod pods are Docker containers, no cloud-init)
++install_base_tools() {
++    local ssh_target="${RUNPOD_SSH_USER}@${RUNPOD_SSH_HOST}"
++
++    log_warn "Installing base tools..."
++    # shellcheck disable=SC2086
++    ssh $(_runpod_ssh_opts) "${ssh_target}" "apt-get update -y && apt-get install -y curl unzip git zsh npm" >/dev/null 2>&1 || true
++
++    # Install Bun
++    log_warn "Installing Bun..."
++    # shellcheck disable=SC2086
++    ssh $(_runpod_ssh_opts) "${ssh_target}" "curl -fsSL https://bun.sh/install | bash" >/dev/null 2>&1 || true
++
++    # Install Claude Code
++    log_warn "Installing Claude Code..."
++    # shellcheck disable=SC2086
++    ssh $(_runpod_ssh_opts) "${ssh_target}" "curl -fsSL https://claude.ai/install.sh | bash" >/dev/null 2>&1 || true
++
++    # Configure PATH in .bashrc and .zshrc
++    # shellcheck disable=SC2086
++    ssh $(_runpod_ssh_opts) "${ssh_target}" "grep -q '.bun/bin' ~/.bashrc 2>/dev/null || printf '%s\n' 'export PATH=\"\${HOME}/.claude/local/bin:\${HOME}/.bun/bin:\${PATH}\"' >> ~/.bashrc; grep -q '.bun/bin' ~/.zshrc 2>/dev/null || printf '%s\n' 'export PATH=\"\${HOME}/.claude/local/bin:\${HOME}/.bun/bin:\${PATH}\"' >> ~/.zshrc" >/dev/null 2>&1 || true
++
++    log_info "Base tools installed"
++}
++
++# RunPod uses root user (or pod ID for proxy SSH)
++# These functions follow the IP-first arg pattern for compatibility with inject_env_vars_ssh
++# The "ip" arg is ignored since RunPod uses RUNPOD_SSH_USER@RUNPOD_SSH_HOST
++# shellcheck disable=SC2086
++run_server() {
++    local _ip="${1}"
++    local cmd="${2}"
++    ssh $(_runpod_ssh_opts) "${RUNPOD_SSH_USER}@${RUNPOD_SSH_HOST}" "${cmd}"
++}
++
++# shellcheck disable=SC2086
++upload_file() {
++    local _ip="${1}"
++    local local_path="${2}"
++    local remote_path="${3}"
++    scp $(_runpod_ssh_opts) "${local_path}" "${RUNPOD_SSH_USER}@${RUNPOD_SSH_HOST}:${remote_path}"
++}
++
++# shellcheck disable=SC2086
++interactive_session() {
++    local _ip="${1}"
++    local cmd="${2}"
++    ssh -t $(_runpod_ssh_opts) "${RUNPOD_SSH_USER}@${RUNPOD_SSH_HOST}" "${cmd}"
++}
++
++destroy_server() {
++    local pod_id="${1}"
++    log_warn "Terminating pod ${pod_id}..."
++    local query='mutation { podTerminate(input: { podId: "'"${pod_id}"'" }) }'
++    runpod_api "${query}" >/dev/null
++    log_info "Pod ${pod_id} terminated"
++}
++
++list_servers() {
++    local query='query { myself { pods { id name desiredStatus runtime { uptimeInSeconds ports { ip isIpPublic privatePort publicPort type } } } } }'
++    local response
++    response=$(runpod_api "${query}")
++
++    python3 -c "
++import json, sys
++data = json.loads(sys.stdin.read())
++pods = data.get('data', {}).get('myself', {}).get('pods', [])
++if not pods:
++    print('No pods found')
++    sys.exit(0)
++print(f\"{'NAME':<25} {'ID':<25} {'STATUS':<12} {'SSH':<30}\")
++print('-' * 92)
++for p in pods:
++    name = p.get('name', 'N/A')
++    pid = p['id']
++    status = p.get('desiredStatus', 'N/A')
++    ssh_info = 'N/A'
++    runtime = p.get('runtime')
++    if runtime and runtime.get('ports'):
++        for port in runtime['ports']:
++            if port.get('privatePort') == 22 and port.get('type') == 'tcp':
++                ssh_info = f\"{port['ip']}:{port['publicPort']}\"
++                break
++        if ssh_info == 'N/A':
++            ssh_info = f\"{pid}@ssh.runpod.io\"
++    print(f'{name:<25} {pid:<25} {status:<12} {ssh_info:<30}')
++" <<< "${response}"
++}
+diff --git a/runpod/nanoclaw.sh b/runpod/nanoclaw.sh
+new file mode 100644
+index 000000000..035d9c5a3
+--- /dev/null
++++ b/runpod/nanoclaw.sh
+@@ -0,0 +1,63 @@
++#!/bin/bash
++# shellcheck disable=SC2154
++set -eo pipefail
++
++# Source common functions - try local file first, fall back to remote
++SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
++# shellcheck source=runpod/lib/common.sh
++if [[ -f "${SCRIPT_DIR}/lib/common.sh" ]]; then
++    source "${SCRIPT_DIR}/lib/common.sh"
++else
++    eval "$(curl -fsSL https://raw.githubusercontent.com/OpenRouterTeam/spawn/main/runpod/lib/common.sh)"
++fi
++
++log_info "NanoClaw on RunPod"
++echo ""
++
++ensure_runpod_token
++ensure_ssh_key
++
++SERVER_NAME=$(get_server_name)
++create_server "${SERVER_NAME}"
++verify_server_connectivity
++install_base_tools
++
++log_warn "Installing tsx..."
++run_server "${RUNPOD_POD_ID}" "source ~/.bashrc && bun install -g tsx"
++
++log_warn "Cloning and building nanoclaw..."
++run_server "${RUNPOD_POD_ID}" "git clone https://github.com/gavrielc/nanoclaw.git ~/nanoclaw && cd ~/nanoclaw && npm install && npm run build"
++log_info "NanoClaw installed"
++
++echo ""
++if [[ -n "${OPENROUTER_API_KEY:-}" ]]; then
++    log_info "Using OpenRouter API key from environment"
++else
++    OPENROUTER_API_KEY=$(get_openrouter_api_key_oauth 5180)
++fi
++
++log_warn "Setting up environment variables..."
++inject_env_vars_ssh "${RUNPOD_POD_ID}" upload_file run_server \
++    "OPENROUTER_API_KEY=${OPENROUTER_API_KEY}" \
++    "ANTHROPIC_API_KEY=${OPENROUTER_API_KEY}" \
++    "ANTHROPIC_BASE_URL=https://openrouter.ai/api"
++
++log_warn "Configuring nanoclaw..."
++DOTENV_TEMP=$(mktemp)
++trap 'rm -f "${DOTENV_TEMP}"' EXIT
++chmod 600 "${DOTENV_TEMP}"
++cat > "${DOTENV_TEMP}" << EOF
++ANTHROPIC_API_KEY=${OPENROUTER_API_KEY}
++EOF
++
++upload_file "${RUNPOD_POD_ID}" "${DOTENV_TEMP}" "/root/nanoclaw/.env"
++
++echo ""
++log_info "RunPod pod setup completed successfully!"
++log_info "Pod: ${SERVER_NAME} (ID: ${RUNPOD_POD_ID})"
++echo ""
++
++log_warn "Starting nanoclaw..."
++log_warn "You will need to scan a WhatsApp QR code to authenticate."
++echo ""
++interactive_session "${RUNPOD_POD_ID}" "cd ~/nanoclaw && source ~/.zshrc && npm run dev"
+diff --git a/runpod/openclaw.sh b/runpod/openclaw.sh
+new file mode 100644
+index 000000000..b9d686ff5
+--- /dev/null
++++ b/runpod/openclaw.sh
+@@ -0,0 +1,56 @@
++#!/bin/bash
++# shellcheck disable=SC2154
++set -eo pipefail
++
++# Source common functions - try local file first, fall back to remote
++SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
++# shellcheck source=runpod/lib/common.sh
++if [[ -f "${SCRIPT_DIR}/lib/common.sh" ]]; then
++    source "${SCRIPT_DIR}/lib/common.sh"
++else
++    eval "$(curl -fsSL https://raw.githubusercontent.com/OpenRouterTeam/spawn/main/runpod/lib/common.sh)"
++fi
++
++log_info "OpenClaw on RunPod"
++echo ""
++
++ensure_runpod_token
++ensure_ssh_key
++
++SERVER_NAME=$(get_server_name)
++create_server "${SERVER_NAME}"
++verify_server_connectivity
++install_base_tools
++
++log_warn "Installing openclaw..."
++run_server "${RUNPOD_POD_ID}" "source ~/.bashrc && bun install -g openclaw"
++log_info "OpenClaw installed"
++
++echo ""
++if [[ -n "${OPENROUTER_API_KEY:-}" ]]; then
++    log_info "Using OpenRouter API key from environment"
++else
++    OPENROUTER_API_KEY=$(get_openrouter_api_key_oauth 5180)
++fi
++
++MODEL_ID=$(get_model_id_interactive "openrouter/auto" "Openclaw") || exit 1
++
++log_warn "Setting up environment variables..."
++inject_env_vars_ssh "${RUNPOD_POD_ID}" upload_file run_server \
++    "OPENROUTER_API_KEY=${OPENROUTER_API_KEY}" \
++    "ANTHROPIC_API_KEY=${OPENROUTER_API_KEY}" \
++    "ANTHROPIC_BASE_URL=https://openrouter.ai/api"
++
++setup_openclaw_config "${OPENROUTER_API_KEY}" "${MODEL_ID}" \
++    "upload_file ${RUNPOD_POD_ID}" \
++    "run_server ${RUNPOD_POD_ID}"
++
++echo ""
++log_info "RunPod pod setup completed successfully!"
++log_info "Pod: ${SERVER_NAME} (ID: ${RUNPOD_POD_ID})"
++echo ""
++
++log_warn "Starting openclaw..."
++run_server "${RUNPOD_POD_ID}" "source ~/.zshrc && nohup openclaw gateway > /tmp/openclaw-gateway.log 2>&1 &"
++sleep 2
++interactive_session "${RUNPOD_POD_ID}" "source ~/.zshrc && openclaw tui"
+diff --git a/runpod/opencode.sh b/runpod/opencode.sh
+new file mode 100644
+index 000000000..acb4e0364
+--- /dev/null
++++ b/runpod/opencode.sh
+@@ -0,0 +1,47 @@
++#!/bin/bash
++# shellcheck disable=SC2154
++set -eo pipefail
++
++SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
++# shellcheck source=runpod/lib/common.sh
++if [[ -f "${SCRIPT_DIR}/lib/common.sh" ]]; then
++    source "${SCRIPT_DIR}/lib/common.sh"
++else
++    eval "$(curl -fsSL https://raw.githubusercontent.com/OpenRouterTeam/spawn/main/runpod/lib/common.sh)"
++fi
++
++log_info "OpenCode on RunPod"
++echo ""
++
++ensure_runpod_token
++ensure_ssh_key
++
++SERVER_NAME=$(get_server_name)
++create_server "${SERVER_NAME}"
++verify_server_connectivity
++install_base_tools
++
++log_warn "Installing OpenCode..."
++run_server "${RUNPOD_POD_ID}" "curl -fsSL https://raw.githubusercontent.com/opencode-ai/opencode/refs/heads/main/install | bash"
++log_info "OpenCode installed"
++
++echo ""
++if [[ -n "${OPENROUTER_API_KEY:-}" ]]; then
++    log_info "Using OpenRouter API key from environment"
++else
++    OPENROUTER_API_KEY=$(get_openrouter_api_key_oauth 5180)
++fi
++
++log_warn "Setting up environment variables..."
++inject_env_vars_ssh "${RUNPOD_POD_ID}" upload_file run_server \
++    "OPENROUTER_API_KEY=${OPENROUTER_API_KEY}"
++
++echo ""
++log_info "RunPod pod setup completed successfully!"
++log_info "Pod: ${SERVER_NAME} (ID: ${RUNPOD_POD_ID})"
++echo ""
++
++log_warn "Starting OpenCode..."
++sleep 1
++clear
++interactive_session "${RUNPOD_POD_ID}" "source ~/.zshrc && opencode"
+diff --git a/runpod/plandex.sh b/runpod/plandex.sh
+new file mode 100644
+index 000000000..9c02265c3
+--- /dev/null
++++ b/runpod/plandex.sh
+@@ -0,0 +1,53 @@
++#!/bin/bash
++# shellcheck disable=SC2154
++set -eo pipefail
++
++# Source common functions - try local file first, fall back to remote
++SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
++# shellcheck source=runpod/lib/common.sh
++if [[ -f "${SCRIPT_DIR}/lib/common.sh" ]]; then
++    source "${SCRIPT_DIR}/lib/common.sh"
++else
++    eval "$(curl -fsSL https://raw.githubusercontent.com/OpenRouterTeam/spawn/main/runpod/lib/common.sh)"
++fi
++
++log_info "Plandex on RunPod"
++echo ""
++
++ensure_runpod_token
++ensure_ssh_key
++
++SERVER_NAME=$(get_server_name)
++create_server "${SERVER_NAME}"
++verify_server_connectivity
++install_base_tools
++
++log_warn "Installing Plandex..."
++run_server "${RUNPOD_POD_ID}" "curl -sL https://plandex.ai/install.sh | bash"
++
++if ! run_server "${RUNPOD_POD_ID}" "command -v plandex &> /dev/null && plandex version &> /dev/null"; then
++    log_error "Plandex installation verification failed"
++    exit 1
++fi
++log_info "Plandex installation verified successfully"
++
++echo ""
++if [[ -n "${OPENROUTER_API_KEY:-}" ]]; then
++    log_info "Using OpenRouter API key from environment"
++else
++    OPENROUTER_API_KEY=$(get_openrouter_api_key_oauth 5180)
++fi
++
++log_warn "Setting up environment variables..."
++inject_env_vars_ssh "${RUNPOD_POD_ID}" upload_file run_server \
++    "OPENROUTER_API_KEY=${OPENROUTER_API_KEY}"
++
++echo ""
++log_info "RunPod pod setup completed successfully!"
++log_info "Pod: ${SERVER_NAME} (ID: ${RUNPOD_POD_ID})"
++echo ""
++
++log_warn "Starting Plandex..."
++sleep 1
++clear
++interactive_session "${RUNPOD_POD_ID}" "source ~/.zshrc && plandex"
+diff --git a/upcloud/README.md b/upcloud/README.md
+new file mode 100644
+index 000000000..82b9accc4
+--- /dev/null
++++ b/upcloud/README.md
+@@ -0,0 +1,104 @@
++# UpCloud
++
++UpCloud cloud servers via REST API. [UpCloud](https://upcloud.com/)
++
++## Agents
++
++#### Claude Code
++
++```bash
++bash <(curl -fsSL https://openrouter.ai/lab/spawn/upcloud/claude.sh)
++```
++
++#### OpenClaw
++
++```bash
++bash <(curl -fsSL https://openrouter.ai/lab/spawn/upcloud/openclaw.sh)
++```
++
++#### NanoClaw
++
++```bash
++bash <(curl -fsSL https://openrouter.ai/lab/spawn/upcloud/nanoclaw.sh)
++```
++
++#### Aider
++
++```bash
++bash <(curl -fsSL https://openrouter.ai/lab/spawn/upcloud/aider.sh)
++```
++
++#### Goose
++
++```bash
++bash <(curl -fsSL https://openrouter.ai/lab/spawn/upcloud/goose.sh)
++```
++
++#### Codex CLI
++
++```bash
++bash <(curl -fsSL https://openrouter.ai/lab/spawn/upcloud/codex.sh)
++```
++
++#### Open Interpreter
++
++```bash
++bash <(curl -fsSL https://openrouter.ai/lab/spawn/upcloud/interpreter.sh)
++```
++
++#### Gemini CLI
++
++```bash
++bash <(curl -fsSL https://openrouter.ai/lab/spawn/upcloud/gemini.sh)
++```
++
++#### Amazon Q CLI
++
++```bash
++bash <(curl -fsSL https://openrouter.ai/lab/spawn/upcloud/amazonq.sh)
++```
++
++#### Cline
++
++```bash
++bash <(curl -fsSL https://openrouter.ai/lab/spawn/upcloud/cline.sh)
++```
++
++#### gptme
++
++```bash
++bash <(curl -fsSL https://openrouter.ai/lab/spawn/upcloud/gptme.sh)
++```
++
++#### OpenCode
++
++```bash
++bash <(curl -fsSL https://openrouter.ai/lab/spawn/upcloud/opencode.sh)
++```
++
++#### Plandex
++
++```bash
++bash <(curl -fsSL https://openrouter.ai/lab/spawn/upcloud/plandex.sh)
++```
++
++## Non-Interactive Mode
++
++```bash
++UPCLOUD_SERVER_NAME=dev-mk1 \
++UPCLOUD_USERNAME=your-api-username \
++UPCLOUD_PASSWORD=your-api-password \
++OPENROUTER_API_KEY=sk-or-v1-xxxxx \
++  bash <(curl -fsSL https://openrouter.ai/lab/spawn/upcloud/claude.sh)
++```
++
++## Environment Variables
++
++| Variable | Description | Default |
++|----------|-------------|---------|
++| `UPCLOUD_USERNAME` | UpCloud API username | _(prompted)_ |
++| `UPCLOUD_PASSWORD` | UpCloud API password | _(prompted)_ |
++| `UPCLOUD_SERVER_NAME` | Server name | _(prompted)_ |
++| `UPCLOUD_ZONE` | Datacenter zone | `de-fra1` |
++| `UPCLOUD_PLAN` | Server plan | `1xCPU-2GB` |
++| `OPENROUTER_API_KEY` | OpenRouter API key | _(OAuth or prompted)_ |
+diff --git a/upcloud/aider.sh b/upcloud/aider.sh
+new file mode 100644
+index 000000000..2255e6365
+--- /dev/null
++++ b/upcloud/aider.sh
+@@ -0,0 +1,52 @@
++#!/bin/bash
++set -eo pipefail
++
++SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
++if [[ -f "${SCRIPT_DIR}/lib/common.sh" ]]; then
++    source "${SCRIPT_DIR}/lib/common.sh"
++else
++    eval "$(curl -fsSL https://raw.githubusercontent.com/OpenRouterTeam/spawn/main/upcloud/lib/common.sh)"
++fi
++
++log_info "Aider on UpCloud"
++echo ""
++
++ensure_upcloud_credentials
++generate_ssh_key_if_missing "${HOME}/.ssh/id_ed25519"
++
++SERVER_NAME=$(get_server_name)
++create_server "${SERVER_NAME}"
++verify_server_connectivity "${UPCLOUD_SERVER_IP}"
++install_base_tools "${UPCLOUD_SERVER_IP}"
++
++log_warn "Installing Aider..."
++run_server "${UPCLOUD_SERVER_IP}" "pip install aider-chat 2>/dev/null || pip3 install aider-chat"
++
++if ! run_server "${UPCLOUD_SERVER_IP}" "command -v aider &> /dev/null && aider --version &> /dev/null"; then
++    log_error "Aider installation verification failed"
++    exit 1
++fi
++log_info "Aider installation verified successfully"
++
++echo ""
++if [[ -n "${OPENROUTER_API_KEY:-}" ]]; then
++    log_info "Using OpenRouter API key from environment"
++else
++    OPENROUTER_API_KEY=$(get_openrouter_api_key_oauth 5180)
++fi
++
++MODEL_ID=$(get_model_id_interactive "openrouter/auto" "Aider") || exit 1
++
++log_warn "Setting up environment variables..."
++inject_env_vars_ssh "${UPCLOUD_SERVER_IP}" upload_file run_server \
++    "OPENROUTER_API_KEY=${OPENROUTER_API_KEY}"
++
++echo ""
++log_info "UpCloud server setup completed successfully!"
++log_info "Server: ${SERVER_NAME} (UUID: ${UPCLOUD_SERVER_UUID}, IP: ${UPCLOUD_SERVER_IP})"
++echo ""
++
++log_warn "Starting Aider..."
++sleep 1
++clear
++interactive_session "${UPCLOUD_SERVER_IP}" "source ~/.zshrc && aider --model openrouter/${MODEL_ID}"
+diff --git a/upcloud/amazonq.sh b/upcloud/amazonq.sh
+new file mode 100644
+index 000000000..979fbd21d
+--- /dev/null
++++ b/upcloud/amazonq.sh
+@@ -0,0 +1,47 @@
++#!/bin/bash
++set -eo pipefail
++
++SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
++if [[ -f "${SCRIPT_DIR}/lib/common.sh" ]]; then
++    source "${SCRIPT_DIR}/lib/common.sh"
++else
++    eval "$(curl -fsSL https://raw.githubusercontent.com/OpenRouterTeam/spawn/main/upcloud/lib/common.sh)"
++fi
++
++log_info "Amazon Q on UpCloud"
++echo ""
++
++ensure_upcloud_credentials
++generate_ssh_key_if_missing "${HOME}/.ssh/id_ed25519"
++
++SERVER_NAME=$(get_server_name)
++create_server "${SERVER_NAME}"
++verify_server_connectivity "${UPCLOUD_SERVER_IP}"
++install_base_tools "${UPCLOUD_SERVER_IP}"
++
++log_warn "Installing Amazon Q CLI..."
++run_server "${UPCLOUD_SERVER_IP}" "curl -fsSL https://desktop-release.q.us-east-1.amazonaws.com/latest/amazon-q-cli-install.sh | bash"
++log_info "Amazon Q CLI installed"
++
++echo ""
++if [[ -n "${OPENROUTER_API_KEY:-}" ]]; then
++    log_info "Using OpenRouter API key from environment"
++else
++    OPENROUTER_API_KEY=$(get_openrouter_api_key_oauth 5180)
++fi
++
++log_warn "Setting up environment variables..."
++inject_env_vars_ssh "${UPCLOUD_SERVER_IP}" upload_file run_server \
++    "OPENROUTER_API_KEY=${OPENROUTER_API_KEY}" \
++    "OPENAI_API_KEY=${OPENROUTER_API_KEY}" \
++    "OPENAI_BASE_URL=https://openrouter.ai/api/v1"
++
++echo ""
++log_info "UpCloud server setup completed successfully!"
++log_info "Server: ${SERVER_NAME} (UUID: ${UPCLOUD_SERVER_UUID}, IP: ${UPCLOUD_SERVER_IP})"
++echo ""
++
++log_warn "Starting Amazon Q..."
++sleep 1
++clear
++interactive_session "${UPCLOUD_SERVER_IP}" "source ~/.zshrc && q chat"
+diff --git a/upcloud/claude.sh b/upcloud/claude.sh
+new file mode 100644
+index 000000000..f208b1392
+--- /dev/null
++++ b/upcloud/claude.sh
+@@ -0,0 +1,73 @@
++#!/bin/bash
++set -eo pipefail
++
++# Source common functions - try local file first, fall back to remote
++SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
++if [[ -f "${SCRIPT_DIR}/lib/common.sh" ]]; then
++    source "${SCRIPT_DIR}/lib/common.sh"
++else
++    eval "$(curl -fsSL https://raw.githubusercontent.com/OpenRouterTeam/spawn/main/upcloud/lib/common.sh)"
++fi
++
++log_info "Claude Code on UpCloud"
++echo ""
++
++# 1. Resolve UpCloud credentials
++ensure_upcloud_credentials
++
++# 2. Generate SSH key
++generate_ssh_key_if_missing "${HOME}/.ssh/id_ed25519"
++
++# 3. Get server name and create server
++SERVER_NAME=$(get_server_name)
++create_server "${SERVER_NAME}"
++
++# 4. Wait for SSH connectivity
++verify_server_connectivity "${UPCLOUD_SERVER_IP}"
++
++# 5. Install base tools and Claude Code
++install_base_tools "${UPCLOUD_SERVER_IP}"
++
++log_warn "Installing Claude Code..."
++run_server "${UPCLOUD_SERVER_IP}" "curl -fsSL https://claude.ai/install.sh | bash"
++
++# Verify installation succeeded
++if ! run_server "${UPCLOUD_SERVER_IP}" "command -v claude &> /dev/null && claude --version &> /dev/null"; then
++    log_error "Claude Code installation verification failed"
++    log_error "The 'claude' command is not available or not working properly on server ${UPCLOUD_SERVER_IP}"
++    exit 1
++fi
++log_info "Claude Code installation verified successfully"
++
++# 6. Get OpenRouter API key
++echo ""
++if [[ -n "${OPENROUTER_API_KEY:-}" ]]; then
++    log_info "Using OpenRouter API key from environment"
++else
++    OPENROUTER_API_KEY=$(get_openrouter_api_key_oauth 5180)
++fi
++
++log_warn "Setting up environment variables..."
++inject_env_vars_ssh "${UPCLOUD_SERVER_IP}" upload_file run_server \
++    "OPENROUTER_API_KEY=${OPENROUTER_API_KEY}" \
++    "ANTHROPIC_BASE_URL=https://openrouter.ai/api" \
++    "ANTHROPIC_AUTH_TOKEN=${OPENROUTER_API_KEY}" \
++    "ANTHROPIC_API_KEY=" \
++    "CLAUDE_CODE_SKIP_ONBOARDING=1" \
++    "CLAUDE_CODE_ENABLE_TELEMETRY=0"
++
++# 7. Configure Claude Code settings
++setup_claude_code_config "${OPENROUTER_API_KEY}" \
++    "upload_file ${UPCLOUD_SERVER_IP}" \
++    "run_server ${UPCLOUD_SERVER_IP}"
++
++echo ""
++log_info "UpCloud server setup completed successfully!"
++log_info "Server: ${SERVER_NAME} (UUID: ${UPCLOUD_SERVER_UUID}, IP: ${UPCLOUD_SERVER_IP})"
++echo ""
++
++# 8. Start Claude Code interactively
++log_warn "Starting Claude Code..."
++sleep 1
++clear
++interactive_session "${UPCLOUD_SERVER_IP}" "source ~/.zshrc && claude"
+diff --git a/upcloud/cline.sh b/upcloud/cline.sh
+new file mode 100644
+index 000000000..65d175e14
+--- /dev/null
++++ b/upcloud/cline.sh
+@@ -0,0 +1,47 @@
++#!/bin/bash
++set -eo pipefail
++
++SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
++if [[ -f "${SCRIPT_DIR}/lib/common.sh" ]]; then
++    source "${SCRIPT_DIR}/lib/common.sh"
++else
++    eval "$(curl -fsSL https://raw.githubusercontent.com/OpenRouterTeam/spawn/main/upcloud/lib/common.sh)"
++fi
++
++log_info "Cline on UpCloud"
++echo ""
++
++ensure_upcloud_credentials
++generate_ssh_key_if_missing "${HOME}/.ssh/id_ed25519"
++
++SERVER_NAME=$(get_server_name)
++create_server "${SERVER_NAME}"
++verify_server_connectivity "${UPCLOUD_SERVER_IP}"
++install_base_tools "${UPCLOUD_SERVER_IP}"
++
++log_warn "Installing Cline..."
++run_server "${UPCLOUD_SERVER_IP}" "npm install -g cline"
++log_info "Cline installed"
++
++echo ""
++if [[ -n "${OPENROUTER_API_KEY:-}" ]]; then
++    log_info "Using OpenRouter API key from environment"
++else
++    OPENROUTER_API_KEY=$(get_openrouter_api_key_oauth 5180)
++fi
++
++log_warn "Setting up environment variables..."
++inject_env_vars_ssh "${UPCLOUD_SERVER_IP}" upload_file run_server \
++    "OPENROUTER_API_KEY=${OPENROUTER_API_KEY}" \
++    "OPENAI_API_KEY=${OPENROUTER_API_KEY}" \
++    "OPENAI_BASE_URL=https://openrouter.ai/api/v1"
++
++echo ""
++log_info "UpCloud server setup completed successfully!"
++log_info "Server: ${SERVER_NAME} (UUID: ${UPCLOUD_SERVER_UUID}, IP: ${UPCLOUD_SERVER_IP})"
++echo ""
++
++log_warn "Starting Cline..."
++sleep 1
++clear
++interactive_session "${UPCLOUD_SERVER_IP}" "source ~/.zshrc && cline"
+diff --git a/upcloud/codex.sh b/upcloud/codex.sh
+new file mode 100644
+index 000000000..97702fe9e
+--- /dev/null
++++ b/upcloud/codex.sh
+@@ -0,0 +1,47 @@
++#!/bin/bash
++set -eo pipefail
++
++SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
++if [[ -f "${SCRIPT_DIR}/lib/common.sh" ]]; then
++    source "${SCRIPT_DIR}/lib/common.sh"
++else
++    eval "$(curl -fsSL https://raw.githubusercontent.com/OpenRouterTeam/spawn/main/upcloud/lib/common.sh)"
++fi
++
++log_info "Codex CLI on UpCloud"
++echo ""
++
++ensure_upcloud_credentials
++generate_ssh_key_if_missing "${HOME}/.ssh/id_ed25519"
++
++SERVER_NAME=$(get_server_name)
++create_server "${SERVER_NAME}"
++verify_server_connectivity "${UPCLOUD_SERVER_IP}"
++install_base_tools "${UPCLOUD_SERVER_IP}"
++
++log_warn "Installing Codex CLI..."
++run_server "${UPCLOUD_SERVER_IP}" "npm install -g @openai/codex"
++log_info "Codex CLI installed"
++
++echo ""
++if [[ -n "${OPENROUTER_API_KEY:-}" ]]; then
++    log_info "Using OpenRouter API key from environment"
++else
++    OPENROUTER_API_KEY=$(get_openrouter_api_key_oauth 5180)
++fi
++
++log_warn "Setting up environment variables..."
++inject_env_vars_ssh "${UPCLOUD_SERVER_IP}" upload_file run_server \
++    "OPENROUTER_API_KEY=${OPENROUTER_API_KEY}" \
++    "OPENAI_API_KEY=${OPENROUTER_API_KEY}" \
++    "OPENAI_BASE_URL=https://openrouter.ai/api/v1"
++
++echo ""
++log_info "UpCloud server setup completed successfully!"
++log_info "Server: ${SERVER_NAME} (UUID: ${UPCLOUD_SERVER_UUID}, IP: ${UPCLOUD_SERVER_IP})"
++echo ""
++
++log_warn "Starting Codex..."
++sleep 1
++clear
++interactive_session "${UPCLOUD_SERVER_IP}" "source ~/.zshrc && codex"
+diff --git a/upcloud/gemini.sh b/upcloud/gemini.sh
+new file mode 100644
+index 000000000..07de72470
+--- /dev/null
++++ b/upcloud/gemini.sh
+@@ -0,0 +1,48 @@
++#!/bin/bash
++set -eo pipefail
++
++SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
++if [[ -f "${SCRIPT_DIR}/lib/common.sh" ]]; then
++    source "${SCRIPT_DIR}/lib/common.sh"
++else
++    eval "$(curl -fsSL https://raw.githubusercontent.com/OpenRouterTeam/spawn/main/upcloud/lib/common.sh)"
++fi
++
++log_info "Gemini CLI on UpCloud"
++echo ""
++
++ensure_upcloud_credentials
++generate_ssh_key_if_missing "${HOME}/.ssh/id_ed25519"
++
++SERVER_NAME=$(get_server_name)
++create_server "${SERVER_NAME}"
++verify_server_connectivity "${UPCLOUD_SERVER_IP}"
++install_base_tools "${UPCLOUD_SERVER_IP}"
++
++log_warn "Installing Gemini CLI..."
++run_server "${UPCLOUD_SERVER_IP}" "npm install -g @google/gemini-cli"
++log_info "Gemini CLI installed"
++
++echo ""
++if [[ -n "${OPENROUTER_API_KEY:-}" ]]; then
++    log_info "Using OpenRouter API key from environment"
++else
++    OPENROUTER_API_KEY=$(get_openrouter_api_key_oauth 5180)
++fi
++
++log_warn "Setting up environment variables..."
++inject_env_vars_ssh "${UPCLOUD_SERVER_IP}" upload_file run_server \
++    "OPENROUTER_API_KEY=${OPENROUTER_API_KEY}" \
++    "GEMINI_API_KEY=${OPENROUTER_API_KEY}" \
++    "OPENAI_API_KEY=${OPENROUTER_API_KEY}" \
++    "OPENAI_BASE_URL=https://openrouter.ai/api/v1"
++
++echo ""
++log_info "UpCloud server setup completed successfully!"
++log_info "Server: ${SERVER_NAME} (UUID: ${UPCLOUD_SERVER_UUID}, IP: ${UPCLOUD_SERVER_IP})"
++echo ""
++
++log_warn "Starting Gemini..."
++sleep 1
++clear
++interactive_session "${UPCLOUD_SERVER_IP}" "source ~/.zshrc && gemini"
+diff --git a/upcloud/goose.sh b/upcloud/goose.sh
+new file mode 100644
+index 000000000..adc8adc73
+--- /dev/null
++++ b/upcloud/goose.sh
+@@ -0,0 +1,51 @@
++#!/bin/bash
++set -eo pipefail
++
++SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
++if [[ -f "${SCRIPT_DIR}/lib/common.sh" ]]; then
++    source "${SCRIPT_DIR}/lib/common.sh"
++else
++    eval "$(curl -fsSL https://raw.githubusercontent.com/OpenRouterTeam/spawn/main/upcloud/lib/common.sh)"
++fi
++
++log_info "Goose on UpCloud"
++echo ""
++
++ensure_upcloud_credentials
++generate_ssh_key_if_missing "${HOME}/.ssh/id_ed25519"
++
++SERVER_NAME=$(get_server_name)
++create_server "${SERVER_NAME}"
++verify_server_connectivity "${UPCLOUD_SERVER_IP}"
++install_base_tools "${UPCLOUD_SERVER_IP}"
++
++log_warn "Installing Goose..."
++run_server "${UPCLOUD_SERVER_IP}" "CONFIGURE=false curl -fsSL https://github.com/block/goose/releases/latest/download/download_cli.sh | bash"
++
++if ! run_server "${UPCLOUD_SERVER_IP}" "command -v goose &> /dev/null && goose --version &> /dev/null"; then
++    log_error "Goose installation verification failed"
++    exit 1
++fi
++log_info "Goose installation verified successfully"
++
++echo ""
++if [[ -n "${OPENROUTER_API_KEY:-}" ]]; then
++    log_info "Using OpenRouter API key from environment"
++else
++    OPENROUTER_API_KEY=$(get_openrouter_api_key_oauth 5180)
++fi
++
++log_warn "Setting up environment variables..."
++inject_env_vars_ssh "${UPCLOUD_SERVER_IP}" upload_file run_server \
++    "GOOSE_PROVIDER=openrouter" \
++    "OPENROUTER_API_KEY=${OPENROUTER_API_KEY}"
++
++echo ""
++log_info "UpCloud server setup completed successfully!"
++log_info "Server: ${SERVER_NAME} (UUID: ${UPCLOUD_SERVER_UUID}, IP: ${UPCLOUD_SERVER_IP})"
++echo ""
++
++log_warn "Starting Goose..."
++sleep 1
++clear
++interactive_session "${UPCLOUD_SERVER_IP}" "source ~/.zshrc && goose"
+diff --git a/upcloud/gptme.sh b/upcloud/gptme.sh
+new file mode 100644
+index 000000000..17182e365
+--- /dev/null
++++ b/upcloud/gptme.sh
+@@ -0,0 +1,52 @@
++#!/bin/bash
++set -eo pipefail
++
++SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
++if [[ -f "${SCRIPT_DIR}/lib/common.sh" ]]; then
++    source "${SCRIPT_DIR}/lib/common.sh"
++else
++    eval "$(curl -fsSL https://raw.githubusercontent.com/OpenRouterTeam/spawn/main/upcloud/lib/common.sh)"
++fi
++
++log_info "gptme on UpCloud"
++echo ""
++
++ensure_upcloud_credentials
++generate_ssh_key_if_missing "${HOME}/.ssh/id_ed25519"
++
++SERVER_NAME=$(get_server_name)
++create_server "${SERVER_NAME}"
++verify_server_connectivity "${UPCLOUD_SERVER_IP}"
++install_base_tools "${UPCLOUD_SERVER_IP}"
++
++log_warn "Installing gptme..."
++run_server "${UPCLOUD_SERVER_IP}" "pip install gptme 2>/dev/null || pip3 install gptme"
++
++if ! run_server "${UPCLOUD_SERVER_IP}" "command -v gptme &> /dev/null && gptme --version &> /dev/null"; then
++    log_error "gptme installation verification failed"
++    exit 1
++fi
++log_info "gptme installation verified successfully"
++
++echo ""
++if [[ -n "${OPENROUTER_API_KEY:-}" ]]; then
++    log_info "Using OpenRouter API key from environment"
++else
++    OPENROUTER_API_KEY=$(get_openrouter_api_key_oauth 5180)
++fi
++
++MODEL_ID=$(get_model_id_interactive "openrouter/auto" "gptme") || exit 1
++
++log_warn "Setting up environment variables..."
++inject_env_vars_ssh "${UPCLOUD_SERVER_IP}" upload_file run_server \
++    "OPENROUTER_API_KEY=${OPENROUTER_API_KEY}"
++
++echo ""
++log_info "UpCloud server setup completed successfully!"
++log_info "Server: ${SERVER_NAME} (UUID: ${UPCLOUD_SERVER_UUID}, IP: ${UPCLOUD_SERVER_IP})"
++echo ""
++
++log_warn "Starting gptme..."
++sleep 1
++clear
++interactive_session "${UPCLOUD_SERVER_IP}" "source ~/.zshrc && gptme -m openrouter/${MODEL_ID}"
+diff --git a/upcloud/interpreter.sh b/upcloud/interpreter.sh
+new file mode 100644
+index 000000000..120494782
+--- /dev/null
++++ b/upcloud/interpreter.sh
+@@ -0,0 +1,47 @@
++#!/bin/bash
++set -eo pipefail
++
++SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
++if [[ -f "${SCRIPT_DIR}/lib/common.sh" ]]; then
++    source "${SCRIPT_DIR}/lib/common.sh"
++else
++    eval "$(curl -fsSL https://raw.githubusercontent.com/OpenRouterTeam/spawn/main/upcloud/lib/common.sh)"
++fi
++
++log_info "Open Interpreter on UpCloud"
++echo ""
++
++ensure_upcloud_credentials
++generate_ssh_key_if_missing "${HOME}/.ssh/id_ed25519"
++
++SERVER_NAME=$(get_server_name)
++create_server "${SERVER_NAME}"
++verify_server_connectivity "${UPCLOUD_SERVER_IP}"
++install_base_tools "${UPCLOUD_SERVER_IP}"
++
++log_warn "Installing Open Interpreter..."
++run_server "${UPCLOUD_SERVER_IP}" "pip install open-interpreter 2>/dev/null || pip3 install open-interpreter"
++log_info "Open Interpreter installed"
++
++echo ""
++if [[ -n "${OPENROUTER_API_KEY:-}" ]]; then
++    log_info "Using OpenRouter API key from environment"
++else
++    OPENROUTER_API_KEY=$(get_openrouter_api_key_oauth 5180)
++fi
++
++log_warn "Setting up environment variables..."
++inject_env_vars_ssh "${UPCLOUD_SERVER_IP}" upload_file run_server \
++    "OPENROUTER_API_KEY=${OPENROUTER_API_KEY}" \
++    "OPENAI_API_KEY=${OPENROUTER_API_KEY}" \
++    "OPENAI_BASE_URL=https://openrouter.ai/api/v1"
++
++echo ""
++log_info "UpCloud server setup completed successfully!"
++log_info "Server: ${SERVER_NAME} (UUID: ${UPCLOUD_SERVER_UUID}, IP: ${UPCLOUD_SERVER_IP})"
++echo ""
++
++log_warn "Starting Open Interpreter..."
++sleep 1
++clear
++interactive_session "${UPCLOUD_SERVER_IP}" "source ~/.zshrc && interpreter"
+diff --git a/upcloud/lib/common.sh b/upcloud/lib/common.sh
+new file mode 100644
+index 000000000..2cda72c82
+--- /dev/null
++++ b/upcloud/lib/common.sh
+@@ -0,0 +1,457 @@
++#!/bin/bash
++set -eo pipefail
++# Common bash functions for UpCloud spawn scripts
++
++# ============================================================
++# Provider-agnostic functions
++# ============================================================
++
++# Source shared provider-agnostic functions (local or remote fallback)
++SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
++if [[ -n "$SCRIPT_DIR" && -f "$SCRIPT_DIR/../../shared/common.sh" ]]; then
++    source "$SCRIPT_DIR/../../shared/common.sh"
++else
++    eval "$(curl -fsSL https://raw.githubusercontent.com/OpenRouterTeam/spawn/main/shared/common.sh)"
++fi
++
++# ============================================================
++# UpCloud specific functions
++# ============================================================
++
++readonly UPCLOUD_API_BASE="https://api.upcloud.com/1.3"
++
++# Configurable timeout/delay constants
++INSTANCE_STATUS_POLL_DELAY=${INSTANCE_STATUS_POLL_DELAY:-5}
++
++# UpCloud API wrapper using Basic Auth
++# Usage: upcloud_api METHOD ENDPOINT [BODY] [MAX_RETRIES]
++upcloud_api() {
++    local method="$1"
++    local endpoint="$2"
++    local body="${3:-}"
++    local max_retries="${4:-3}"
++
++    local attempt=1
++    local interval=2
++    local max_interval=30
++
++    while [[ "${attempt}" -le "${max_retries}" ]]; do
++        local args=(
++            -s
++            -w "\n%{http_code}"
++            -X "${method}"
++            -u "${UPCLOUD_USERNAME}:${UPCLOUD_PASSWORD}"
++            -H "Content-Type: application/json"
++        )
++
++        if [[ -n "${body}" ]]; then
++            args+=(-d "${body}")
++        fi
++
++        local response
++        response=$(curl "${args[@]}" "${UPCLOUD_API_BASE}${endpoint}" 2>&1)
++        local curl_exit_code=$?
++
++        local http_code
++        http_code=$(printf '%s' "${response}" | tail -1)
++        local response_body
++        response_body=$(printf '%s' "${response}" | head -n -1)
++
++        if [[ ${curl_exit_code} -ne 0 ]]; then
++            if [[ "${attempt}" -ge "${max_retries}" ]]; then
++                log_error "UpCloud API network error after ${max_retries} attempts: curl exit code ${curl_exit_code}"
++                return 1
++            fi
++            local next_interval=$((interval * 2))
++            if [[ "${next_interval}" -gt "${max_interval}" ]]; then
++                next_interval="${max_interval}"
++            fi
++            local jitter
++            jitter=$(python3 -c "import random; print(int(${interval} * (0.8 + random.random() * 0.4)))" 2>/dev/null || echo "${interval}")
++            log_warn "UpCloud API network error (attempt ${attempt}/${max_retries}), retrying in ${jitter}s..."
++            sleep "${jitter}"
++            interval="${next_interval}"
++            attempt=$((attempt + 1))
++            continue
++        fi
++
++        if [[ "${http_code}" == "429" ]] || [[ "${http_code}" == "503" ]]; then
++            if [[ "${attempt}" -ge "${max_retries}" ]]; then
++                log_error "UpCloud API returned HTTP ${http_code} after ${max_retries} attempts"
++                echo "${response_body}"
++                return 1
++            fi
++            local next_interval=$((interval * 2))
++            if [[ "${next_interval}" -gt "${max_interval}" ]]; then
++                next_interval="${max_interval}"
++            fi
++            local jitter
++            jitter=$(python3 -c "import random; print(int(${interval} * (0.8 + random.random() * 0.4)))" 2>/dev/null || echo "${interval}")
++            log_warn "UpCloud API returned HTTP ${http_code} (attempt ${attempt}/${max_retries}), retrying in ${jitter}s..."
++            sleep "${jitter}"
++            interval="${next_interval}"
++            attempt=$((attempt + 1))
++            continue
++        fi
++
++        echo "${response_body}"
++        return 0
++    done
++
++    log_error "UpCloud API retry logic exhausted"
++    return 1
++}
++
++test_upcloud_credentials() {
++    local response
++    response=$(upcloud_api GET "/account")
++    if echo "$response" | grep -q '"account"'; then
++        return 0
++    else
++        local error_msg
++        error_msg=$(echo "$response" | python3 -c "import json,sys; d=json.loads(sys.stdin.read()); print(d.get('error',{}).get('error_message','No details available'))" 2>/dev/null || echo "Unable to parse error")
++        log_error "API Error: $error_msg"
++        log_warn "Remediation steps:"
++        log_warn "  1. Verify credentials at: https://hub.upcloud.com/people/account"
++        log_warn "  2. Ensure your sub-account has API access enabled"
++        log_warn "  3. Check username and password are correct"
++        return 1
++    fi
++}
++
++# Ensure UpCloud credentials are available (env var -> config file -> prompt+save)
++ensure_upcloud_credentials() {
++    check_python_available || return 1
++
++    # 1. Check environment variables
++    if [[ -n "${UPCLOUD_USERNAME:-}" ]] && [[ -n "${UPCLOUD_PASSWORD:-}" ]]; then
++        log_info "Using UpCloud credentials from environment"
++        if ! test_upcloud_credentials; then
++            return 1
++        fi
++        return 0
++    fi
++
++    # 2. Check config file
++    local config_file="$HOME/.config/spawn/upcloud.json"
++    if [[ -f "${config_file}" ]]; then
++        local saved_username saved_password
++        saved_username=$(python3 -c "import json; print(json.load(open('${config_file}')).get('username',''))" 2>/dev/null)
++        saved_password=$(python3 -c "import json; print(json.load(open('${config_file}')).get('password',''))" 2>/dev/null)
++        if [[ -n "${saved_username}" ]] && [[ -n "${saved_password}" ]]; then
++            export UPCLOUD_USERNAME="${saved_username}"
++            export UPCLOUD_PASSWORD="${saved_password}"
++            log_info "Using UpCloud credentials from ${config_file}"
++            return 0
++        fi
++    fi
++
++    # 3. Prompt and save
++    echo ""
++    log_warn "UpCloud API Credentials Required"
++    log_warn "Create API credentials at: https://hub.upcloud.com/people/account"
++    echo ""
++
++    local username
++    username=$(safe_read "Enter your UpCloud API username: ") || return 1
++    if [[ -z "${username}" ]]; then
++        log_error "Username is required"
++        return 1
++    fi
++
++    local password
++    password=$(safe_read "Enter your UpCloud API password: ") || return 1
++    if [[ -z "${password}" ]]; then
++        log_error "Password is required"
++        return 1
++    fi
++
++    export UPCLOUD_USERNAME="${username}"
++    export UPCLOUD_PASSWORD="${password}"
++
++    if ! test_upcloud_credentials; then
++        unset UPCLOUD_USERNAME UPCLOUD_PASSWORD
++        return 1
++    fi
++
++    # Save to config file
++    local config_dir
++    config_dir=$(dirname "${config_file}")
++    mkdir -p "${config_dir}"
++    cat > "${config_file}" << EOF
++{
++  "username": "${username}",
++  "password": "${password}"
++}
++EOF
++    chmod 600 "${config_file}"
++    log_info "Credentials saved to ${config_file}"
++}
++
++# Get server name from env var or prompt
++get_server_name() {
++    local server_name
++    server_name=$(get_resource_name "UPCLOUD_SERVER_NAME" "Enter server name: ") || return 1
++
++    if ! validate_server_name "$server_name"; then
++        return 1
++    fi
++
++    echo "$server_name"
++}
++
++# Find Ubuntu 24.04 template UUID
++find_ubuntu_template() {
++    local response
++    response=$(upcloud_api GET "/storage/template")
++
++    local template_uuid
++    template_uuid=$(echo "$response" | python3 -c "
++import json, sys
++data = json.loads(sys.stdin.read())
++storages = data.get('storages', {}).get('storage', [])
++for s in storages:
++    title = s.get('title', '').lower()
++    if 'ubuntu' in title and '24.04' in title:
++        print(s['uuid'])
++        break
++else:
++    # Fallback to any Ubuntu template
++    for s in storages:
++        title = s.get('title', '').lower()
++        if 'ubuntu' in title:
++            print(s['uuid'])
++            break
++" 2>/dev/null)
++
++    if [[ -z "${template_uuid}" ]]; then
++        log_error "Could not find Ubuntu template"
++        return 1
++    fi
++
++    echo "${template_uuid}"
++}
++
++# Create an UpCloud server
++create_server() {
++    local name="$1"
++    local plan="${UPCLOUD_PLAN:-1xCPU-2GB}"
++    local zone="${UPCLOUD_ZONE:-de-fra1}"
++
++    log_warn "Creating UpCloud server '$name' (plan: $plan, zone: $zone)..."
++
++    # Find Ubuntu template
++    local template_uuid
++    template_uuid=$(find_ubuntu_template) || return 1
++    log_info "Using Ubuntu template: $template_uuid"
++
++    # Read SSH public key
++    local key_path="${HOME}/.ssh/id_ed25519.pub"
++    if [[ ! -f "${key_path}" ]]; then
++        log_error "SSH public key not found at ${key_path}"
++        return 1
++    fi
++    local ssh_pub_key
++    ssh_pub_key=$(cat "${key_path}")
++
++    # Build request body
++    local body
++    body=$(python3 -c "
++import json
++ssh_key = '''$ssh_pub_key'''
++body = {
++    'server': {
++        'zone': '$zone',
++        'title': '$name',
++        'hostname': '$name',
++        'plan': '$plan',
++        'storage_devices': {
++            'storage_device': [
++                {
++                    'action': 'clone',
++                    'storage': '$template_uuid',
++                    'title': '$name-os',
++                    'size': 25,
++                    'tier': 'maxiops'
++                }
++            ]
++        },
++        'login_user': {
++            'username': 'root',
++            'create_password': 'no',
++            'ssh_keys': {
++                'ssh_key': [ssh_key.strip()]
++            }
++        }
++    }
++}
++print(json.dumps(body))
++")
++
++    local response
++    response=$(upcloud_api POST "/server" "$body")
++
++    # Check for errors
++    if echo "$response" | grep -q '"error"'; then
++        log_error "Failed to create UpCloud server"
++        local error_msg
++        error_msg=$(echo "$response" | python3 -c "import json,sys; d=json.loads(sys.stdin.read()); print(d.get('error',{}).get('error_message','Unknown error'))" 2>/dev/null || echo "$response")
++        log_error "API Error: $error_msg"
++        log_warn "Common issues:"
++        log_warn "  - Insufficient account balance"
++        log_warn "  - Plan not available in zone (try different UPCLOUD_PLAN or UPCLOUD_ZONE)"
++        log_warn "  - Server limit reached"
++        log_warn "Remediation: Check https://hub.upcloud.com/"
++        return 1
++    fi
++
++    # Extract server UUID and wait for IP
++    UPCLOUD_SERVER_UUID=$(echo "$response" | python3 -c "import json,sys; print(json.loads(sys.stdin.read())['server']['uuid'])")
++    export UPCLOUD_SERVER_UUID
++
++    log_info "Server created: UUID=$UPCLOUD_SERVER_UUID"
++
++    # Wait for server to become started and get IP
++    log_warn "Waiting for server to become active..."
++    local max_attempts=60
++    local attempt=1
++    while [[ "$attempt" -le "$max_attempts" ]]; do
++        local status_response
++        status_response=$(upcloud_api GET "/server/$UPCLOUD_SERVER_UUID")
++        local status
++        status=$(echo "$status_response" | python3 -c "import json,sys; print(json.loads(sys.stdin.read())['server']['state'])" 2>/dev/null || echo "unknown")
++
++        if [[ "$status" == "started" ]]; then
++            UPCLOUD_SERVER_IP=$(echo "$status_response" | python3 -c "
++import json, sys
++data = json.loads(sys.stdin.read())
++for iface in data['server'].get('ip_addresses', {}).get('ip_address', []):
++    if iface.get('access') == 'public' and iface.get('family') == 'IPv4':
++        print(iface['address'])
++        break
++" 2>/dev/null)
++            export UPCLOUD_SERVER_IP
++
++            if [[ -n "${UPCLOUD_SERVER_IP}" ]]; then
++                log_info "Server active: IP=$UPCLOUD_SERVER_IP"
++                return 0
++            fi
++        fi
++
++        log_warn "Server status: $status ($attempt/$max_attempts)"
++        sleep "${INSTANCE_STATUS_POLL_DELAY}"
++        attempt=$((attempt + 1))
++    done
++
++    log_error "Server did not become active in time"
++    return 1
++}
++
++# Wait for SSH connectivity
++verify_server_connectivity() {
++    local ip="$1"
++    local max_attempts=${2:-30}
++    generic_ssh_wait "root" "$ip" "$SSH_OPTS -o ConnectTimeout=5" "echo ok" "SSH connectivity" "$max_attempts" 5
++}
++
++# Run a command on the server
++run_server() {
++    local ip="$1"
++    local cmd="$2"
++    # shellcheck disable=SC2086
++    ssh $SSH_OPTS "root@$ip" "$cmd"
++}
++
++# Upload a file to the server
++upload_file() {
++    local ip="$1"
++    local local_path="$2"
++    local remote_path="$3"
++    # shellcheck disable=SC2086
++    scp $SSH_OPTS "$local_path" "root@$ip:$remote_path"
++}
++
++# Start an interactive SSH session
++interactive_session() {
++    local ip="$1"
++    local cmd="$2"
++    # shellcheck disable=SC2086
++    ssh -t $SSH_OPTS "root@$ip" "$cmd"
++}
++
++# Destroy an UpCloud server
++destroy_server() {
++    local server_uuid="$1"
++
++    log_warn "Stopping server $server_uuid..."
++    upcloud_api POST "/server/$server_uuid/stop" '{"stop_server":{"stop_type":"soft","timeout":"60"}}' >/dev/null 2>&1 || true
++
++    # Wait for server to stop
++    local max_attempts=30
++    local attempt=1
++    while [[ "$attempt" -le "$max_attempts" ]]; do
++        local status_response
++        status_response=$(upcloud_api GET "/server/$server_uuid")
++        local status
++        status=$(echo "$status_response" | python3 -c "import json,sys; print(json.loads(sys.stdin.read())['server']['state'])" 2>/dev/null || echo "unknown")
++        if [[ "$status" == "stopped" ]]; then
++            break
++        fi
++        sleep 2
++        attempt=$((attempt + 1))
++    done
++
++    log_warn "Destroying server $server_uuid..."
++    local response
++    response=$(upcloud_api DELETE "/server/$server_uuid?storages=1")
++
++    if echo "$response" | grep -q '"error"'; then
++        log_error "Failed to destroy server: $response"
++        return 1
++    fi
++
++    log_info "Server $server_uuid destroyed"
++}
++
++# List all UpCloud servers
++list_servers() {
++    local response
++    response=$(upcloud_api GET "/server")
++
++    python3 -c "
++import json, sys
++data = json.loads(sys.stdin.read())
++servers = data.get('servers', {}).get('server', [])
++if not servers:
++    print('No servers found')
++    sys.exit(0)
++print(f\"{'TITLE':<25} {'UUID':<40} {'STATE':<12} {'ZONE':<12}\")
++print('-' * 89)
++for s in servers:
++    title = s.get('title', 'N/A')
++    uuid = s.get('uuid', 'N/A')
++    state = s.get('state', 'N/A')
++    zone = s.get('zone', 'N/A')
++    print(f'{title:<25} {uuid:<40} {state:<12} {zone:<12}')
++" <<< "$response"
++}
++
++# Install base tools on server (cloud-init equivalent for UpCloud)
++install_base_tools() {
++    local ip="$1"
++
++    log_warn "Installing base tools..."
++    run_server "$ip" "apt-get update -qq && apt-get install -y -qq curl unzip git zsh python3 > /dev/null 2>&1"
++
++    log_warn "Installing Bun..."
++    run_server "$ip" "curl -fsSL https://bun.sh/install | bash"
++
++    log_warn "Installing Node.js..."
++    run_server "$ip" "curl -fsSL https://deb.nodesource.com/setup_22.x | bash - > /dev/null 2>&1 && apt-get install -y -qq nodejs > /dev/null 2>&1"
++
++    # Configure PATH
++    run_server "$ip" "printf '%s\n' 'export PATH=\"\${HOME}/.bun/bin:\${HOME}/.claude/local/bin:\${PATH}\"' >> /root/.bashrc"
++    run_server "$ip" "printf '%s\n' 'export PATH=\"\${HOME}/.bun/bin:\${HOME}/.claude/local/bin:\${PATH}\"' >> /root/.zshrc"
++
++    log_info "Base tools installed"
++}
+diff --git a/upcloud/nanoclaw.sh b/upcloud/nanoclaw.sh
+new file mode 100644
+index 000000000..8943ffdae
+--- /dev/null
++++ b/upcloud/nanoclaw.sh
+@@ -0,0 +1,60 @@
++#!/bin/bash
++set -eo pipefail
++
++SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
++if [[ -f "${SCRIPT_DIR}/lib/common.sh" ]]; then
++    source "${SCRIPT_DIR}/lib/common.sh"
++else
++    eval "$(curl -fsSL https://raw.githubusercontent.com/OpenRouterTeam/spawn/main/upcloud/lib/common.sh)"
++fi
++
++log_info "NanoClaw on UpCloud"
++echo ""
++
++ensure_upcloud_credentials
++generate_ssh_key_if_missing "${HOME}/.ssh/id_ed25519"
++
++SERVER_NAME=$(get_server_name)
++create_server "${SERVER_NAME}"
++verify_server_connectivity "${UPCLOUD_SERVER_IP}"
++install_base_tools "${UPCLOUD_SERVER_IP}"
++
++log_warn "Installing tsx..."
++run_server "${UPCLOUD_SERVER_IP}" "source ~/.bashrc && bun install -g tsx"
++
++log_warn "Cloning and building nanoclaw..."
++run_server "${UPCLOUD_SERVER_IP}" "git clone https://github.com/gavrielc/nanoclaw.git ~/nanoclaw && cd ~/nanoclaw && npm install && npm run build"
++log_info "NanoClaw installed"
++
++echo ""
++if [[ -n "${OPENROUTER_API_KEY:-}" ]]; then
++    log_info "Using OpenRouter API key from environment"
++else
++    OPENROUTER_API_KEY=$(get_openrouter_api_key_oauth 5180)
++fi
++
++log_warn "Setting up environment variables..."
++inject_env_vars_ssh "${UPCLOUD_SERVER_IP}" upload_file run_server \
++    "OPENROUTER_API_KEY=${OPENROUTER_API_KEY}" \
++    "ANTHROPIC_API_KEY=${OPENROUTER_API_KEY}" \
++    "ANTHROPIC_BASE_URL=https://openrouter.ai/api"
++
++log_warn "Configuring nanoclaw..."
++DOTENV_TEMP=$(mktemp)
++trap 'rm -f "${DOTENV_TEMP}"' EXIT
++chmod 600 "${DOTENV_TEMP}"
++cat > "${DOTENV_TEMP}" << EOF
++ANTHROPIC_API_KEY=${OPENROUTER_API_KEY}
++EOF
++
++upload_file "${UPCLOUD_SERVER_IP}" "${DOTENV_TEMP}" "/root/nanoclaw/.env"
++
++echo ""
++log_info "UpCloud server setup completed successfully!"
++log_info "Server: ${SERVER_NAME} (UUID: ${UPCLOUD_SERVER_UUID}, IP: ${UPCLOUD_SERVER_IP})"
++echo ""
++
++log_warn "Starting nanoclaw..."
++log_warn "You will need to scan a WhatsApp QR code to authenticate."
++echo ""
++interactive_session "${UPCLOUD_SERVER_IP}" "cd ~/nanoclaw && source ~/.zshrc && npm run dev"
+diff --git a/upcloud/openclaw.sh b/upcloud/openclaw.sh
+new file mode 100644
+index 000000000..dce71f5f9
+--- /dev/null
++++ b/upcloud/openclaw.sh
+@@ -0,0 +1,53 @@
++#!/bin/bash
++set -eo pipefail
++
++SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
++if [[ -f "${SCRIPT_DIR}/lib/common.sh" ]]; then
++    source "${SCRIPT_DIR}/lib/common.sh"
++else
++    eval "$(curl -fsSL https://raw.githubusercontent.com/OpenRouterTeam/spawn/main/upcloud/lib/common.sh)"
++fi
++
++log_info "OpenClaw on UpCloud"
++echo ""
++
++ensure_upcloud_credentials
++generate_ssh_key_if_missing "${HOME}/.ssh/id_ed25519"
++
++SERVER_NAME=$(get_server_name)
++create_server "${SERVER_NAME}"
++verify_server_connectivity "${UPCLOUD_SERVER_IP}"
++install_base_tools "${UPCLOUD_SERVER_IP}"
++
++log_warn "Installing openclaw..."
++run_server "${UPCLOUD_SERVER_IP}" "source ~/.bashrc && bun install -g openclaw"
++log_info "OpenClaw installed"
++
++echo ""
++if [[ -n "${OPENROUTER_API_KEY:-}" ]]; then
++    log_info "Using OpenRouter API key from environment"
++else
++    OPENROUTER_API_KEY=$(get_openrouter_api_key_oauth 5180)
++fi
++
++MODEL_ID=$(get_model_id_interactive "openrouter/auto" "Openclaw") || exit 1
++
++log_warn "Setting up environment variables..."
++inject_env_vars_ssh "${UPCLOUD_SERVER_IP}" upload_file run_server \
++    "OPENROUTER_API_KEY=${OPENROUTER_API_KEY}" \
++    "ANTHROPIC_API_KEY=${OPENROUTER_API_KEY}" \
++    "ANTHROPIC_BASE_URL=https://openrouter.ai/api"
++
++setup_openclaw_config "${OPENROUTER_API_KEY}" "${MODEL_ID}" \
++    "upload_file ${UPCLOUD_SERVER_IP}" \
++    "run_server ${UPCLOUD_SERVER_IP}"
++
++echo ""
++log_info "UpCloud server setup completed successfully!"
++log_info "Server: ${SERVER_NAME} (UUID: ${UPCLOUD_SERVER_UUID}, IP: ${UPCLOUD_SERVER_IP})"
++echo ""
++
++log_warn "Starting openclaw..."
++run_server "${UPCLOUD_SERVER_IP}" "source ~/.zshrc && nohup openclaw gateway > /tmp/openclaw-gateway.log 2>&1 &"
++sleep 2
++interactive_session "${UPCLOUD_SERVER_IP}" "source ~/.zshrc && openclaw tui"
+diff --git a/upcloud/opencode.sh b/upcloud/opencode.sh
+new file mode 100644
+index 000000000..04863ac8c
+--- /dev/null
++++ b/upcloud/opencode.sh
+@@ -0,0 +1,45 @@
++#!/bin/bash
++set -eo pipefail
++
++SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
++if [[ -f "${SCRIPT_DIR}/lib/common.sh" ]]; then
++    source "${SCRIPT_DIR}/lib/common.sh"
++else
++    eval "$(curl -fsSL https://raw.githubusercontent.com/OpenRouterTeam/spawn/main/upcloud/lib/common.sh)"
++fi
++
++log_info "OpenCode on UpCloud"
++echo ""
++
++ensure_upcloud_credentials
++generate_ssh_key_if_missing "${HOME}/.ssh/id_ed25519"
++
++SERVER_NAME=$(get_server_name)
++create_server "${SERVER_NAME}"
++verify_server_connectivity "${UPCLOUD_SERVER_IP}"
++install_base_tools "${UPCLOUD_SERVER_IP}"
++
++log_warn "Installing OpenCode..."
++run_server "${UPCLOUD_SERVER_IP}" "curl -fsSL https://raw.githubusercontent.com/opencode-ai/opencode/refs/heads/main/install | bash"
++log_info "OpenCode installed"
++
++echo ""
++if [[ -n "${OPENROUTER_API_KEY:-}" ]]; then
++    log_info "Using OpenRouter API key from environment"
++else
++    OPENROUTER_API_KEY=$(get_openrouter_api_key_oauth 5180)
++fi
++
++log_warn "Setting up environment variables..."
++inject_env_vars_ssh "${UPCLOUD_SERVER_IP}" upload_file run_server \
++    "OPENROUTER_API_KEY=${OPENROUTER_API_KEY}"
++
++echo ""
++log_info "UpCloud server setup completed successfully!"
++log_info "Server: ${SERVER_NAME} (UUID: ${UPCLOUD_SERVER_UUID}, IP: ${UPCLOUD_SERVER_IP})"
++echo ""
++
++log_warn "Starting OpenCode..."
++sleep 1
++clear
++interactive_session "${UPCLOUD_SERVER_IP}" "source ~/.zshrc && opencode"
+diff --git a/upcloud/plandex.sh b/upcloud/plandex.sh
+new file mode 100644
+index 000000000..543e88e65
+--- /dev/null
++++ b/upcloud/plandex.sh
+@@ -0,0 +1,50 @@
++#!/bin/bash
++set -eo pipefail
++
++SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
++if [[ -f "${SCRIPT_DIR}/lib/common.sh" ]]; then
++    source "${SCRIPT_DIR}/lib/common.sh"
++else
++    eval "$(curl -fsSL https://raw.githubusercontent.com/OpenRouterTeam/spawn/main/upcloud/lib/common.sh)"
++fi
++
++log_info "Plandex on UpCloud"
++echo ""
++
++ensure_upcloud_credentials
++generate_ssh_key_if_missing "${HOME}/.ssh/id_ed25519"
++
++SERVER_NAME=$(get_server_name)
++create_server "${SERVER_NAME}"
++verify_server_connectivity "${UPCLOUD_SERVER_IP}"
++install_base_tools "${UPCLOUD_SERVER_IP}"
++
++log_warn "Installing Plandex..."
++run_server "${UPCLOUD_SERVER_IP}" "curl -sL https://plandex.ai/install.sh | bash"
++
++if ! run_server "${UPCLOUD_SERVER_IP}" "command -v plandex &> /dev/null && plandex version &> /dev/null"; then
++    log_error "Plandex installation verification failed"
++    exit 1
++fi
++log_info "Plandex installation verified successfully"
++
++echo ""
++if [[ -n "${OPENROUTER_API_KEY:-}" ]]; then
++    log_info "Using OpenRouter API key from environment"
++else
++    OPENROUTER_API_KEY=$(get_openrouter_api_key_oauth 5180)
++fi
++
++log_warn "Setting up environment variables..."
++inject_env_vars_ssh "${UPCLOUD_SERVER_IP}" upload_file run_server \
++    "OPENROUTER_API_KEY=${OPENROUTER_API_KEY}"
++
++echo ""
++log_info "UpCloud server setup completed successfully!"
++log_info "Server: ${SERVER_NAME} (UUID: ${UPCLOUD_SERVER_UUID}, IP: ${UPCLOUD_SERVER_IP})"
++echo ""
++
++log_warn "Starting Plandex..."
++sleep 1
++clear
++interactive_session "${UPCLOUD_SERVER_IP}" "source ~/.zshrc && plandex"

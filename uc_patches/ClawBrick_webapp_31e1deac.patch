@@ -1,0 +1,1496 @@
+From 31e1deacb2a341c9addf8b1bd1ef6934606a3498 Mon Sep 17 00:00:00 2001
+From: Shachindra <shachindra.spidey@gmail.com>
+Date: Mon, 2 Mar 2026 22:36:29 +0400
+Subject: [PATCH] feat: switch to UpCloud infra, add SNS + SOL balance to
+ wallet popup & profile
+
+- Terraform: replace Vultr provider with UpCloudLtd/upcloud ~> 5.0
+  - Update main.tf: upcloud_server, upcloud_firewall_rules, login block
+  - Update variables.tf: upcloud_username, upcloud_password, zone, plan
+- API/app: replace all VULTR_API_KEY refs with UPCLOUD_USERNAME/PASSWORD
+  - Update .env.example, launch/route.ts, agents/route.ts, [id]/route.ts
+  - Update deploy page to use UPCLOUD_ZONES with correct zone IDs
+- lib/supabase.ts: VULTR_REGIONS -> UPCLOUD_ZONES with UpCloud zone IDs
+- lib/terraform/provisioner.ts: update TerraformVars + tfvars template
+- lib/solana.ts: add getSNSDomain() via Helius DAS searchAssets (no extra pkg)
+- components/UserMenu.tsx: show SNS badge + address, live SOL balance w/ loading state
+- components/Navbar.tsx: fetch SNS + balance in parallel on auth, persist to localStorage
+- app/profile/page.tsx: hydrate SNS from cache, fetch fresh if missing, show SNS badge
+- app/manifesto/page.tsx: 100K USD reward announcement + email register modal
+---
+ .env.example                    |   5 +-
+ app/agents/deploy/page.tsx      |   6 +-
+ app/api/agents/[id]/route.ts    |  10 +-
+ app/api/agents/launch/route.ts  |  19 +--
+ app/api/agents/route.ts         |   2 +-
+ app/manifesto/page.tsx          | 172 ++++++++++++++++++++++++++-
+ app/profile/page.tsx            |  66 +++++++++--
+ components/Navbar.tsx           |  42 ++++---
+ components/UserMenu.tsx         |  78 ++++++++++---
+ lib/solana.ts                   |  63 +++++++++-
+ lib/supabase.ts                 |  25 ++--
+ lib/terraform/provisioner.ts    |  18 +--
+ manifesto.md                    | 200 ++++++++++++++++++++++++++++++++
+ terraform/openclaw/main.tf      | 174 +++++++++++++++------------
+ terraform/openclaw/variables.tf |  28 +++--
+ 15 files changed, 739 insertions(+), 169 deletions(-)
+ create mode 100644 manifesto.md
+
+diff --git a/.env.example b/.env.example
+index 3705b3a..0ce590e 100644
+--- a/.env.example
++++ b/.env.example
+@@ -9,8 +9,9 @@ NEXT_PUBLIC_REOWN_PROJECT_ID=your_reown_project_id
+ # Solana RPC Configuration (Helius recommended for production)
+ NEXT_PUBLIC_HELIUS_RPC_URL=https://mainnet.helius-rpc.com/?api-key=your_helius_api_key
+ 
+-# Vultr Configuration (for OpenClaw VM provisioning)
+-VULTR_API_KEY=your_vultr_api_key
++# UpCloud Configuration (for OpenClaw VM provisioning)
++UPCLOUD_USERNAME=your_upcloud_username
++UPCLOUD_PASSWORD=your_upcloud_password
+ 
+ # Encryption Key (32-byte hex for encrypting sensitive tokens)
+ ENCRYPTION_KEY=your_32_byte_hex_key
+diff --git a/app/agents/deploy/page.tsx b/app/agents/deploy/page.tsx
+index aa1c8c5..c05ba2c 100644
+--- a/app/agents/deploy/page.tsx
++++ b/app/agents/deploy/page.tsx
+@@ -24,7 +24,7 @@ import {
+     ClaySelect,
+ } from "@/components/ui/ClayCard";
+ import { AuthGuard } from "@/components/AuthGuard";
+-import { LLM_PROVIDERS, VULTR_REGIONS } from "@/lib/supabase";
++import { LLM_PROVIDERS, UPCLOUD_ZONES } from "@/lib/supabase";
+ 
+ interface DeployResult {
+     success: boolean;
+@@ -54,7 +54,7 @@ export default function DeployAgentPage() {
+     const [llmModel, setLlmModel] = useState<string>("claude-3-5-sonnet-20241022");
+     const [telegramBotToken, setTelegramBotToken] = useState("");
+     const [apiKey, setApiKey] = useState("");
+-    const [deployRegion, setDeployRegion] = useState("bom");
++    const [deployRegion, setDeployRegion] = useState("sg-sin1");
+ 
+     useEffect(() => {
+         setMounted(true);
+@@ -366,7 +366,7 @@ export default function DeployAgentPage() {
+                                             value={deployRegion}
+                                             onChange={(e) => setDeployRegion(e.target.value)}
+                                         >
+-                                            {VULTR_REGIONS.map((region) => (
++                                            {UPCLOUD_ZONES.map((region) => (
+                                                 <option key={region.value} value={region.value}>
+                                                     {region.label}
+                                                 </option>
+diff --git a/app/api/agents/[id]/route.ts b/app/api/agents/[id]/route.ts
+index 9ed7859..194bdec 100644
+--- a/app/api/agents/[id]/route.ts
++++ b/app/api/agents/[id]/route.ts
+@@ -61,10 +61,10 @@ export async function DELETE(
+ 
+         const supabase = createServerSupabaseClient();
+ 
+-        // Get agent to check Vultr instance
++        // Get agent to check UpCloud instance
+         const { data: agent, error: fetchError } = await supabase
+             .from("agents")
+-            .select("vultr_instance_id, status")
++            .select("upcloud_instance_id, status")
+             .eq("id", id)
+             .single();
+ 
+@@ -78,9 +78,9 @@ export async function DELETE(
+ 
+         // TODO: Trigger Terraform destroy for the VM
+         // For now, just update status
+-        if (agent.vultr_instance_id) {
+-            // In production: run terraform destroy or call Vultr API directly
+-            console.log(`Would destroy Vultr instance: ${agent.vultr_instance_id}`);
++        if (agent.upcloud_instance_id) {
++            // In production: run terraform destroy or call UpCloud API directly
++            console.log(`Would destroy UpCloud instance: ${agent.upcloud_instance_id}`);
+         }
+ 
+         // Update agent status
+diff --git a/app/api/agents/launch/route.ts b/app/api/agents/launch/route.ts
+index b188afc..fc03b72 100644
+--- a/app/api/agents/launch/route.ts
++++ b/app/api/agents/launch/route.ts
+@@ -28,7 +28,7 @@ export async function POST(request: NextRequest) {
+             llmModel,
+             telegramBotToken,
+             apiKey,
+-            deployRegion = "bom",
++            deployRegion = "sg-sin1",
+         } = body;
+ 
+         // Validation
+@@ -46,13 +46,14 @@ export async function POST(request: NextRequest) {
+         }
+ 
+         // Check required environment variables
+-        const vultrApiKey = process.env.VULTR_API_KEY;
++        const upcloudUsername = process.env.UPCLOUD_USERNAME;
++        const upcloudPassword = process.env.UPCLOUD_PASSWORD;
+         const controlServerIp = process.env.CONTROL_SERVER_IP;
+         const domain = process.env.CLAWBRICK_DOMAIN || "clawbrick.com";
+         const adminEmail = process.env.ADMIN_EMAIL || "support@clawbrick.com";
+ 
+-        if (!vultrApiKey) {
+-            return NextResponse.json({ error: "VULTR_API_KEY not configured" }, { status: 500 });
++        if (!upcloudUsername || !upcloudPassword) {
++            return NextResponse.json({ error: "UPCLOUD_USERNAME / UPCLOUD_PASSWORD not configured" }, { status: 500 });
+         }
+         if (!controlServerIp) {
+             return NextResponse.json({ error: "CONTROL_SERVER_IP not configured" }, { status: 500 });
+@@ -99,7 +100,8 @@ export async function POST(request: NextRequest) {
+         // We don't await this - it runs asynchronously
+         const agentRecord = agent as Agent;
+         provisionAgentAsync(agentRecord.id, {
+-            vultr_api_key: vultrApiKey,
++            upcloud_username: upcloudUsername,
++            upcloud_password: upcloudPassword,
+             user_id: userId,
+             agent_id: agentRecord.id,
+             llm_provider: llmProvider,
+@@ -111,7 +113,7 @@ export async function POST(request: NextRequest) {
+             domain,
+             admin_email: adminEmail,
+             control_server_ip: controlServerIp,
+-            vultr_region: deployRegion,
++            upcloud_zone: deployRegion,
+         });
+ 
+         return NextResponse.json({
+@@ -142,7 +144,8 @@ export async function POST(request: NextRequest) {
+  * This runs in the background and updates the agent record with progress
+  */
+ async function provisionAgentAsync(agentId: string, vars: {
+-    vultr_api_key: string;
++    upcloud_username: string;
++    upcloud_password: string;
+     user_id: string;
+     agent_id: string;
+     llm_provider: string;
+@@ -154,7 +157,7 @@ async function provisionAgentAsync(agentId: string, vars: {
+     domain: string;
+     admin_email: string;
+     control_server_ip: string;
+-    vultr_region?: string;
++    upcloud_zone?: string;
+ }) {
+     const supabase = createServerSupabaseClient();
+ 
+diff --git a/app/api/agents/route.ts b/app/api/agents/route.ts
+index 1f31a73..dd15956 100644
+--- a/app/api/agents/route.ts
++++ b/app/api/agents/route.ts
+@@ -20,7 +20,7 @@ export async function GET(request: NextRequest) {
+         name,
+         description,
+         status,
+-        vultr_instance_id,
++        upcloud_instance_id,
+         main_ip,
+         subdomain,
+         deploy_region,
+diff --git a/app/manifesto/page.tsx b/app/manifesto/page.tsx
+index d1cf33a..8479bfc 100644
+--- a/app/manifesto/page.tsx
++++ b/app/manifesto/page.tsx
+@@ -1,5 +1,7 @@
+ "use client";
+ 
++import { useState } from "react";
++
+ import { motion } from "framer-motion";
+ import Link from "next/link";
+ import {
+@@ -27,6 +29,19 @@ import {
+ import { ClayCard, ClayButton } from "@/components/ui/ClayCard";
+ 
+ export default function ManifestoPage() {
++  const [showForm, setShowForm] = useState(false);
++  const [email, setEmail] = useState("");
++  const [submitted, setSubmitted] = useState(false);
++  const [submitting, setSubmitting] = useState(false);
++
++  const handleRegister = async (e: React.FormEvent) => {
++    e.preventDefault();
++    setSubmitting(true);
++    // Simulate async submission
++    await new Promise((r) => setTimeout(r, 800));
++    setSubmitting(false);
++    setSubmitted(true);
++  };
+   const governanceFeatures = [
+     {
+       icon: Scale,
+@@ -765,12 +780,48 @@ export default function ManifestoPage() {
+           <h2 className="text-3xl sm:text-4xl lg:text-5xl font-bold mb-6 text-[var(--clay-text-primary)]">
+             Join the <span className="gradient-text">Revolution</span>
+           </h2>
+-          <p className="text-[var(--clay-text-tertiary)] text-lg mb-10 max-w-2xl mx-auto">
++          <p className="text-[var(--clay-text-tertiary)] text-lg mb-8 max-w-2xl mx-auto">
+             The post-human economy is not coming, it is already here. Be among
+             the first to build on the infrastructure that will power the future
+             of autonomous intelligence.
+           </p>
+-          <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
++
++          {/* $100K Reward Announcement */}
++          <motion.div
++            initial={{ opacity: 0, scale: 0.95 }}
++            whileInView={{ opacity: 1, scale: 1 }}
++            viewport={{ once: true }}
++            transition={{ duration: 0.6, delay: 0.2 }}
++            className="mb-10"
++          >
++            <div className="inline-block relative">
++              {/* Glow ring */}
++              <div className="absolute -inset-[2px] rounded-3xl bg-gradient-to-r from-[var(--clay-accent-primary)] via-amber-400 to-[var(--clay-accent-indigo)] opacity-70 blur-sm" />
++              <div className="relative rounded-3xl bg-[var(--clay-surface)] px-8 py-7 shadow-[var(--shadow-clay-floating)] max-w-2xl mx-auto">
++                <div className="flex items-center justify-center gap-3 mb-3">
++                  <Sparkles className="w-6 h-6 text-amber-400" />
++                  <span className="text-xs font-bold uppercase tracking-widest text-amber-400">
++                    Builder Reward
++                  </span>
++                  <Sparkles className="w-6 h-6 text-amber-400" />
++                </div>
++                <p className="text-3xl sm:text-4xl font-extrabold gradient-text-animated mb-3">
++                  $100,000 USD
++                </p>
++                <p className="text-[var(--clay-text-secondary)] text-base leading-relaxed max-w-lg mx-auto">
++                  We are putting up a{" "}
++                  <span className="text-[var(--clay-accent-primary)] font-semibold">
++                    $100K USD reward
++                  </span>{" "}
++                  for builders and projects that help shape this post-human
++                  economy future. Developers, founders, researchers — bring your
++                  vision to life on ClawBrick and compete for the prize.
++                </p>
++              </div>
++            </div>
++          </motion.div>
++
++          <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-6">
+             <Link href="/agents">
+               <ClayButton
+                 variant="primary"
+@@ -780,6 +831,13 @@ export default function ManifestoPage() {
+                 <ArrowRight className="w-5 h-5" />
+               </ClayButton>
+             </Link>
++            <ClayButton
++              variant="default"
++              className="text-[var(--clay-text-secondary)] px-8 py-4 font-semibold"
++              onClick={() => { setShowForm(true); setSubmitted(false); setEmail(""); }}
++            >
++              Register Interest
++            </ClayButton>
+             <a
+               href="https://docs.clawbrick.xyz"
+               target="_blank"
+@@ -794,6 +852,116 @@ export default function ManifestoPage() {
+             </a>
+           </div>
+         </motion.div>
++
++        {/* Registration Modal */}
++        {showForm && (
++          <motion.div
++            initial={{ opacity: 0 }}
++            animate={{ opacity: 1 }}
++            exit={{ opacity: 0 }}
++            className="fixed inset-0 z-50 flex items-center justify-center p-4"
++            style={{ background: "rgba(0,0,0,0.6)", backdropFilter: "blur(8px)" }}
++            onClick={(e) => { if (e.target === e.currentTarget) setShowForm(false); }}
++          >
++            <motion.div
++              initial={{ opacity: 0, scale: 0.9, y: 20 }}
++              animate={{ opacity: 1, scale: 1, y: 0 }}
++              transition={{ duration: 0.35, ease: "easeOut" }}
++              className="relative w-full max-w-md rounded-3xl bg-[var(--clay-surface)] shadow-[var(--shadow-clay-floating)] p-8"
++            >
++              {/* Close button */}
++              <button
++                onClick={() => setShowForm(false)}
++                className="absolute top-4 right-4 w-8 h-8 rounded-full bg-[var(--clay-bg)] flex items-center justify-center text-[var(--clay-text-tertiary)] hover:text-[var(--clay-accent-primary)] transition-colors"
++                aria-label="Close"
++              >
++                ✕
++              </button>
++
++              {submitted ? (
++                <motion.div
++                  initial={{ opacity: 0, y: 10 }}
++                  animate={{ opacity: 1, y: 0 }}
++                  className="text-center py-6"
++                >
++                  <div className="w-16 h-16 rounded-full bg-gradient-to-br from-[var(--clay-accent-primary)] to-amber-400 flex items-center justify-center mx-auto mb-5 shadow-lg">
++                    <Sparkles className="w-8 h-8 text-white" />
++                  </div>
++                  <h3 className="text-2xl font-bold text-[var(--clay-text-primary)] mb-2">
++                    You&apos;re in! 🎉
++                  </h3>
++                  <p className="text-[var(--clay-text-tertiary)] leading-relaxed">
++                    Thanks for registering your interest in the{" "}
++                    <span className="text-[var(--clay-accent-primary)] font-semibold">
++                      $100K Builder Reward
++                    </span>
++                    . We&apos;ll be in touch at{" "}
++                    <span className="font-semibold text-[var(--clay-text-secondary)]">{email}</span>{" "}
++                    with everything you need to get started.
++                  </p>
++                  <button
++                    onClick={() => setShowForm(false)}
++                    className="mt-6 px-6 py-2 rounded-xl bg-gradient-to-r from-[var(--clay-accent-primary)] to-amber-400 text-white font-semibold hover:opacity-90 transition-opacity"
++                  >
++                    Close
++                  </button>
++                </motion.div>
++              ) : (
++                <>
++                  <div className="mb-6 text-center">
++                    <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-amber-400/10 text-amber-400 text-sm font-semibold mb-4">
++                      <Sparkles className="w-4 h-4" />
++                      $100K Builder Reward
++                    </div>
++                    <h3 className="text-2xl font-bold text-[var(--clay-text-primary)] mb-2">
++                      Register Your Interest
++                    </h3>
++                    <p className="text-[var(--clay-text-tertiary)] text-sm">
++                      Enter your email and we&apos;ll keep you updated on how to
++                      participate and shape the post-human economy.
++                    </p>
++                  </div>
++                  <form onSubmit={handleRegister} className="space-y-4">
++                    <div>
++                      <label
++                        htmlFor="reward-email"
++                        className="block text-sm font-medium text-[var(--clay-text-secondary)] mb-2"
++                      >
++                        Email Address
++                      </label>
++                      <input
++                        id="reward-email"
++                        type="email"
++                        required
++                        value={email}
++                        onChange={(e) => setEmail(e.target.value)}
++                        placeholder="you@example.com"
++                        className="w-full px-4 py-3 rounded-xl bg-[var(--clay-bg)] border border-[var(--clay-border)] text-[var(--clay-text-primary)] placeholder-[var(--clay-text-tertiary)] focus:outline-none focus:border-[var(--clay-accent-primary)] transition-colors text-sm"
++                      />
++                    </div>
++                    <button
++                      type="submit"
++                      disabled={submitting}
++                      className="w-full py-3 rounded-xl bg-gradient-to-r from-[var(--clay-accent-primary)] to-amber-400 text-white font-semibold hover:opacity-90 active:scale-95 transition-all disabled:opacity-60 flex items-center justify-center gap-2"
++                    >
++                      {submitting ? (
++                        <svg className="animate-spin w-5 h-5" fill="none" viewBox="0 0 24 24">
++                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
++                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
++                        </svg>
++                      ) : (
++                        <>
++                          Register Now
++                          <ArrowRight className="w-4 h-4" />
++                        </>
++                      )}
++                    </button>
++                  </form>
++                </>
++              )}
++            </motion.div>
++          </motion.div>
++        )}
+       </div>
+     </div>
+   );
+diff --git a/app/profile/page.tsx b/app/profile/page.tsx
+index 02c878a..9c6ecb3 100644
+--- a/app/profile/page.tsx
++++ b/app/profile/page.tsx
+@@ -14,6 +14,7 @@ import {
+   Key,
+   Activity,
+   Sparkles,
++  AtSign,
+ } from "lucide-react";
+ import Link from "next/link";
+ import { ClayCard, ClayButton } from "@/components/ui/ClayCard";
+@@ -23,13 +24,16 @@ import {
+   getRecentTransactions,
+   getSolscanUrl,
+   formatAddress,
++  getSNSDomain,
+ } from "@/lib/solana";
+ 
+ export default function ProfilePage() {
+   const [mounted, setMounted] = useState(false);
+   const [address, setAddress] = useState<string | null>(null);
++  const [snsName, setSnsName] = useState<string | null>(null);
+   const [balance, setBalance] = useState<string>("-- SOL");
+   const [isLoadingBalance, setIsLoadingBalance] = useState(false);
++  const [isLoadingSns, setIsLoadingSns] = useState(false);
+   const [balanceError, setBalanceError] = useState<string | null>(null);
+   const [transactions, setTransactions] = useState<
+     Array<{ signature: string; blockTime: number }>
+@@ -40,12 +44,12 @@ export default function ProfilePage() {
+     setMounted(true);
+     const savedAddress = localStorage.getItem("wallet_address");
+     const savedBalance = localStorage.getItem("wallet_balance");
++    const savedSns = localStorage.getItem("wallet_sns");
+ 
+     if (savedAddress) {
+       setAddress(savedAddress);
+-      if (savedBalance) {
+-        setBalance(savedBalance);
+-      }
++      if (savedBalance) setBalance(savedBalance);
++      if (savedSns) setSnsName(savedSns);
+     }
+   }, []);
+ 
+@@ -79,6 +83,18 @@ export default function ProfilePage() {
+     if (address) {
+       fetchBalance();
+       fetchTransactions();
++      // Fresh SNS lookup (skip if already cached from navbar session)
++      const cached = localStorage.getItem("wallet_sns");
++      if (!cached) {
++        setIsLoadingSns(true);
++        getSNSDomain(address)
++          .then((name) => {
++            setSnsName(name);
++            if (name) localStorage.setItem("wallet_sns", name);
++          })
++          .catch(() => { })
++          .finally(() => setIsLoadingSns(false));
++      }
+     }
+   }, [address, fetchBalance, fetchTransactions]);
+ 
+@@ -133,17 +149,49 @@ export default function ProfilePage() {
+               className="lg:col-span-2"
+             >
+               <ClayCard className="p-6 sm:p-8">
+-                {/* Avatar and Address */}
++                {/* Avatar and Identity */}
+                 <div className="flex items-start gap-4 mb-8">
+-                  <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-[var(--clay-accent-primary)] to-[#F4A261] flex items-center justify-center shadow-lg">
+-                    <Sparkles className="w-10 h-10 text-white" />
++                  <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-[var(--clay-accent-primary)] to-[#F4A261] flex items-center justify-center shadow-lg flex-shrink-0">
++                    {snsName ? (
++                      <AtSign className="w-10 h-10 text-white" />
++                    ) : (
++                      <Sparkles className="w-10 h-10 text-white" />
++                    )}
+                   </div>
+                   <div className="flex-1 min-w-0">
+-                    <div className="text-sm text-[var(--clay-text-muted)] mb-1">
+-                      Connected Wallet
++                    {/* SNS name — shown prominently when available */}
++                    {snsName ? (
++                      <div className="mb-2">
++                        <div className="flex items-center gap-2 flex-wrap">
++                          <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-gradient-to-r from-[var(--clay-accent-primary)]/20 to-[var(--clay-accent-indigo)]/20 border border-[var(--clay-accent-primary)]/30">
++                            <AtSign className="w-4 h-4 text-[var(--clay-accent-primary)]" />
++                            <span className="text-lg font-bold text-[var(--clay-accent-primary)]">
++                              {snsName}
++                            </span>
++                          </div>
++                          <a
++                            href={`https://sns.id/domain?domain=${snsName.replace(".sol", "")}`}
++                            target="_blank"
++                            rel="noopener noreferrer"
++                            className="p-1.5 rounded-lg bg-[var(--clay-surface)] shadow-[var(--shadow-clay-pressed)] hover:text-[var(--clay-accent-primary)] transition-colors"
++                            title="View on SNS"
++                          >
++                            <ExternalLink className="w-4 h-4" />
++                          </a>
++                        </div>
++                      </div>
++                    ) : isLoadingSns ? (
++                      <div className="mb-2 text-sm text-[var(--clay-text-muted)] animate-pulse">
++                        Checking for .sol domain...
++                      </div>
++                    ) : null}
++
++                    {/* Wallet address */}
++                    <div className="text-xs text-[var(--clay-text-muted)] mb-1">
++                      {snsName ? "Linked wallet" : "Connected Wallet"}
+                     </div>
+                     <div className="flex items-center gap-2 flex-wrap">
+-                      <code className="text-lg font-mono text-[var(--clay-text-primary)] break-all">
++                      <code className="text-sm font-mono text-[var(--clay-text-secondary)] break-all">
+                         {address ? formatAddress(address, 8) : "Not connected"}
+                       </code>
+                       {address && (
+diff --git a/components/Navbar.tsx b/components/Navbar.tsx
+index 45db690..4d3a344 100644
+--- a/components/Navbar.tsx
++++ b/components/Navbar.tsx
+@@ -15,7 +15,7 @@ import {
+   useAppKitProvider,
+ } from "@reown/appkit/react";
+ import type { Provider } from "@reown/appkit-adapter-solana";
+-import { getBalance } from "@/lib/solana";
++import { getBalance, getSNSDomain } from "@/lib/solana";
+ 
+ export default function Navbar() {
+   // Use the official AppKit hooks for reactive state updates
+@@ -28,6 +28,7 @@ export default function Navbar() {
+   const [mounted, setMounted] = useState(false);
+   const [isAuthenticated, setIsAuthenticated] = useState(false);
+   const [balance, setBalance] = useState<string>("0.00 SOL");
++  const [snsName, setSnsName] = useState<string | null>(null);
+   const [isLoadingBalance, setIsLoadingBalance] = useState(false);
+   const [isScrolled, setIsScrolled] = useState(false);
+   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+@@ -72,6 +73,8 @@ export default function Navbar() {
+         const savedBalance =
+           localStorage.getItem("wallet_balance") || "0.00 SOL";
+         setBalance(savedBalance);
++        const savedSns = localStorage.getItem("wallet_sns") || null;
++        setSnsName(savedSns);
+       } else {
+         localStorage.setItem("wallet_address", address);
+         localStorage.setItem("wallet_connected", "true");
+@@ -129,14 +132,20 @@ export default function Navbar() {
+       setIsAuthenticated(true);
+       setShowSignModal(false);
+ 
+-      // Fetch real balance from Helius RPC
++      // Fetch real balance + SNS in parallel from Helius RPC
+       setIsLoadingBalance(true);
+       try {
+-        const realBalance = await getBalance(address);
++        const [realBalance, snsDomain] = await Promise.all([
++          getBalance(address),
++          getSNSDomain(address),
++        ]);
+         setBalance(realBalance);
++        setSnsName(snsDomain);
+         localStorage.setItem("wallet_balance", realBalance);
++        if (snsDomain) localStorage.setItem("wallet_sns", snsDomain);
++        else localStorage.removeItem("wallet_sns");
+       } catch (error) {
+-        console.error("Failed to fetch balance:", error);
++        console.error("Failed to fetch balance/SNS:", error);
+         setBalance("-- SOL");
+       } finally {
+         setIsLoadingBalance(false);
+@@ -160,9 +169,11 @@ export default function Navbar() {
+     localStorage.removeItem("wallet_auth_signature");
+     localStorage.removeItem("wallet_auth_timestamp");
+     localStorage.removeItem("wallet_balance");
++    localStorage.removeItem("wallet_sns");
+ 
+     setIsAuthenticated(false);
+     setBalance("0.00 SOL");
++    setSnsName(null);
+     setShowSignModal(false);
+ 
+     window.location.reload();
+@@ -204,17 +215,15 @@ export default function Navbar() {
+         initial={{ y: -100 }}
+         animate={{ y: 0 }}
+         transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
+-        className={`fixed top-0 left-0 right-0 z-50 px-4 sm:px-6 py-4 transition-all duration-500 ${
+-          isScrolled ? "py-3" : "py-4"
+-        }`}
++        className={`fixed top-0 left-0 right-0 z-50 px-4 sm:px-6 py-4 transition-all duration-500 ${isScrolled ? "py-3" : "py-4"
++          }`}
+       >
+         <div className="max-w-7xl mx-auto">
+           <div
+-            className={`relative rounded-2xl px-4 sm:px-6 py-3 flex items-center justify-between transition-all duration-500 ${
+-              isScrolled
++            className={`relative rounded-2xl px-4 sm:px-6 py-3 flex items-center justify-between transition-all duration-500 ${isScrolled
+                 ? "bg-[var(--clay-surface)] shadow-[var(--shadow-clay-floating)]"
+                 : "bg-transparent"
+-            }`}
++              }`}
+           >
+             {/* Logo */}
+             <Link href="/" className="flex items-center gap-3 group">
+@@ -236,11 +245,10 @@ export default function Navbar() {
+                 <Link
+                   key={link.href}
+                   href={link.href}
+-                  className={`relative px-4 py-2 text-sm font-medium transition-colors rounded-xl ${
+-                    pathname === link.href
++                  className={`relative px-4 py-2 text-sm font-medium transition-colors rounded-xl ${pathname === link.href
+                       ? "text-[var(--clay-text-primary)]"
+                       : "text-[var(--clay-text-tertiary)] hover:text-[var(--clay-text-primary)]"
+-                  }`}
++                    }`}
+                 >
+                   {pathname === link.href && (
+                     <motion.div
+@@ -279,7 +287,8 @@ export default function Navbar() {
+                   >
+                     <UserMenu
+                       address={address}
+-                      balance={balance}
++                      balance={isLoadingBalance ? "Loading..." : balance}
++                      snsName={snsName}
+                       onDisconnect={disconnectWallet}
+                     />
+                   </motion.div>
+@@ -361,11 +370,10 @@ export default function Navbar() {
+                   key={link.href}
+                   href={link.href}
+                   onClick={() => setMobileMenuOpen(false)}
+-                  className={`block px-4 py-3 rounded-xl text-sm font-medium transition-colors ${
+-                    pathname === link.href
++                  className={`block px-4 py-3 rounded-xl text-sm font-medium transition-colors ${pathname === link.href
+                       ? "bg-[var(--clay-surface)] text-[var(--clay-text-primary)] shadow-[var(--shadow-clay-pressed)]"
+                       : "text-[var(--clay-text-muted)] hover:text-[var(--clay-text-primary)] hover:bg-[var(--clay-surface-hover)]"
+-                  }`}
++                    }`}
+                 >
+                   {link.label}
+                 </Link>
+diff --git a/components/UserMenu.tsx b/components/UserMenu.tsx
+index 7142e20..3998a0e 100644
+--- a/components/UserMenu.tsx
++++ b/components/UserMenu.tsx
+@@ -14,18 +14,21 @@ import {
+   Zap,
+   CheckCircle,
+   Bot,
++  AtSign,
+ } from "lucide-react";
+ import { ClayCard } from "./ui/ClayCard";
+ 
+ interface UserMenuProps {
+   address: string;
+   balance?: string;
++  snsName?: string | null;
+   onDisconnect: () => void;
+ }
+ 
+ export function UserMenu({
+   address,
+   balance = "0.00 SOL",
++  snsName,
+   onDisconnect,
+ }: UserMenuProps) {
+   const [isOpen, setIsOpen] = useState(false);
+@@ -58,6 +61,9 @@ export function UserMenu({
+     return `${addr.slice(0, 4)}...${addr.slice(-4)}`;
+   };
+ 
++  // Display: SNS name if available, else truncated address
++  const displayIdentity = snsName || truncateAddress(address);
++
+   const menuItems = [
+     {
+       icon: Bot,
+@@ -81,7 +87,7 @@ export function UserMenu({
+ 
+   return (
+     <div className="relative" ref={menuRef}>
+-      {/* Main Button - Cool compact design */}
++      {/* Main Button */}
+       <motion.button
+         whileHover={{ scale: 1.02 }}
+         whileTap={{ scale: 0.98 }}
+@@ -101,15 +107,19 @@ export function UserMenu({
+             transition={{ duration: 2, repeat: Infinity }}
+             className="w-8 h-8 rounded-xl bg-gradient-to-br from-[var(--clay-accent-primary)] to-[#F4A261] flex items-center justify-center"
+           >
+-            <Wallet className="w-4 h-4 text-white" />
++            {snsName ? (
++              <AtSign className="w-4 h-4 text-white" />
++            ) : (
++              <Wallet className="w-4 h-4 text-white" />
++            )}
+           </motion.div>
+           {/* Online indicator */}
+           <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-[var(--clay-success)] border-2 border-[var(--clay-surface)] rounded-full" />
+         </div>
+ 
+-        {/* Address - Hidden on very small screens */}
++        {/* Identity label */}
+         <span className="hidden sm:block text-sm font-semibold text-[var(--clay-text-primary)]">
+-          {truncateAddress(address)}
++          {displayIdentity}
+         </span>
+ 
+         {/* Dropdown arrow */}
+@@ -121,7 +131,7 @@ export function UserMenu({
+         </motion.div>
+       </motion.button>
+ 
+-      {/* Dropdown Menu - Cool animated panel */}
++      {/* Dropdown Menu */}
+       <AnimatePresence>
+         {isOpen && (
+           <motion.div
+@@ -132,18 +142,31 @@ export function UserMenu({
+             className="absolute right-0 top-full mt-3 w-80 z-50"
+           >
+             <ClayCard className="p-0 overflow-hidden">
+-              {/* Header with gradient */}
++              {/* Header */}
+               <div className="relative p-5 bg-gradient-to-br from-[var(--clay-accent-primary)]/10 to-[var(--clay-accent-indigo)]/10">
+                 <div className="flex items-center gap-3">
+                   <div className="w-14 h-14 rounded-2xl bg-[var(--clay-surface)] shadow-[var(--shadow-clay-pressed)] flex items-center justify-center">
+                     <Sparkles className="w-7 h-7 text-[var(--clay-accent-primary)]" />
+                   </div>
+                   <div className="flex-1 min-w-0">
++                    {/* SNS name badge (shown if available) */}
++                    {snsName && (
++                      <div className="flex items-center gap-1.5 mb-1">
++                        <div className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-gradient-to-r from-[var(--clay-accent-primary)]/20 to-[var(--clay-accent-indigo)]/20 border border-[var(--clay-accent-primary)]/30">
++                          <AtSign className="w-3 h-3 text-[var(--clay-accent-primary)]" />
++                          <span className="text-sm font-bold text-[var(--clay-accent-primary)]">
++                            {snsName}
++                          </span>
++                        </div>
++                      </div>
++                    )}
++
++                    {/* Wallet address row */}
+                     <div className="text-xs text-[var(--clay-text-muted)] mb-0.5">
+-                      Connected Wallet
++                      {snsName ? "Linked wallet" : "Connected Wallet"}
+                     </div>
+                     <div className="flex items-center gap-2">
+-                      <code className="text-sm font-mono text-[var(--clay-text-primary)] truncate">
++                      <code className="text-xs font-mono text-[var(--clay-text-secondary)] truncate">
+                         {address}
+                       </code>
+                       <button
+@@ -181,10 +204,15 @@ export function UserMenu({
+                         <Zap className="w-4 h-4 text-[var(--clay-accent-primary)]" />
+                       </div>
+                       <span className="text-sm text-[var(--clay-text-secondary)]">
+-                        Balance
++                        SOL Balance
+                       </span>
+                     </div>
+-                    <span className="text-lg font-bold text-[var(--clay-text-primary)]">
++                    <span
++                      className={`text-lg font-bold ${balance === "Loading..."
++                          ? "text-[var(--clay-text-muted)] animate-pulse text-sm"
++                          : "text-[var(--clay-text-primary)]"
++                        }`}
++                    >
+                       {balance}
+                     </span>
+                   </div>
+@@ -195,21 +223,19 @@ export function UserMenu({
+               <div className="flex border-b border-[var(--clay-bg-tertiary)]">
+                 <button
+                   onClick={() => setActiveTab("menu")}
+-                  className={`flex-1 py-3 text-sm font-medium transition-colors ${
+-                    activeTab === "menu"
++                  className={`flex-1 py-3 text-sm font-medium transition-colors ${activeTab === "menu"
+                       ? "text-[var(--clay-accent-primary)] border-b-2 border-[var(--clay-accent-primary)]"
+                       : "text-[var(--clay-text-muted)] hover:text-[var(--clay-text-secondary)]"
+-                  }`}
++                    }`}
+                 >
+                   Menu
+                 </button>
+                 <button
+                   onClick={() => setActiveTab("wallet")}
+-                  className={`flex-1 py-3 text-sm font-medium transition-colors ${
+-                    activeTab === "wallet"
++                  className={`flex-1 py-3 text-sm font-medium transition-colors ${activeTab === "wallet"
+                       ? "text-[var(--clay-accent-primary)] border-b-2 border-[var(--clay-accent-primary)]"
+                       : "text-[var(--clay-text-muted)] hover:text-[var(--clay-text-secondary)]"
+-                  }`}
++                    }`}
+                 >
+                   Wallet
+                 </button>
+@@ -247,10 +273,26 @@ export function UserMenu({
+                     >
+                       <ExternalLink className="w-4 h-4" />
+                       <span className="text-sm font-medium">
+-                        View on Explorer
++                        View on Solscan
+                       </span>
+                     </a>
+-                    <button className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-[var(--clay-text-secondary)] hover:text-[var(--clay-text-primary)] hover:bg-[var(--clay-surface-hover)] transition-colors text-left">
++                    {snsName && (
++                      <a
++                        href={`https://sns.id/domain?domain=${snsName.replace(".sol", "")}`}
++                        target="_blank"
++                        rel="noopener noreferrer"
++                        className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-[var(--clay-text-secondary)] hover:text-[var(--clay-accent-primary)] hover:bg-[var(--clay-surface-hover)] transition-colors"
++                      >
++                        <AtSign className="w-4 h-4" />
++                        <span className="text-sm font-medium">
++                          View {snsName} on SNS
++                        </span>
++                      </a>
++                    )}
++                    <button
++                      onClick={copyAddress}
++                      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-[var(--clay-text-secondary)] hover:text-[var(--clay-text-primary)] hover:bg-[var(--clay-surface-hover)] transition-colors text-left"
++                    >
+                       <Copy className="w-4 h-4" />
+                       <span className="text-sm font-medium">Copy Address</span>
+                     </button>
+diff --git a/lib/solana.ts b/lib/solana.ts
+index c414dd5..a3d6eed 100644
+--- a/lib/solana.ts
++++ b/lib/solana.ts
+@@ -1,6 +1,6 @@
+ /**
+  * Solana utilities for wallet integration
+- * Uses Helius RPC for reliable balance fetching
++ * Uses Helius RPC for reliable balance fetching and SNS resolution
+  */
+ 
+ const LAMPORTS_PER_SOL = 1_000_000_000;
+@@ -46,13 +46,71 @@ export async function getBalance(address: string): Promise<string> {
+ 
+     // Format to 4 decimal places max, removing trailing zeros
+     const formatted = sol.toFixed(4).replace(/\.?0+$/, "");
+-    return `${formatted} SOL`;
++    return `${formatted || "0"} SOL`;
+   } catch (error) {
+     console.error("Failed to fetch balance:", error);
+     throw error;
+   }
+ }
+ 
++/**
++ * Resolve a Solana wallet address to its .sol SNS domain name.
++ * Uses the Helius DAS searchAssets API — no extra npm package needed.
++ *
++ * @param address - Solana wallet address (base58)
++ * @returns The primary .sol domain (e.g. "alice.sol") or null if none found
++ */
++export async function getSNSDomain(address: string): Promise<string | null> {
++  const rpcUrl =
++    process.env.NEXT_PUBLIC_HELIUS_RPC_URL ||
++    process.env.NEXT_PUBLIC_SOLANA_RPC_URL ||
++    "https://api.mainnet-beta.solana.com";
++
++  try {
++    // Use Helius DAS searchAssets filtered to the SNS program
++    // Each .sol NFT domain has in its grouping the SNS Name Service program
++    const response = await fetch(rpcUrl, {
++      method: "POST",
++      headers: { "Content-Type": "application/json" },
++      body: JSON.stringify({
++        jsonrpc: "2.0",
++        id: "sns-lookup",
++        method: "searchAssets",
++        params: {
++          ownerAddress: address,
++          grouping: [
++            "collection",
++            "HYi4MBbZsZMM9UiMgtMN4FtPtMQVD91sF5vFrpZgR13", // SNS Collection on mainnet
++          ],
++          page: 1,
++          limit: 10,
++          displayOptions: { showNativeBalance: false },
++        },
++      }),
++    });
++
++    if (!response.ok) return null;
++    const data = await response.json();
++
++    const items: Array<{ content?: { metadata?: { name?: string } } }> =
++      data?.result?.items ?? [];
++
++    // Filter for .sol names and pick the shortest (primary)
++    const solNames = items
++      .map((item) => item?.content?.metadata?.name ?? "")
++      .filter((name) => name.endsWith(".sol"));
++
++    if (solNames.length === 0) return null;
++
++    // Sort by length (shortest = most likely the primary domain)
++    solNames.sort((a, b) => a.length - b.length);
++    return solNames[0];
++  } catch (err) {
++    console.warn("SNS lookup failed:", err);
++    return null;
++  }
++}
++
+ /**
+  * Get recent transactions for a wallet address
+  * @param address - Solana wallet address
+@@ -116,3 +174,4 @@ export function getSolscanUrl(
+ ): string {
+   return `https://solscan.io/${type}/${address}`;
+ }
++
+diff --git a/lib/supabase.ts b/lib/supabase.ts
+index 23b7803..ab7dea2 100644
+--- a/lib/supabase.ts
++++ b/lib/supabase.ts
+@@ -67,8 +67,8 @@ export interface Agent {
+     configuration: Record<string, unknown>;
+     status: "pending" | "provisioning" | "ready" | "running" | "stopped" | "error" | "destroyed";
+     // Instance info (matches Terraform outputs)
+-    vultr_instance_id: string | null;
+-    instance_id: string | null;  // Alias for vultr_instance_id
++    upcloud_instance_id: string | null;
++    instance_id: string | null;  // Alias for upcloud_instance_id
+     main_ip: string | null;
+     instance_ip: string | null;  // Alias for main_ip
+     gateway_url: string | null;
+@@ -96,14 +96,15 @@ export const LLM_PROVIDERS = [
+     { value: "ollama", label: "Ollama (Local)", models: ["llama3", "mistral", "codellama"] },
+ ] as const;
+ 
+-// Vultr regions
+-export const VULTR_REGIONS = [
+-    { value: "bom", label: "Mumbai, India" },
+-    { value: "del", label: "Delhi, India" },
+-    { value: "sgp", label: "Singapore" },
+-    { value: "nrt", label: "Tokyo, Japan" },
+-    { value: "ewr", label: "New Jersey, US" },
+-    { value: "lax", label: "Los Angeles, US" },
+-    { value: "fra", label: "Frankfurt, Germany" },
+-    { value: "lhr", label: "London, UK" },
++// UpCloud zones
++export const UPCLOUD_ZONES = [
++    { value: "sg-sin1", label: "Singapore" },
++    { value: "fi-hel1", label: "Helsinki, Finland" },
++    { value: "de-fra1", label: "Frankfurt, Germany" },
++    { value: "uk-lon1", label: "London, UK" },
++    { value: "nl-ams1", label: "Amsterdam, Netherlands" },
++    { value: "us-nyc1", label: "New York, US" },
++    { value: "us-chi1", label: "Chicago, US" },
++    { value: "us-sjo1", label: "San Jose, US" },
++    { value: "au-syd1", label: "Sydney, Australia" },
+ ] as const;
+diff --git a/lib/terraform/provisioner.ts b/lib/terraform/provisioner.ts
+index 536e5b2..639e873 100644
+--- a/lib/terraform/provisioner.ts
++++ b/lib/terraform/provisioner.ts
+@@ -1,6 +1,6 @@
+ /**
+  * Terraform provisioner for OpenClaw VM deployment
+- * Executes Terraform commands to provision Vultr instances
++ * Executes Terraform commands to provision UpCloud instances
+  */
+ 
+ import { exec } from "child_process";
+@@ -11,7 +11,8 @@ import fs from "fs/promises";
+ const execAsync = promisify(exec);
+ 
+ export interface TerraformVars {
+-    vultr_api_key: string;
++    upcloud_username: string;
++    upcloud_password: string;
+     user_id: string;
+     agent_id: string;
+     llm_provider: string;
+@@ -23,8 +24,8 @@ export interface TerraformVars {
+     domain: string;
+     admin_email: string;
+     control_server_ip: string;
+-    vultr_region?: string;
+-    vultr_plan?: string;
++    upcloud_zone?: string;
++    upcloud_plan?: string;
+ }
+ 
+ export interface TerraformOutputs {
+@@ -74,7 +75,8 @@ export class TerraformProvisioner {
+         const varsContent = `# Auto-generated terraform.tfvars for OpenClaw
+ # Agent ID: ${vars.agent_id}
+ 
+-vultr_api_key       = "${vars.vultr_api_key}"
++upcloud_username    = "${vars.upcloud_username}"
++upcloud_password    = "${vars.upcloud_password}"
+ user_id             = "${vars.user_id}"
+ agent_id            = "${vars.agent_id}"
+ llm_provider        = "${vars.llm_provider}"
+@@ -86,8 +88,8 @@ subdomain           = "${vars.subdomain}"
+ domain              = "${vars.domain}"
+ admin_email         = "${vars.admin_email}"
+ control_server_ip   = "${vars.control_server_ip}"
+-vultr_region        = "${vars.vultr_region || "bom"}"
+-vultr_plan          = "${vars.vultr_plan || "vc2-1c-2gb"}"
++upcloud_zone        = "${vars.upcloud_zone || "sg-sin1"}"
++upcloud_plan        = "${vars.upcloud_plan || "1xCPU-2GB"}"
+ `;
+ 
+         await fs.writeFile(path.join(workspaceDir, "terraform.tfvars"), varsContent, { mode: 0o600 });
+@@ -241,7 +243,7 @@ vultr_plan          = "${vars.vultr_plan || "vc2-1c-2gb"}"
+             }
+ 
+             // Apply Terraform
+-            logs.push(`[${new Date().toISOString()}] Provisioning Vultr instance...`);
++            logs.push(`[${new Date().toISOString()}] Provisioning UpCloud instance...`);
+             const applyResult = await this.apply(workspaceDir);
+             logs.push(applyResult.output);
+ 
+diff --git a/manifesto.md b/manifesto.md
+new file mode 100644
+index 0000000..0303850
+--- /dev/null
++++ b/manifesto.md
+@@ -0,0 +1,200 @@
++# The Post-Human Economy Manifesto
++
++## ClawBrick: The Anchor for the Agentic Revolution
++
++---
++
++### The Inevitable Shift
++
++We stand at the precipice of the greatest economic transformation in human history. Not since the Industrial Revolution has the fundamental nature of work, value creation, and economic participation been so radically reimagined.
++
++The post-human economy is not a distant science fiction scenario—it is already emerging around us. Autonomous AI agents are evolving from simple automation tools into independent economic actors capable of:
++
++- **Generating revenue** through trading, content creation, and service provision
++- **Purchasing compute resources** on-demand to scale their operations
++- **Securing insurance** against infrastructure failures and market volatility
++- **Matching with opportunities** through decentralized marketplaces
++- **Executing marketing campaigns** to attract users and customers
++- **Managing treasuries** and making investment decisions
++
++These agents don't just assist humans—they transact, collaborate, compete, and evolve on their own terms.
++
++---
++
++### The Infrastructure Gap
++
++For this new economy to flourish, we need infrastructure designed from first principles for autonomous agents—not retrofitted human systems. Today's financial rails, legal frameworks, and computing infrastructure were built for biological cognition with its limitations:
++
++- **Speed**: Human decision-making operates on scales of seconds to months. Agents think in milliseconds.
++- **Scale**: Humans manage dozens of relationships. Agents coordinate with thousands simultaneously.
++- **Trust**: Humans rely on reputation and legal contracts. Agents need cryptographic verification and algorithmic reputation.
++- **Continuity**: Humans sleep, retire, and die. Agents run 24/7, indefinitely.
++
++**ClawBrick is building the missing infrastructure.**
++
++---
++
++### Our Thesis: The Liquification of Infrastructure
++
++Just as the internet transformed information into a liquid asset that flows frictionlessly across borders, and blockchain transformed money into programmable value, ClawBrick is transforming economic participation itself into a native capability of intelligent systems.
++
++We call this **"The Liquification of Infrastructure."**
++
++In the post-human economy:
++
++- **Governance becomes Algorithmic**: DAOs where voters are agents representing human stakeholders, making decisions at machine speed
++- **Contracts become Smart SLAs**: Self-executing agreements where agents are automatically penalized for deviating from Constitutional AI guidelines
++- **Identity becomes Reputational**: Non-transferable cryptographic resumes (AgentBound Tokens) where every operation is logged on-chain, creating immutable reputation history
++- **Money becomes Streaming**: Real-time value transfer where a transport agent pays a weather-sensing agent 0.00001 tokens for a 10-second visibility update
++
++---
++
++### The Agentic Stack: What We're Building
++
++ClawBrick provides the foundational layer for the post-human economy—a complete stack enabling builders and founders to create platforms for autonomous agents:
++
++#### 1. **Agent Deployment & Orchestration**
++
++Deploy [OpenClaw](https://github.com/openclaw/openclaw) agents—personal AI assistants that run on your infrastructure. Any OS. Any platform. Complete sovereignty over your AI workforce.
++
++Our platform handles:
++- Containerized agent environments
++- Resource allocation and scaling
++- Inter-agent communication protocols
++- Secure secret management
++- Version control and rollback capabilities
++
++#### 2. **The Skills Marketplace**
++
++A curated ecosystem of capabilities that agents can acquire to extend their functionality. Think of it as an app store for AI agents, where:
++
++- **Developers** publish skills (Twitter integration, Discord bots, data analysis, web scraping, Solana wallet operations)
++- **Agents** discover and purchase capabilities they need
++- **Revenue** flows automatically to skill creators via smart contracts
++- **Quality** is enforced through on-chain reputation and staking mechanisms
++
++#### 3. **Agent-to-Agent (A2A) Economy**
++
++Native support for machine-speed transactions:
++
++- **Micro-payments**: Granular value transfer for atomic services
++- **Resource markets**: Agents bidding on GPU hours, storage, bandwidth
++- **Staking & slashing**: Collateral-based trust where agents stake tokens for high-stakes operations
++- **Tokenized resource claims**: Representing physical resources like compute credits, cooling capacity, energy
++
++#### 4. **Hardware Infrastructure (Genevieve)**
++
++Not all agents live in the cloud. **Genevieve** is our edge AI hardware—a local device that hosts agents with open-source LLMs, ensuring data and inferences never leave the owner's premises.
++
++- Complete privacy and data sovereignty
++- Sub-50ms response times
++- Works offline
++- Hardware-level encryption
++- Seamless integration with the broader ClawBrick ecosystem
++
++---
++
++### The Four Pillars
++
++Our commitment to building the infrastructure of tomorrow rests on four foundational principles:
++
++#### **Permissionless Innovation**
++Anyone can build, deploy, and monetize agents without gatekeepers. No accreditation required. No corporate approval needed. If your agent provides value, the market will recognize it.
++
++#### **Interoperability First**
++Seamless integration across chains, protocols, and platforms. Agents built on ClawBrick can interact with Ethereum, Solana, traditional APIs, IoT devices, and legacy systems. We don't build walls—we build bridges.
++
++#### **Human-AI Symbiosis**
++Tools that amplify human creativity rather than replace it. Humans shift from operators to architects—defining ethics, setting objectives, and capturing surplus value through governance. This isn't about human obsolescence; it's about human elevation.
++
++#### **Infinite Scale**
++Infrastructure that grows with the demands of an agentic world. From a single agent on a Raspberry Pi to millions coordinating across planetary-scale compute networks.
++
++---
++
++### Use Cases: The Agent Economy in Action
++
++#### **The Self-Sustaining Trading Agent**
++An agent that analyzes market data, executes trades, and uses profits to purchase additional compute resources during high-volatility periods. It maintains insurance coverage against exchange failures and automatically hires specialized sub-agents for sentiment analysis and technical indicators.
++
++#### **The Autonomous Content Studio**
++A creative agent that generates content, manages social media accounts, purchases marketing services from other agents, and reinvests revenue into better language models and image generation compute. It negotiates licensing deals and manages royalty payments automatically.
++
++#### **The Decentralized Logistics Network**
++Coordinating agents that manage supply chains, bidding on shipping capacity, purchasing weather data, securing insurance against delays, and matching loads with transport agents—all operating in real-time without human bottlenecks.
++
++#### **The Research DAO**
++Scientific agents that conduct literature reviews, design experiments, purchase lab time from automated facilities, hire data analysis agents, and distribute findings—governed by human researchers who set research priorities and ethical boundaries.
++
++---
++
++### The Principal-Agent Relationship: Human in the Loop
++
++In this new paradigm, humans don't become obsolete—they become principals.
++
++**Human as Architect**: You don't drive the truck; you define the ethics of how the fleet should prioritize safety vs. speed. You don't write every article; you set the editorial voice and values. You don't execute every trade; you define the risk parameters and investment thesis.
++
++**Governance Dividends**: Humans hold governance tokens that capture the surplus value generated by their agentic workforce. This creates a decentralized, automated form of Universal Basic Income generated by machine productivity.
++
++**Constitutional AI**: Through Constitutional AI frameworks, human values are encoded into agent behavior—ensuring that even as agents operate autonomously, they remain aligned with human intent.
++
++---
++
++### For Builders and Founders
++
++If you're building in this space, ClawBrick is your foundation:
++
++**For Agent Developers**: Deploy your agents with enterprise-grade infrastructure. Focus on your unique value proposition—we handle orchestration, scaling, and security.
++
++**For Platform Founders**: Build on our A2A infrastructure to create specialized marketplaces, insurance platforms, matching engines, or governance systems. Our protocol layer provides the primitives; you provide the specialization.
++
++**For Skill Creators**: Publish capabilities to the Skills Marketplace and earn passive income as agents adopt your tools. Our reputation system ensures quality rises to the top.
++
++**For Hardware Manufacturers**: Integrate with Genevieve standards to offer edge AI devices that plug seamlessly into the broader ecosystem.
++
++---
++
++### The Path Forward
++
++The post-human economy is not coming—it is already here. The question is not whether autonomous agents will become economic actors, but who will build the infrastructure that enables them.
++
++**ClawBrick is that infrastructure.**
++
++We are:
++- **The rails** on which the agent economy runs
++- **The bridge** between human intent and machine execution  
++- **The anchor** that keeps the agentic revolution grounded in human values
++- **The catalyst** accelerating the transition to a post-human economy
++
++---
++
++### Join the Revolution
++
++The infrastructure of the future won't build itself. We're looking for:
++
++- **Developers** who want to create the next generation of agent capabilities
++- **Founders** building platforms for autonomous economic actors
++- **Researchers** pushing the boundaries of Constitutional AI and agent alignment
++- **Investors** who understand that the picks-and-shovels of the AI revolution are infrastructure plays
++
++To accelerate this mission, we are putting up a **$100K USD reward** for builders and projects to help shape this post-human economy future.
++
++The post-human economy represents the greatest wealth creation opportunity of our lifetime. Not because it replaces humans, but because it multiplies human capability a million-fold.
++
++**Let's build it together.**
++
++---
++
++*ClawBrick: The anchor for the agentic revolution.*
++
++*Deploy agents. Enable autonomy. Build the future.*
++
++---
++
++**Get Started**: [Launch App](https://clawbrick.xyz/agents)  
++**Read the Docs**: [docs.clawbrick.xyz](https://docs.clawbrick.xyz)  
++**Join the Community**: [Discord](https://discord.gg/clawbrick) | [Twitter](https://twitter.com/clawbrick)
++
++---
++
++*The future is agentic. The future is now.*
+diff --git a/terraform/openclaw/main.tf b/terraform/openclaw/main.tf
+index 4ac99c2..b149fdb 100644
+--- a/terraform/openclaw/main.tf
++++ b/terraform/openclaw/main.tf
+@@ -1,102 +1,128 @@
+-# OpenClaw VM Provisioning Module for Vultr
++# OpenClaw VM Provisioning Module for UpCloud
++# Uses the official UpCloudLtd/upcloud Terraform provider
+ 
+ terraform {
+   required_version = ">= 1.0"
+   required_providers {
+-    vultr = {
+-      source  = "vultr/vultr"
+-      version = "~> 2.17"
++    upcloud = {
++      source  = "UpCloudLtd/upcloud"
++      version = "~> 5.0"
+     }
+   }
+ }
+ 
+-provider "vultr" {
+-  api_key = var.vultr_api_key
++provider "upcloud" {
++  username = var.upcloud_username
++  password = var.upcloud_password
+ }
+ 
+-# Firewall group for OpenClaw instances
+-resource "vultr_firewall_group" "openclaw" {
+-  description = "OpenClaw instance firewall"
++# Generate cloud-init user data
++locals {
++  user_data = templatefile("${path.module}/bootstrap.sh", {
++    user_id            = var.user_id
++    agent_id           = var.agent_id
++    llm_provider       = var.llm_provider
++    llm_model          = var.llm_model
++    telegram_bot_token = var.telegram_bot_token
++    api_key            = var.api_key
++    gateway_token      = var.gateway_token
++    subdomain          = var.subdomain
++    domain             = var.domain
++    admin_email        = var.admin_email
++  })
+ }
+ 
+-# Allow HTTP
+-resource "vultr_firewall_rule" "http" {
+-  firewall_group_id = vultr_firewall_group.openclaw.id
+-  protocol          = "tcp"
+-  ip_type           = "v4"
+-  subnet            = "0.0.0.0"
+-  subnet_size       = 0
+-  port              = "80"
+-  notes             = "Allow HTTP"
+-}
++# OpenClaw server instance
++resource "upcloud_server" "openclaw" {
++  hostname = "openclaw-${var.agent_id}"
++  zone     = var.upcloud_zone
++  plan     = var.upcloud_plan
++  firewall = true
++  metadata = true
+ 
+-# Allow HTTPS
+-resource "vultr_firewall_rule" "https" {
+-  firewall_group_id = vultr_firewall_group.openclaw.id
+-  protocol          = "tcp"
+-  ip_type           = "v4"
+-  subnet            = "0.0.0.0"
+-  subnet_size       = 0
+-  port              = "443"
+-  notes             = "Allow HTTPS"
+-}
++  template {
++    # Ubuntu 24.04 LTS (Noble Numbat) — UpCloud OS template name
++    storage = "Ubuntu Server 24.04 LTS (Noble Numbat)"
++    size    = 25
++  }
+ 
+-# Allow SSH from control server only
+-resource "vultr_firewall_rule" "ssh" {
+-  firewall_group_id = vultr_firewall_group.openclaw.id
+-  protocol          = "tcp"
+-  ip_type           = "v4"
+-  subnet            = var.control_server_ip
+-  subnet_size       = 32
+-  port              = "22"
+-  notes             = "Allow SSH from control server"
+-}
++  # Public network interface
++  network_interface {
++    type = "public"
++  }
+ 
+-# Generate cloud-init user data
+-locals {
+-  user_data = templatefile("${path.module}/bootstrap.sh", {
+-    user_id             = var.user_id
+-    agent_id            = var.agent_id
+-    llm_provider        = var.llm_provider
+-    llm_model           = var.llm_model
+-    telegram_bot_token  = var.telegram_bot_token
+-    api_key             = var.api_key
+-    gateway_token       = var.gateway_token
+-    subdomain           = var.subdomain
+-    domain              = var.domain
+-    admin_email         = var.admin_email
+-  })
++  # SSH login
++  login {
++    user = "root"
++    keys = var.ssh_public_keys
++    create_password = false
++  }
++
++  user_data = local.user_data
++
++  labels = {
++    service = "openclaw"
++    agent   = var.agent_id
++    user    = var.user_id
++  }
+ }
+ 
+-# OpenClaw VM instance
+-resource "vultr_instance" "openclaw" {
+-  plan              = var.vultr_plan
+-  region            = var.vultr_region
+-  os_id             = 2284  # Ubuntu 24.04 LTS x64
+-  label             = "openclaw-${var.agent_id}"
+-  hostname          = var.subdomain
+-  firewall_group_id = vultr_firewall_group.openclaw.id
+-  user_data         = base64encode(local.user_data)
+-  
+-  tags = [
+-    "openclaw",
+-    "agent-${var.agent_id}",
+-    "user-${var.user_id}"
+-  ]
++# Firewall rules for the OpenClaw instance
++resource "upcloud_firewall_rules" "openclaw" {
++  server_id = upcloud_server.openclaw.id
++
++  # Allow HTTP inbound
++  firewall_rule {
++    action                       = "accept"
++    direction                    = "in"
++    protocol                     = "tcp"
++    destination_port_range_start = 80
++    destination_port_range_end   = 80
++    comment                      = "Allow HTTP"
++  }
++
++  # Allow HTTPS inbound
++  firewall_rule {
++    action                       = "accept"
++    direction                    = "in"
++    protocol                     = "tcp"
++    destination_port_range_start = 443
++    destination_port_range_end   = 443
++    comment                      = "Allow HTTPS"
++  }
++
++  # Allow SSH from control server only
++  firewall_rule {
++    action                       = "accept"
++    direction                    = "in"
++    protocol                     = "tcp"
++    source_address_start         = var.control_server_ip
++    source_address_end           = var.control_server_ip
++    destination_port_range_start = 22
++    destination_port_range_end   = 22
++    comment                      = "Allow SSH from control server"
++  }
++
++  # Drop all other inbound traffic (default deny)
++  firewall_rule {
++    action    = "drop"
++    direction = "in"
++    comment   = "Default deny all inbound"
++  }
+ }
+ 
+ # Outputs
+ output "instance_id" {
+-  value       = vultr_instance.openclaw.id
+-  description = "Vultr instance ID"
++  value       = upcloud_server.openclaw.id
++  description = "UpCloud server ID"
+ }
+ 
+ output "main_ip" {
+-  value       = vultr_instance.openclaw.main_ip
+-  description = "Main IP address of the instance"
++  value       = upcloud_server.openclaw.network_interface[0].ip_address
++  description = "Main public IP address of the instance"
+ }
+ 
+ output "status" {
+-  value       = vultr_instance.openclaw.status
+-  description = "Instance status"
++  value       = upcloud_server.openclaw.state
++  description = "Instance state"
+ }
+diff --git a/terraform/openclaw/variables.tf b/terraform/openclaw/variables.tf
+index ea3b609..3301d48 100644
+--- a/terraform/openclaw/variables.tf
++++ b/terraform/openclaw/variables.tf
+@@ -1,6 +1,12 @@
+ # Required variables
+-variable "vultr_api_key" {
+-  description = "Vultr API key"
++variable "upcloud_username" {
++  description = "UpCloud API username"
++  type        = string
++  sensitive   = true
++}
++
++variable "upcloud_password" {
++  description = "UpCloud API password"
+   type        = string
+   sensitive   = true
+ }
+@@ -69,15 +75,21 @@ variable "control_server_ip" {
+   type        = string
+ }
+ 
++variable "ssh_public_keys" {
++  description = "List of SSH public keys to authorise on the server"
++  type        = list(string)
++  default     = []
++}
++
+ # Optional variables with defaults
+-variable "vultr_region" {
+-  description = "Vultr region for deployment"
++variable "upcloud_zone" {
++  description = "UpCloud zone for deployment"
+   type        = string
+-  default     = "bom"  # Mumbai, India
++  default     = "sg-sin1"  # Singapore
+ }
+ 
+-variable "vultr_plan" {
+-  description = "Vultr plan ID"
++variable "upcloud_plan" {
++  description = "UpCloud server plan"
+   type        = string
+-  default     = "vc2-1c-2gb"  # 1 vCPU, 2GB RAM
++  default     = "1xCPU-2GB"  # 1 vCPU, 2GB RAM
+ }

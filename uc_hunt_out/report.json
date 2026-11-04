@@ -1,0 +1,463 @@
+{
+ "generated": "2026-11-02T08:06:46Z",
+ "dork_hits": [],
+ "repos": [
+  {
+   "repo": "fabianwimberger/cloud-bench",
+   "size_kb": 1700,
+   "pushed": "2026-11-01T20:43:06Z",
+   "desc": "Cloud instance benchmarking suite with cost analysis across AWS, GCP, Azure, Oracle, Hetzner, UpCloud and OVH.",
+   "default_branch": "main"
+  },
+  {
+   "repo": "api-evangelist/upcloud",
+   "size_kb": 8,
+   "pushed": "2026-11-01T11:14:03Z",
+   "desc": "",
+   "default_branch": "main"
+  },
+  {
+   "repo": "UpCloudLtd/upcloud-php-api",
+   "size_kb": 11904,
+   "pushed": "2026-10-30T11:46:44Z",
+   "desc": "PHP client for UpCloud's API",
+   "default_branch": "main"
+  },
+  {
+   "repo": "UpCloudLtd/terraform-provider-upcloud",
+   "size_kb": 33469,
+   "pushed": "2026-10-31T02:37:34Z",
+   "desc": "Terraform provider for UpCloud",
+   "default_branch": "main"
+  },
+  {
+   "repo": "moveinfra/eu-cloud-mcp",
+   "size_kb": 26,
+   "pushed": "2026-10-29T15:45:47Z",
+   "desc": "MCP server for moving off AWS, Google Cloud and Azure: EU-owned alternatives, EU cloud prices, exit fees, Terraform lock-in scan",
+   "default_branch": "main"
+  },
+  {
+   "repo": "stefanbosak/upcloud-tools",
+   "size_kb": 1014,
+   "pushed": "2026-10-29T13:20:50Z",
+   "desc": "UpCloud tools",
+   "default_branch": "main"
+  },
+  {
+   "repo": "moveinfra/eu-cloud-prices",
+   "size_kb": 125,
+   "pushed": "2026-10-28T21:57:42Z",
+   "desc": "Monthly EUR prices on AWS, Azure, Google Cloud vs UpCloud, Hetzner, Scaleway, OVHcloud. Open data, every number sourced.",
+   "default_branch": "main"
+  },
+  {
+   "repo": "moveinfra/cloud-bill-analyzer",
+   "size_kb": 122,
+   "pushed": "2026-10-28T21:56:25Z",
+   "desc": "See what your AWS, Azure or Google Cloud bill would cost on EU-owned clouds. Runs in your browser.",
+   "default_branch": "main"
+  },
+  {
+   "repo": "moveinfra/eu-cloud-map",
+   "size_kb": 16,
+   "pushed": "2026-10-28T19:01:45Z",
+   "desc": "EU-owned equivalents of AWS, Google Cloud, Azure and DigitalOcean services: UpCloud, Scaleway, Hetzner, OVHcloud. Open data (CC BY 4.0).",
+   "default_branch": "main"
+  },
+  {
+   "repo": "moveinfra/cloud-exit-cost-analyzer",
+   "size_kb": 246,
+   "pushed": "2026-10-28T19:00:28Z",
+   "desc": "See what your Kubernetes cluster costs today and what it would cost on UpCloud, from real usage. Helm chart, read-only, nothing leaves the cluster.",
+   "default_branch": "main"
+  },
+  {
+   "repo": "mhernesniemi/lautta",
+   "size_kb": 72,
+   "pushed": "2026-10-28T13:32:09Z",
+   "desc": "Build, ship and run client web apps on UpCloud with Kamal",
+   "default_branch": "main"
+  },
+  {
+   "repo": "HewlettPackard/morpheus-upcloud-plugin",
+   "size_kb": 317,
+   "pushed": "2026-10-28T20:25:09Z",
+   "desc": "",
+   "default_branch": "api-1.4.x"
+  },
+  {
+   "repo": "UpCloudLtd/example-images-app",
+   "size_kb": 109,
+   "pushed": "2026-10-30T12:25:33Z",
+   "desc": "Example application to demonstrate how to run AI model on UpCloud Managed Kubernetes",
+   "default_branch": "main"
+  },
+  {
+   "repo": "crossplane-contrib/provider-upcloud",
+   "size_kb": 1731,
+   "pushed": "2026-10-31T22:53:52Z",
+   "desc": "",
+   "default_branch": "main"
+  },
+  {
+   "repo": "jamalakhaligova/Terraform-UpCloud",
+   "size_kb": 8,
+   "pushed": "2026-10-27T07:13:20Z",
+   "desc": "Terraform project",
+   "default_branch": "main"
+  },
+  {
+   "repo": "Kirbo/gitlab-fleeting-plugin-upcloud",
+   "size_kb": 204,
+   "pushed": "2026-10-26T13:25:18Z",
+   "desc": "A GitLab Runner plugin for autoscaling servers on UpCloud.",
+   "default_branch": "main"
+  },
+  {
+   "repo": "UpCloudLtd/upcloud-csi",
+   "size_kb": 8332,
+   "pushed": "2026-10-26T07:58:45Z",
+   "desc": "Container Storage Interface (CSI) driver for UpCloud's MaxIOPS storage offering",
+   "default_branch": "main"
+  },
+  {
+   "repo": "rwunderer/packer-upctl",
+   "size_kb": 160,
+   "pushed": "2026-10-26T00:07:09Z",
+   "desc": "Enhanced packer image with upctl as needed when creating images on UpCloud",
+   "default_branch": "main"
+  },
+  {
+   "repo": "bencoverts/upcloud-vpscontroller",
+   "size_kb": 519,
+   "pushed": "2026-10-24T13:01:33Z",
+   "desc": "",
+   "default_branch": "main"
+  },
+  {
+   "repo": "jdaln/inference-gpu-spinner",
+   "size_kb": 591,
+   "pushed": "2026-10-23T12:26:52Z",
+   "desc": "Spin an Inference GPU for your team daily-use. Unlimited tokens. Pay for the time of use instead! Looking for a sponsor with cloud GPU credits to keep updating ",
+   "default_branch": "main"
+  }
+ ],
+ "code_findings": [
+  {
+   "pattern": "env_var_upcloud",
+   "file": "cloud-bench-main/.github/workflows/cleanup-upcloud.yml",
+   "line": 25,
+   "match": "UPCLOUD_USERNAME:$UPCLOUD_PASSWORD",
+   "repo": "fabianwimberger/cloud-bench"
+  },
+  {
+   "pattern": "env_var_upcloud",
+   "file": "cloud-bench-main/.github/workflows/pr-check.yml",
+   "line": 63,
+   "match": "upcloud_username=unused",
+   "repo": "fabianwimberger/cloud-bench"
+  },
+  {
+   "pattern": "env_var_upcloud",
+   "file": "cloud-bench-main/.github/workflows/pr-check.yml",
+   "line": 63,
+   "match": "upcloud_password=unused",
+   "repo": "fabianwimberger/cloud-bench"
+  },
+  {
+   "pattern": "env_var_upcloud",
+   "file": "cloud-bench-main/README.md",
+   "line": 65,
+   "match": "UPCLOUD_USERNAME=\"your-api-user",
+   "repo": "fabianwimberger/cloud-bench"
+  },
+  {
+   "pattern": "env_var_upcloud",
+   "file": "cloud-bench-main/README.md",
+   "line": 66,
+   "match": "UPCLOUD_PASSWORD=\"your-password",
+   "repo": "fabianwimberger/cloud-bench"
+  },
+  {
+   "pattern": "env_var_upcloud",
+   "file": "cloud-bench-main/docs/setup-guide.md",
+   "line": 290,
+   "match": "UPCLOUD_USERNAME=\"your-api-user",
+   "repo": "fabianwimberger/cloud-bench"
+  },
+  {
+   "pattern": "env_var_upcloud",
+   "file": "cloud-bench-main/docs/setup-guide.md",
+   "line": 291,
+   "match": "UPCLOUD_PASSWORD=\"your-password",
+   "repo": "fabianwimberger/cloud-bench"
+  },
+  {
+   "pattern": "env_var_upcloud",
+   "file": "cloud-bench-main/scripts/run-local.sh",
+   "line": 102,
+   "match": "UPCLOUD_USERNAME=your-api-user",
+   "repo": "fabianwimberger/cloud-bench"
+  },
+  {
+   "pattern": "env_var_upcloud",
+   "file": "cloud-bench-main/scripts/run-local.sh",
+   "line": 103,
+   "match": "UPCLOUD_PASSWORD=your-password",
+   "repo": "fabianwimberger/cloud-bench"
+  },
+  {
+   "pattern": "env_var_upcloud",
+   "file": "terraform-provider-upcloud-main/DEVELOPING.md",
+   "line": 202,
+   "match": "UPCLOUD_USERNAME=\"upcloud-api-access-enabled-user",
+   "repo": "UpCloudLtd/terraform-provider-upcloud"
+  },
+  {
+   "pattern": "env_var_upcloud",
+   "file": "terraform-provider-upcloud-main/DEVELOPING.md",
+   "line": 203,
+   "match": "UPCLOUD_PASSWORD=\"verysecretpassword",
+   "repo": "UpCloudLtd/terraform-provider-upcloud"
+  },
+  {
+   "pattern": "env_var_upcloud",
+   "file": "terraform-provider-upcloud-main/docs/index.md",
+   "line": 75,
+   "match": "UPCLOUD_USERNAME=\"upcloud-api-access-enabled-user",
+   "repo": "UpCloudLtd/terraform-provider-upcloud"
+  },
+  {
+   "pattern": "env_var_upcloud",
+   "file": "terraform-provider-upcloud-main/docs/index.md",
+   "line": 76,
+   "match": "UPCLOUD_PASSWORD=\"verysecretpassword",
+   "repo": "UpCloudLtd/terraform-provider-upcloud"
+  },
+  {
+   "pattern": "env_var_upcloud",
+   "file": "terraform-provider-upcloud-main/docs/index.md",
+   "line": 110,
+   "match": "UPCLOUD_USERNAME=\"Username",
+   "repo": "UpCloudLtd/terraform-provider-upcloud"
+  },
+  {
+   "pattern": "env_var_upcloud",
+   "file": "terraform-provider-upcloud-main/docs/index.md",
+   "line": 111,
+   "match": "UPCLOUD_PASSWORD=\"Password",
+   "repo": "UpCloudLtd/terraform-provider-upcloud"
+  },
+  {
+   "pattern": "generic_secret",
+   "file": "terraform-provider-upcloud-main/upcloud/database/testdata/managed_database_s1.tf",
+   "line": 167,
+   "match": "password       = \"Superpass123\"",
+   "repo": "UpCloudLtd/terraform-provider-upcloud"
+  },
+  {
+   "pattern": "generic_secret",
+   "file": "terraform-provider-upcloud-main/upcloud/database/testdata/managed_database_s1.tf",
+   "line": 174,
+   "match": "password = \"Superpass123\"",
+   "repo": "UpCloudLtd/terraform-provider-upcloud"
+  },
+  {
+   "pattern": "generic_secret",
+   "file": "terraform-provider-upcloud-main/upcloud/database/testdata/managed_database_s1.tf",
+   "line": 192,
+   "match": "password = \"Superpass12345\"",
+   "repo": "UpCloudLtd/terraform-provider-upcloud"
+  },
+  {
+   "pattern": "generic_secret",
+   "file": "terraform-provider-upcloud-main/upcloud/database/testdata/managed_database_s1.tf",
+   "line": 204,
+   "match": "password = \"Superpass123\"",
+   "repo": "UpCloudLtd/terraform-provider-upcloud"
+  },
+  {
+   "pattern": "generic_secret",
+   "file": "terraform-provider-upcloud-main/upcloud/database/testdata/managed_database_s2.tf",
+   "line": 192,
+   "match": "password       = \"Superpass890\"",
+   "repo": "UpCloudLtd/terraform-provider-upcloud"
+  },
+  {
+   "pattern": "generic_secret",
+   "file": "terraform-provider-upcloud-main/upcloud/database/testdata/managed_database_s2.tf",
+   "line": 199,
+   "match": "password = \"Superpass123\"",
+   "repo": "UpCloudLtd/terraform-provider-upcloud"
+  },
+  {
+   "pattern": "generic_secret",
+   "file": "terraform-provider-upcloud-main/upcloud/database/testdata/managed_database_s2.tf",
+   "line": 213,
+   "match": "password = \"Superpass12345\"",
+   "repo": "UpCloudLtd/terraform-provider-upcloud"
+  },
+  {
+   "pattern": "generic_secret",
+   "file": "terraform-provider-upcloud-main/upcloud/database/testdata/managed_database_s2.tf",
+   "line": 219,
+   "match": "password = \"Superpass123\"",
+   "repo": "UpCloudLtd/terraform-provider-upcloud"
+  },
+  {
+   "pattern": "generic_secret",
+   "file": "terraform-provider-upcloud-main/upcloud/database/testdata/managed_database_s3.tf",
+   "line": 181,
+   "match": "password = \"Superpass890\"",
+   "repo": "UpCloudLtd/terraform-provider-upcloud"
+  },
+  {
+   "pattern": "generic_secret",
+   "file": "terraform-provider-upcloud-main/upcloud/database/testdata/managed_database_s3.tf",
+   "line": 187,
+   "match": "password = \"Superpass123\"",
+   "repo": "UpCloudLtd/terraform-provider-upcloud"
+  },
+  {
+   "pattern": "generic_secret",
+   "file": "terraform-provider-upcloud-main/upcloud/database/testdata/managed_database_s3.tf",
+   "line": 193,
+   "match": "password = \"Superpass123\"",
+   "repo": "UpCloudLtd/terraform-provider-upcloud"
+  },
+  {
+   "pattern": "private_key",
+   "file": "terraform-provider-upcloud-main/upcloud/loadbalancer/testdata/manual_certificate_bundle_s1.tf",
+   "line": 126,
+   "match": "-----BEGIN PRIVATE KEY-----",
+   "repo": "UpCloudLtd/terraform-provider-upcloud"
+  },
+  {
+   "pattern": "private_key",
+   "file": "terraform-provider-upcloud-main/upcloud/loadbalancer/testdata/manual_certificate_bundle_s2.tf",
+   "line": 113,
+   "match": "-----BEGIN PRIVATE KEY-----",
+   "repo": "UpCloudLtd/terraform-provider-upcloud"
+  },
+  {
+   "pattern": "private_key",
+   "file": "terraform-provider-upcloud-main/upcloud/loadbalancer/testdata/manual_certificate_bundle_s3.tf",
+   "line": 44,
+   "match": "-----BEGIN PRIVATE KEY-----",
+   "repo": "UpCloudLtd/terraform-provider-upcloud"
+  },
+  {
+   "pattern": "private_key",
+   "file": "terraform-provider-upcloud-main/upcloud/loadbalancer/testdata/manual_certificate_bundle_s4.tf",
+   "line": 44,
+   "match": "-----BEGIN PRIVATE KEY-----",
+   "repo": "UpCloudLtd/terraform-provider-upcloud"
+  },
+  {
+   "pattern": "private_key",
+   "file": "terraform-provider-upcloud-main/upcloud/loadbalancer/testdata/manual_certificate_bundle_s5.tf",
+   "line": 44,
+   "match": "-----BEGIN PRIVATE KEY-----",
+   "repo": "UpCloudLtd/terraform-provider-upcloud"
+  },
+  {
+   "pattern": "env_var_upcloud",
+   "file": "upcloud-tools-main/README.md",
+   "line": 110,
+   "match": "UPCLOUD_TOKEN=\"<your-api-token>",
+   "repo": "stefanbosak/upcloud-tools"
+  },
+  {
+   "pattern": "env_var_upcloud",
+   "file": "upcloud-tools-main/README.md",
+   "line": 118,
+   "match": "UPCLOUD_USERNAME=\"<your-username>",
+   "repo": "stefanbosak/upcloud-tools"
+  },
+  {
+   "pattern": "env_var_upcloud",
+   "file": "upcloud-tools-main/README.md",
+   "line": 119,
+   "match": "UPCLOUD_PASSWORD=\"<your-password>",
+   "repo": "stefanbosak/upcloud-tools"
+  },
+  {
+   "pattern": "env_var_upcloud",
+   "file": "Terraform-UpCloud-main/README.md",
+   "line": 18,
+   "match": "UPCLOUD_TOKEN=\"your-api-token",
+   "repo": "jamalakhaligova/Terraform-UpCloud"
+  },
+  {
+   "pattern": "env_var_upcloud",
+   "file": "Terraform-UpCloud-main/README.md",
+   "line": 19,
+   "match": "UPCLOUD_USERNAME=\"api-user",
+   "repo": "jamalakhaligova/Terraform-UpCloud"
+  },
+  {
+   "pattern": "env_var_upcloud",
+   "file": "Terraform-UpCloud-main/README.md",
+   "line": 19,
+   "match": "UPCLOUD_PASSWORD=\"api-password",
+   "repo": "jamalakhaligova/Terraform-UpCloud"
+  },
+  {
+   "pattern": "env_var_upcloud",
+   "file": "gitlab-fleeting-plugin-upcloud-main/integration_test.go",
+   "line": 18,
+   "match": "UPCLOUD_TOKEN=ucat_...",
+   "repo": "Kirbo/gitlab-fleeting-plugin-upcloud"
+  },
+  {
+   "pattern": "env_var_upcloud",
+   "file": "upcloud-csi-main/deploy/nomad/README.md",
+   "line": 18,
+   "match": "upcloud_username=$UPCLOUD_USERNAME",
+   "repo": "UpCloudLtd/upcloud-csi"
+  },
+  {
+   "pattern": "env_var_upcloud",
+   "file": "upcloud-csi-main/deploy/nomad/README.md",
+   "line": 19,
+   "match": "upcloud_password=$UPCLOUD_PASSWORD",
+   "repo": "UpCloudLtd/upcloud-csi"
+  },
+  {
+   "pattern": "generic_secret",
+   "file": "upcloud-csi-main/internal/plugin/plugin_internal_test.go",
+   "line": 19,
+   "match": "Password:            \"test-password\"",
+   "repo": "UpCloudLtd/upcloud-csi"
+  },
+  {
+   "pattern": "generic_secret",
+   "file": "upcloud-csi-main/internal/plugin/plugin_internal_test.go",
+   "line": 46,
+   "match": "Password:            \"test-password\"",
+   "repo": "UpCloudLtd/upcloud-csi"
+  },
+  {
+   "pattern": "generic_secret",
+   "file": "upcloud-vpscontroller-main/backend/src/tests/upcloud.test.ts",
+   "line": 30,
+   "match": "password: 'do-not-store'",
+   "repo": "bencoverts/upcloud-vpscontroller"
+  },
+  {
+   "pattern": "env_var_upcloud",
+   "file": "inference-gpu-spinner-main/terraform/persistent/providers.tf",
+   "line": 2,
+   "match": "UPCLOUD_TOKEN=ucat_xxxxxxxx",
+   "repo": "jdaln/inference-gpu-spinner"
+  },
+  {
+   "pattern": "env_var_upcloud",
+   "file": "inference-gpu-spinner-main/terraform/providers/upcloud/providers.tf",
+   "line": 2,
+   "match": "UPCLOUD_TOKEN=ucat_xxxxxxxx",
+   "repo": "jdaln/inference-gpu-spinner"
+  }
+ ]
+}

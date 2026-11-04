@@ -1,0 +1,22 @@
+From afeb18cc1b2f949ad85804e3003d5c7b6de03f44 Mon Sep 17 00:00:00 2001
+From: vreid <vreid@users.noreply.github.com>
+Date: Tue, 13 Oct 2026 03:41:31 +0200
+Subject: [PATCH] deploy: expose UPCLOUD_API_TOKEN to the app-env step
+ (API-derived DB pw + S3 endpoint need it) (#19)
+
+---
+ .github/workflows/deploy.yml | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/.github/workflows/deploy.yml b/.github/workflows/deploy.yml
+index 5383112..45d0ce2 100644
+--- a/.github/workflows/deploy.yml
++++ b/.github/workflows/deploy.yml
+@@ -294,6 +294,7 @@ jobs:
+             --dry-run=client -o yaml | kubectl apply -f -
+         env:
+           SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
++          UPCLOUD_API_TOKEN: ${{ secrets.UPCLOUD_API_TOKEN }}
+ 
+       - name: Sync DNS to LoadBalancer IP
+         run: |

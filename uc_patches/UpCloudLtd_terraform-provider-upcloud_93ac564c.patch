@@ -1,0 +1,3529 @@
+From 93ac564c3a5dabfd61bc67f822b97e750496f15b Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Ville=20V=C3=A4lim=C3=A4ki?=
+ <110451292+villevsv-upcloud@users.noreply.github.com>
+Date: Tue, 23 Jun 2026 11:19:24 +0300
+Subject: [PATCH] feat(client): support for v9 client (#966)
+
+* feat(client): support for v9 client
+
+* chore(deps): bump uploud-go-api/v9
+
+* chore(deps): bump uploud-go-api/v9
+
+* chore: upgrade to sdk v9 (#970)
+
+* chore: upgrade objsto user policy to v9 sdk (#974)
+
+* chore: upgrade objsto custom domain to v9 sdk (#973)
+
+* chore: upgrade obj sto user to v9 sdk (#972)
+
+* chore(objsto): bucket v9 api (#967)
+
+* chore: v9 objsto user access key (#986)
+
+* chore: v9 objsto user access key
+
+* chore: proper response handling
+
+* chore: v9 objsto user access key (#990)
+
+* feat: v9 objsto policy data source (#991)
+
+* chore: v9 objsto user access key (#986)
+
+* chore: v9 objsto user access key
+
+* chore: proper response handling
+
+* feat(objsto): policy data source in v9 sdk
+
+* feat(objsto): v9 policy migration (#992)
+
+* chore: v9 objsto user access key (#986)
+
+* chore: v9 objsto user access key
+
+* chore: proper response handling
+
+* feat(objsto): policy data source in v9 sdk
+
+* feat(objsto): v9 migration
+
+* feat: firewall ruleset (#1012)
+
+* feat(firewall): add SDN firewall ruleset and rule resources
+
+- Add upcloud_firewall_ruleset resource for managing SDN firewall rulesets
+- Add upcloud_firewall_ruleset_rule resource for managing individual rules
+- Use v9 SDK (upcloud-go-api@9ac5425) with firewall-ruleset support
+- Register both resources in provider.go
+- Implement full CRUD operations with proper UUID handling
+- Support all firewall rule fields: action, direction, family, protocol, ports, addresses, ICMP
+- Add composite ID support for rule import (ruleset_uuid/rule_id)
+- Handle labels as map[string]string on ruleset resource
+
+* refactor(firewall): use cleaner v9 response handling pattern
+
+Use StatusCode() and Status() helper methods consistently throughout
+firewall resources instead of manual nil checks and JSON field
+inspection. This aligns with the pattern used in other v9-based
+resources like managed object storage custom domain.
+
+* test: add tests and fixes unearthed by tests
+
+* chore: update to latest v9 sdk
+
+* chore: add validators to int fields
+
+* chore: change function name
+
+* chore: update README and latest v9 commit
+
+* chore: update to latest v9 version
+
+* feat: firewall ruleset (#1018)
+
+* feat(firewall): add SDN firewall ruleset and rule resources
+
+- Add upcloud_firewall_ruleset resource for managing SDN firewall rulesets
+- Add upcloud_firewall_ruleset_rule resource for managing individual rules
+- Use v9 SDK (upcloud-go-api@9ac5425) with firewall-ruleset support
+- Register both resources in provider.go
+- Implement full CRUD operations with proper UUID handling
+- Support all firewall rule fields: action, direction, family, protocol, ports, addresses, ICMP
+- Add composite ID support for rule import (ruleset_uuid/rule_id)
+- Handle labels as map[string]string on ruleset resource
+
+* refactor(firewall): use cleaner v9 response handling pattern
+
+Use StatusCode() and Status() helper methods consistently throughout
+firewall resources instead of manual nil checks and JSON field
+inspection. This aligns with the pattern used in other v9-based
+resources like managed object storage custom domain.
+
+* test: add tests and fixes unearthed by tests
+
+* chore: update to latest v9 sdk
+
+* chore: add validators to int fields
+
+* chore: change function name
+
+* chore: update to latest v9 sdk
+
+* feat(firewall): manage rules in ruleset with SDK v9 response fix
+
+* fix: changelog.md
+
+* test(firewall): compact ruleset acceptance coverage
+
+* docs(examples): remove obsolete firewall ruleset_rule example
+
+* chore: clean go.sum
+
+* chore: remove stale firewall_ruleset_rule from subcategories
+
+* Improve description
+
+Co-authored-by: Toni Kangas <kangasta@users.noreply.github.com>
+
+* Improve rule position description
+
+Co-authored-by: Toni Kangas <kangasta@users.noreply.github.com>
+
+* chore: use pointer to value helpers
+
+* chore: use pointer value helper function
+
+* chore: improve tests
+
+* chore: fix go.mod and go.sum versions after merge
+
+- Update v9 to v9.0.0-20260617185413-91e273556c74 (tested firewall ruleset version)
+- Keep v8 v8.37.0 from feat/v9-client merge
+- Sync go.sum entries for both versions
+
+* chore: formatting alignment in firewall test
+
+---------
+
+Co-authored-by: Toni Kangas <kangasta@users.noreply.github.com>
+
+* firewallruleset: remove stale standalone rule resource artifacts
+
+* fix: linter rule
+
+---------
+
+Co-authored-by: Toni Kangas <toni.kangas@upcloud.com>
+Co-authored-by: Francisco Serrano <59340762+paketeserrano@users.noreply.github.com>
+Co-authored-by: Francisco Serrano <francisco.serrano@upcloud.com>
+Co-authored-by: Toni Kangas <kangasta@users.noreply.github.com>
+---
+ .github/acctest-path-mapping.json             |   2 +-
+ CHANGELOG.md                                  |   3 +
+ .../upcloud_firewall_ruleset/resource.tf      |  35 +
+ go.mod                                        |  26 +-
+ go.sum                                        |  53 +-
+ internal/service/firewallruleset/helpers.go   |  18 +
+ internal/service/firewallruleset/ruleset.go   | 788 ++++++++++++++++++
+ .../service/managedobjectstorage/bucket.go    | 149 +++-
+ .../managedobjectstorage/custom_domain.go     | 141 +++-
+ .../policies_data_source.go                   |  56 +-
+ .../service/managedobjectstorage/policy.go    | 160 +++-
+ .../regions_data_source.go                    |  29 +-
+ internal/service/managedobjectstorage/user.go |  86 +-
+ .../managedobjectstorage/user_access_key.go   | 188 +++--
+ .../managedobjectstorage/user_policy.go       | 105 ++-
+ internal/utils/client.go                      |  36 +-
+ subcategories.json                            |   1 +
+ ...rce_upcloud_firewall_ruleset_rules_test.go |  87 ++
+ .../resource_upcloud_firewall_ruleset_test.go | 186 +++++
+ .../upcloud_firewall_ruleset_labels_s1.tf     |  13 +
+ .../upcloud_firewall_ruleset_labels_s2.tf     |  12 +
+ .../upcloud_firewall_ruleset_labels_s3.tf     |   7 +
+ .../upcloud_firewall_ruleset_minimal.tf       |   7 +
+ .../upcloud_firewall_ruleset_rules_s1.tf      |  31 +
+ .../upcloud_firewall_ruleset_rules_s2.tf      |  41 +
+ .../upcloud_firewall_ruleset_rules_s3.tf      |  10 +
+ .../testdata/upcloud_firewall_ruleset_s1.tf   |  10 +
+ .../testdata/upcloud_firewall_ruleset_s2.tf   |  10 +
+ .../testdata/upcloud_firewall_ruleset_s3.tf   |   8 +
+ .../upcloud_firewall_ruleset_stateful.tf      |   8 +
+ .../upcloud_firewall_ruleset_stateless.tf     |   8 +
+ upcloud/provider.go                           |  21 +-
+ 32 files changed, 2039 insertions(+), 296 deletions(-)
+ create mode 100644 examples/resources/upcloud_firewall_ruleset/resource.tf
+ create mode 100644 internal/service/firewallruleset/helpers.go
+ create mode 100644 internal/service/firewallruleset/ruleset.go
+ create mode 100644 upcloud/firewall/resource_upcloud_firewall_ruleset_rules_test.go
+ create mode 100644 upcloud/firewall/resource_upcloud_firewall_ruleset_test.go
+ create mode 100644 upcloud/firewall/testdata/upcloud_firewall_ruleset_labels_s1.tf
+ create mode 100644 upcloud/firewall/testdata/upcloud_firewall_ruleset_labels_s2.tf
+ create mode 100644 upcloud/firewall/testdata/upcloud_firewall_ruleset_labels_s3.tf
+ create mode 100644 upcloud/firewall/testdata/upcloud_firewall_ruleset_minimal.tf
+ create mode 100644 upcloud/firewall/testdata/upcloud_firewall_ruleset_rules_s1.tf
+ create mode 100644 upcloud/firewall/testdata/upcloud_firewall_ruleset_rules_s2.tf
+ create mode 100644 upcloud/firewall/testdata/upcloud_firewall_ruleset_rules_s3.tf
+ create mode 100644 upcloud/firewall/testdata/upcloud_firewall_ruleset_s1.tf
+ create mode 100644 upcloud/firewall/testdata/upcloud_firewall_ruleset_s2.tf
+ create mode 100644 upcloud/firewall/testdata/upcloud_firewall_ruleset_s3.tf
+ create mode 100644 upcloud/firewall/testdata/upcloud_firewall_ruleset_stateful.tf
+ create mode 100644 upcloud/firewall/testdata/upcloud_firewall_ruleset_stateless.tf
+
+diff --git a/.github/acctest-path-mapping.json b/.github/acctest-path-mapping.json
+index 54e42bb87..259b42b23 100644
+--- a/.github/acctest-path-mapping.json
++++ b/.github/acctest-path-mapping.json
+@@ -20,7 +20,7 @@
+     "cloud": ["internal/service/cloud/", "upcloud/cloud/"],
+     "database": ["internal/service/database/", "upcloud/database/"],
+     "filestorage": ["internal/service/filestorage/", "upcloud/filestorage/"],
+-    "firewall": ["internal/service/firewall/", "upcloud/firewall/"],
++    "firewall": ["internal/service/firewall/", "internal/service/firewallruleset/", "upcloud/firewall/"],
+     "gateway": ["internal/service/gateway/", "upcloud/gateway/"],
+     "ip": ["internal/service/ip/", "upcloud/ip/"],
+     "kubernetes": ["internal/service/kubernetes/", "upcloud/kubernetes/"],
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 4f9183a9d..67acbb5e2 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -5,6 +5,9 @@ See updating [Changelog example here](https://keepachangelog.com/en/1.0.0/)
+ 
+ ## [Unreleased]
+ 
++### Added
++
++- upcloud_firewall_ruleset: new resource for managing SDN firewall rulesets
+ ## [5.39.1] - 2026-06-15
+ 
+ ### Fixed
+diff --git a/examples/resources/upcloud_firewall_ruleset/resource.tf b/examples/resources/upcloud_firewall_ruleset/resource.tf
+new file mode 100644
+index 000000000..f1c1d2ee4
+--- /dev/null
++++ b/examples/resources/upcloud_firewall_ruleset/resource.tf
+@@ -0,0 +1,35 @@
++# Create a stateful firewall ruleset with default DNS rules enabled
++resource "upcloud_firewall_ruleset" "example" {
++  name        = "example-ruleset"
++  description = "Example firewall ruleset for production servers"
++
++  # Enable default DNS rules to allow DNS traffic
++  default_dns_rules_enabled = true
++
++  # Add labels for organization
++  labels = {
++    environment = "production"
++    managed_by  = "terraform"
++  }
++}
++
++# Create a firewall ruleset attached to a specific server
++resource "upcloud_server" "example" {
++  hostname = "terraform.example.tld"
++  zone     = "de-fra1"
++  plan     = "1xCPU-1GB"
++
++  template {
++    storage = "Ubuntu Server 24.04 LTS (Noble Numbat)"
++  }
++
++  network_interface {
++    type = "utility"
++  }
++}
++
++resource "upcloud_firewall_ruleset" "server_ruleset" {
++  name        = "server-ruleset"
++  description = "Firewall rules for example server"
++  server_uuid = upcloud_server.example.id
++}
+diff --git a/go.mod b/go.mod
+index d724cb0c8..ca34cf4bb 100644
+--- a/go.mod
++++ b/go.mod
+@@ -3,8 +3,8 @@ module github.com/UpCloudLtd/terraform-provider-upcloud
+ go 1.25.3
+ 
+ require (
+-	github.com/UpCloudLtd/upcloud-go-api/credentials v0.1.1
+-	github.com/UpCloudLtd/upcloud-go-api/v8 v8.38.0
++	github.com/UpCloudLtd/upcloud-go-api/v9 v9.0.0-20260617185413-91e273556c74
++	github.com/google/uuid v1.6.0
+ 	github.com/hashicorp/go-cty v1.5.0
+ 	github.com/hashicorp/go-retryablehttp v0.7.7
+ 	github.com/hashicorp/go-uuid v1.0.3
+@@ -17,19 +17,24 @@ require (
+ 	github.com/hashicorp/terraform-plugin-testing v1.13.0
+ 	github.com/stretchr/testify v1.11.1
+ 	go.yaml.in/yaml/v3 v3.0.4
+-	golang.org/x/crypto v0.46.0
+-	golang.org/x/mod v0.30.0
++	golang.org/x/crypto v0.48.0
++	golang.org/x/mod v0.33.0
+ )
+ 
++require github.com/rogpeppe/go-internal v1.15.0 // indirect
++
+ require (
+ 	al.essio.dev/pkg/shellescape v1.5.1 // indirect
+ 	github.com/ProtonMail/go-crypto v1.1.6 // indirect
++	github.com/UpCloudLtd/upcloud-go-api/credentials v0.1.2-0.20260218111517-78b5a1eb8206
++	github.com/UpCloudLtd/upcloud-go-api/v8 v8.38.0
+ 	github.com/agext/levenshtein v1.2.3 // indirect
++	github.com/apapsch/go-jsonmerge/v2 v2.0.0 // indirect
+ 	github.com/apparentlymart/go-textseg/v15 v15.0.0 // indirect
+ 	github.com/cloudflare/circl v1.6.3 // indirect
+ 	github.com/danieljoos/wincred v1.2.2 // indirect
+ 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
+-	github.com/fatih/color v1.16.0 // indirect
++	github.com/fatih/color v1.18.0 // indirect
+ 	github.com/godbus/dbus/v5 v5.1.0 // indirect
+ 	github.com/golang/protobuf v1.5.4 // indirect
+ 	github.com/google/go-cmp v0.7.0 // indirect
+@@ -55,19 +60,20 @@ require (
+ 	github.com/mitchellh/go-wordwrap v1.0.1 // indirect
+ 	github.com/mitchellh/mapstructure v1.5.0 // indirect
+ 	github.com/mitchellh/reflectwalk v1.0.2 // indirect
++	github.com/oapi-codegen/oapi-codegen/v2 v2.6.0 // indirect
++	github.com/oapi-codegen/runtime v1.3.0 // indirect
+ 	github.com/oklog/run v1.1.0 // indirect
+ 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
+-	github.com/rogpeppe/go-internal v1.12.0 // indirect
+ 	github.com/vmihailenco/msgpack v4.0.4+incompatible // indirect
+ 	github.com/vmihailenco/msgpack/v5 v5.4.1 // indirect
+ 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
+ 	github.com/zalando/go-keyring v0.2.6 // indirect
+ 	github.com/zclconf/go-cty v1.16.2 // indirect
+-	golang.org/x/net v0.48.0 // indirect
++	golang.org/x/net v0.51.0 // indirect
+ 	golang.org/x/sync v0.19.0 // indirect
+-	golang.org/x/sys v0.39.0 // indirect
+-	golang.org/x/text v0.32.0 // indirect
+-	golang.org/x/tools v0.39.0 // indirect
++	golang.org/x/sys v0.41.0 // indirect
++	golang.org/x/text v0.34.0 // indirect
++	golang.org/x/tools v0.42.0 // indirect
+ 	google.golang.org/appengine v1.6.8 // indirect
+ 	google.golang.org/genproto/googleapis/rpc v0.0.0-20251202230838-ff82c1b0f217 // indirect
+ 	google.golang.org/grpc v1.79.3 // indirect
+diff --git a/go.sum b/go.sum
+index b07722bfb..dc4bc308f 100644
+--- a/go.sum
++++ b/go.sum
+@@ -6,15 +6,21 @@ github.com/Microsoft/go-winio v0.6.2 h1:F2VQgta7ecxGYO8k3ZZz3RS8fVIXVxONVUPlNERo
+ github.com/Microsoft/go-winio v0.6.2/go.mod h1:yd8OoFMLzJbo9gZq8j5qaps8bJ9aShtEA8Ipt1oGCvU=
+ github.com/ProtonMail/go-crypto v1.1.6 h1:ZcV+Ropw6Qn0AX9brlQLAUXfqLBc7Bl+f/DmNxpLfdw=
+ github.com/ProtonMail/go-crypto v1.1.6/go.mod h1:rA3QumHc/FZ8pAHreoekgiAbzpNsfQAosU5td4SnOrE=
+-github.com/UpCloudLtd/upcloud-go-api/credentials v0.1.1 h1:eTfQsv58ufALOk9BZ7WbS/i7pMUD11RnYYpRPsz0LdI=
+-github.com/UpCloudLtd/upcloud-go-api/credentials v0.1.1/go.mod h1:7OtVs2UqtfvjkC1HfE+Oud0MnbMv7qUWnbEgxnTAqts=
++github.com/RaveNoX/go-jsoncommentstrip v1.0.0/go.mod h1:78ihd09MekBnJnxpICcwzCMzGrKSKYe4AqU6PDYYpjk=
++github.com/UpCloudLtd/upcloud-go-api/credentials v0.1.2-0.20260218111517-78b5a1eb8206 h1:r1Q2sxM6GkJiRrw14gFC9GHk49mh4ngpX+ihFNDZ4ro=
++github.com/UpCloudLtd/upcloud-go-api/credentials v0.1.2-0.20260218111517-78b5a1eb8206/go.mod h1:aZoVN4egBMe11BuJWJywm2aF1rZipCQ69VhacEtYm/M=
+ github.com/UpCloudLtd/upcloud-go-api/v8 v8.38.0 h1:iWgTz32bgXtX1ouFIA3JehBXOvUWnRJsH9CTaX5SzcY=
+ github.com/UpCloudLtd/upcloud-go-api/v8 v8.38.0/go.mod h1:sxG94uNhC31OQH+zK0RhZjVj+PdkhObsNAt5bvq2J8c=
++github.com/UpCloudLtd/upcloud-go-api/v9 v9.0.0-20260617185413-91e273556c74 h1:WgSdTibC8FaoTDxzN+UdPZGZN9i+4Hp75Do37IXXioo=
++github.com/UpCloudLtd/upcloud-go-api/v9 v9.0.0-20260617185413-91e273556c74/go.mod h1:Sy9fWRwKJnUZlN9LwnEwCOG1pgkktR303kD88V38D6E=
+ github.com/agext/levenshtein v1.2.3 h1:YB2fHEn0UJagG8T1rrWknE3ZQzWM06O8AMAatNn7lmo=
+ github.com/agext/levenshtein v1.2.3/go.mod h1:JEDfjyjHDjOF/1e4FlBE/PkbqA9OfWu2ki2W0IB5558=
++github.com/apapsch/go-jsonmerge/v2 v2.0.0 h1:axGnT1gRIfimI7gJifB699GoE/oq+F2MU7Dml6nw9rQ=
++github.com/apapsch/go-jsonmerge/v2 v2.0.0/go.mod h1:lvDnEdqiQrp0O42VQGgmlKpxL1AP2+08jFMw88y4klk=
+ github.com/apparentlymart/go-textseg/v12 v12.0.0/go.mod h1:S/4uRK2UtaQttw1GenVJEynmyUenKwP++x/+DdGV/Ec=
+ github.com/apparentlymart/go-textseg/v15 v15.0.0 h1:uYvfpb3DyLSCGWnctWKGj857c6ew1u1fNQOlOtuGxQY=
+ github.com/apparentlymart/go-textseg/v15 v15.0.0/go.mod h1:K8XmNZdhEBkdlyDdvbmmsvpAG721bKi0joRfFdHIWJ4=
++github.com/bmatcuk/doublestar v1.1.1/go.mod h1:UD6OnuiIn0yFxxA2le/rnRU1G4RaI4UvFv1sNto9p6w=
+ github.com/bufbuild/protocompile v0.14.1 h1:iA73zAf/fyljNjQKwYzUHD6AD4R8KMasmwa/FBatYVw=
+ github.com/bufbuild/protocompile v0.14.1/go.mod h1:ppVdAIhbr2H8asPk6k4pY7t9zB1OU5DoEw9xY/FUi1c=
+ github.com/cespare/xxhash/v2 v2.3.0 h1:UL815xU9SqsFlibzuggzjXhog7bL6oX9BbNZnL2UFvs=
+@@ -34,8 +40,8 @@ github.com/dnaeon/go-vcr v1.2.0/go.mod h1:R4UdLID7HZT3taECzJs4YgbbH6PIGXB6W/sc5O
+ github.com/emirpasic/gods v1.18.1 h1:FXtiHYKDGKCW2KzwZKx0iC0PQmdlorYgdFG9jPXJ1Bc=
+ github.com/emirpasic/gods v1.18.1/go.mod h1:8tpGGwCnJ5H4r6BWwaV6OrWmMoPhUl5jm/FMNAnJvWQ=
+ github.com/fatih/color v1.13.0/go.mod h1:kLAiJbzzSOZDVNGyDpeOxJ47H46qBXwg5ILebYFFOfk=
+-github.com/fatih/color v1.16.0 h1:zmkK9Ngbjj+K0yRhTVONQh1p/HknKYSlNT+vZCzyokM=
+-github.com/fatih/color v1.16.0/go.mod h1:fL2Sau1YI5c0pdGEVCbKQbLXB6edEj1ZgiY4NijnWvE=
++github.com/fatih/color v1.18.0 h1:S8gINlzdQ840/4pfAwic/ZE0djQEH3wM94VfqLTZcOM=
++github.com/fatih/color v1.18.0/go.mod h1:4FelSpRwEGDpQ12mAdzqdOukCy4u8WUtOY6lkT/6HfU=
+ github.com/go-git/gcfg v1.5.1-0.20230307220236-3a3c6141e376 h1:+zs/tPmkDkHx3U66DAb0lQFJrpS6731Oaa12ikc+DiI=
+ github.com/go-git/gcfg v1.5.1-0.20230307220236-3a3c6141e376/go.mod h1:an3vInlBmSxCcxctByoQdvwPiA7DTK7jaaFDBTtu0ic=
+ github.com/go-git/go-billy/v5 v5.6.2 h1:6Q86EsPXMa7c3YZ3aLAQsMA0VlWmy43r6FHqa/UNbRM=
+@@ -122,6 +128,7 @@ github.com/jbenet/go-context v0.0.0-20150711004518-d14ea06fba99 h1:BQSFePA1RWJOl
+ github.com/jbenet/go-context v0.0.0-20150711004518-d14ea06fba99/go.mod h1:1lJo3i6rXxKeerYnT8Nvf0QmHCRC1n8sfWVwXF2Frvo=
+ github.com/jhump/protoreflect v1.17.0 h1:qOEr613fac2lOuTgWN4tPAtLL7fUSbuJL5X5XumQh94=
+ github.com/jhump/protoreflect v1.17.0/go.mod h1:h9+vUUL38jiBzck8ck+6G/aeMX8Z4QUY/NiJPwPNi+8=
++github.com/juju/gnuflag v0.0.0-20171113085948-2ce1bb71843d/go.mod h1:2PavIy+JPciBPrBUjwbNvtwB6RQlve+hkpll6QSNmOE=
+ github.com/kevinburke/ssh_config v1.2.0 h1:x584FjTGwHzMwvHx18PXxbBVzfnxogHaAReU4gf13a4=
+ github.com/kevinburke/ssh_config v1.2.0/go.mod h1:CT57kijsi8u/K/BOFA39wgDQJ9CxiF4nAY/ojJ6r6mM=
+ github.com/kr/pretty v0.1.0/go.mod h1:dAy3ld7l9f0ibDNOQOHHMYYIIbhfbHSm3C4ZsoJORNo=
+@@ -149,6 +156,10 @@ github.com/mitchellh/mapstructure v1.5.0 h1:jeMsZIYE/09sWLaz43PL7Gy6RuMjD2eJVyua
+ github.com/mitchellh/mapstructure v1.5.0/go.mod h1:bFUtVrKA4DC2yAKiSyO/QUcy7e+RRV2QTWOzhPopBRo=
+ github.com/mitchellh/reflectwalk v1.0.2 h1:G2LzWKi524PWgd3mLHV8Y5k7s6XUvT0Gef6zxSIeXaQ=
+ github.com/mitchellh/reflectwalk v1.0.2/go.mod h1:mSTlrgnPZtwu0c4WaC2kGObEpuNDbx0jmZXqmk4esnw=
++github.com/oapi-codegen/oapi-codegen/v2 v2.6.0 h1:4i+F2cvwBFZeplxCssNdLy3MhNzUD87mI3HnayHZkAU=
++github.com/oapi-codegen/oapi-codegen/v2 v2.6.0/go.mod h1:eWHeJSohQJIINJZzzQriVynfGsnlQVh0UkN2UYYcw4Q=
++github.com/oapi-codegen/runtime v1.3.0 h1:vyK1zc0gDWWXgk2xoQa4+X4RNNc5SL2RbTpJS/4vMYA=
++github.com/oapi-codegen/runtime v1.3.0/go.mod h1:kOdeacKy7t40Rclb1je37ZLFboFxh+YLy0zaPCMibPY=
+ github.com/oklog/run v1.1.0 h1:GEenZ1cK0+q0+wsJew9qUg/DyD8k3JzYsZAi5gYi2mA=
+ github.com/oklog/run v1.1.0/go.mod h1:sVPdnTZT1zYwAJeCMu2Th4T21pA3FPOQRfWjQlk7DVU=
+ github.com/pjbgf/sha1cd v0.3.2 h1:a9wb0bp1oC2TGwStyn0Umc/IGKQnEgF0vVaZ8QF8eo4=
+@@ -156,15 +167,17 @@ github.com/pjbgf/sha1cd v0.3.2/go.mod h1:zQWigSxVmsHEZow5qaLtPYxpcKMMQpa09ixqBxu
+ github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
+ github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 h1:Jamvg5psRIccs7FGNTlIRMkT8wgtp5eCXdBlqhYGL6U=
+ github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
+-github.com/rogpeppe/go-internal v1.12.0 h1:exVL4IDcn6na9z1rAb56Vxr+CgyK3nn3O+epU5NdKM8=
+-github.com/rogpeppe/go-internal v1.12.0/go.mod h1:E+RYuTGaKKdloAfM02xzb0FW3Paa99yedzYV+kq4uf4=
++github.com/rogpeppe/go-internal v1.15.0 h1:D0RCU5rMAp+SpgkiNdrjfJ+LX4J1M32V2NeCY7EJ6hc=
++github.com/rogpeppe/go-internal v1.15.0/go.mod h1:DrUVZyrJU+txYW5/1kwtXQSMFio52ZOxX7yM1VHvnxs=
+ github.com/sergi/go-diff v1.3.2-0.20230802210424-5b0b94c5c0d3 h1:n661drycOFuPLCN3Uc8sB6B/s6Z4t2xvBgU1htSHuq8=
+ github.com/sergi/go-diff v1.3.2-0.20230802210424-5b0b94c5c0d3/go.mod h1:A0bzQcvG0E7Rwjx0REVgAGH58e96+X0MeOfepqsbeW4=
+ github.com/skeema/knownhosts v1.3.1 h1:X2osQ+RAjK76shCbvhHHHVl3ZlgDm8apHEHFqRjnBY8=
+ github.com/skeema/knownhosts v1.3.1/go.mod h1:r7KTdC8l4uxWRyK2TpQZ/1o5HaSzh06ePQNxPwTcfiY=
++github.com/spkg/bom v0.0.0-20160624110644-59b7046e48ad/go.mod h1:qLr4V1qq6nMqFKkMo8ZTx3f+BZEkzsRUY10Xsm2mwU0=
+ github.com/stretchr/objx v0.1.0/go.mod h1:HFkY916IF+rwdDfMAkV7OtwuqBVzrE8GR6GFx+wExME=
+ github.com/stretchr/objx v0.5.2 h1:xuMeJ0Sdp5ZMRXx/aWO6RZxdr3beISkG5/G/aIRr3pY=
+ github.com/stretchr/objx v0.5.2/go.mod h1:FRsXN1f5AsAjCGJKqEizvkpNtU+EGNCLh3NxZ/8L+MA=
++github.com/stretchr/testify v1.3.0/go.mod h1:M5WIy9Dh21IEIfnGCwXGc5bZfKNJtfHm1UVUgZn+9EI=
+ github.com/stretchr/testify v1.7.2/go.mod h1:R6va5+xMeoiuVRoj+gSkQ7d3FALtqAAGI1FQKckRals=
+ github.com/stretchr/testify v1.11.1 h1:7s2iGBzp5EwR7/aIZr8ao5+dra3wiQyKjjFuvgVKu7U=
+ github.com/stretchr/testify v1.11.1/go.mod h1:wZwfW3scLgRK+23gO65QZefKpKQRnfz6sD981Nm4B6U=
+@@ -200,17 +213,17 @@ go.yaml.in/yaml/v3 v3.0.4 h1:tfq32ie2Jv2UxXFdLJdh3jXuOzWiL1fo0bu/FbuKpbc=
+ go.yaml.in/yaml/v3 v3.0.4/go.mod h1:DhzuOOF2ATzADvBadXxruRBLzYTpT36CKvDb3+aBEFg=
+ golang.org/x/crypto v0.0.0-20190308221718-c2843e01d9a2/go.mod h1:djNgcEr1/C05ACkg1iLfiJU5Ep61QUkGW8qpdssI0+w=
+ golang.org/x/crypto v0.0.0-20210921155107-089bfa567519/go.mod h1:GvvjBRRGRdwPK5ydBHafDWAxML/pGHZbMvKqRZ5+Abc=
+-golang.org/x/crypto v0.46.0 h1:cKRW/pmt1pKAfetfu+RCEvjvZkA9RimPbh7bhFjGVBU=
+-golang.org/x/crypto v0.46.0/go.mod h1:Evb/oLKmMraqjZ2iQTwDwvCtJkczlDuTmdJXoZVzqU0=
++golang.org/x/crypto v0.48.0 h1:/VRzVqiRSggnhY7gNRxPauEQ5Drw9haKdM0jqfcCFts=
++golang.org/x/crypto v0.48.0/go.mod h1:r0kV5h3qnFPlQnBSrULhlsRfryS2pmewsg+XfMgkVos=
+ golang.org/x/mod v0.6.0-dev.0.20220419223038-86c51ed26bb4/go.mod h1:jJ57K6gSWd91VN4djpZkiMVwK6gcyfeH4XE8wZrZaV4=
+-golang.org/x/mod v0.30.0 h1:fDEXFVZ/fmCKProc/yAXXUijritrDzahmwwefnjoPFk=
+-golang.org/x/mod v0.30.0/go.mod h1:lAsf5O2EvJeSFMiBxXDki7sCgAxEUcZHXoXMKT4GJKc=
++golang.org/x/mod v0.33.0 h1:tHFzIWbBifEmbwtGz65eaWyGiGZatSrT9prnU8DbVL8=
++golang.org/x/mod v0.33.0/go.mod h1:swjeQEj+6r7fODbD2cqrnje9PnziFuw4bmLbBZFrQ5w=
+ golang.org/x/net v0.0.0-20190404232315-eb5bcb51f2a3/go.mod h1:t9HGtf8HONx5eT2rtn7q6eTqICYqUVnKs3thJo3Qplg=
+ golang.org/x/net v0.0.0-20190620200207-3b0461eec859/go.mod h1:z5CRVTTTmAJ677TzLLGU+0bjPO0LkuOLi4/5GtJWs/s=
+ golang.org/x/net v0.0.0-20210226172049-e18ecbb05110/go.mod h1:m0MpNAwzfU5UDzcl9v0D8zg8gWTRqZa9RBIspLL5mdg=
+ golang.org/x/net v0.0.0-20220722155237-a158d28d115b/go.mod h1:XRhObCWvk6IyKnWLug+ECip1KBveYUHfp+8e9klMJ9c=
+-golang.org/x/net v0.48.0 h1:zyQRTTrjc33Lhh0fBgT/H3oZq9WuvRR5gPC70xpDiQU=
+-golang.org/x/net v0.48.0/go.mod h1:+ndRgGjkh8FGtu1w1FGbEC31if4VrNVMuKTgcAAnQRY=
++golang.org/x/net v0.51.0 h1:94R/GTO7mt3/4wIKpcR5gkGmRLOuE/2hNGeWq/GBIFo=
++golang.org/x/net v0.51.0/go.mod h1:aamm+2QF5ogm02fjy5Bb7CQ0WMt1/WVM7FtyaTLlA9Y=
+ golang.org/x/sync v0.0.0-20180314180146-1d60e4601c6f/go.mod h1:RxMgew5VJxzue5/jJTE5uejpjVlOe/izrB70Jof72aM=
+ golang.org/x/sync v0.0.0-20190423024810-112230192c58/go.mod h1:RxMgew5VJxzue5/jJTE5uejpjVlOe/izrB70Jof72aM=
+ golang.org/x/sync v0.0.0-20220722155255-886fb9371eb4/go.mod h1:RxMgew5VJxzue5/jJTE5uejpjVlOe/izrB70Jof72aM=
+@@ -228,23 +241,23 @@ golang.org/x/sys v0.0.0-20220520151302-bc2c85ada10a/go.mod h1:oPkhp1MJrh7nUepCBc
+ golang.org/x/sys v0.0.0-20220722155257-8c9f86f7a55f/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=
+ golang.org/x/sys v0.0.0-20220811171246-fbc7d0a398ab/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=
+ golang.org/x/sys v0.6.0/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=
+-golang.org/x/sys v0.39.0 h1:CvCKL8MeisomCi6qNZ+wbb0DN9E5AATixKsvNtMoMFk=
+-golang.org/x/sys v0.39.0/go.mod h1:OgkHotnGiDImocRcuBABYBEXf8A9a87e/uXjp9XT3ks=
++golang.org/x/sys v0.41.0 h1:Ivj+2Cp/ylzLiEU89QhWblYnOE9zerudt9Ftecq2C6k=
++golang.org/x/sys v0.41.0/go.mod h1:OgkHotnGiDImocRcuBABYBEXf8A9a87e/uXjp9XT3ks=
+ golang.org/x/term v0.0.0-20201126162022-7de9c90e9dd1/go.mod h1:bj7SfCRtBDWHUb9snDiAeCFNEtKQo2Wmx5Cou7ajbmo=
+ golang.org/x/term v0.0.0-20210927222741-03fcf44c2211/go.mod h1:jbD1KX2456YbFQfuXm/mYQcufACuNUgVhRMnK/tPxf8=
+-golang.org/x/term v0.38.0 h1:PQ5pkm/rLO6HnxFR7N2lJHOZX6Kez5Y1gDSJla6jo7Q=
+-golang.org/x/term v0.38.0/go.mod h1:bSEAKrOT1W+VSu9TSCMtoGEOUcKxOKgl3LE5QEF/xVg=
++golang.org/x/term v0.40.0 h1:36e4zGLqU4yhjlmxEaagx2KuYbJq3EwY8K943ZsHcvg=
++golang.org/x/term v0.40.0/go.mod h1:w2P8uVp06p2iyKKuvXIm7N/y0UCRt3UfJTfZ7oOpglM=
+ golang.org/x/text v0.3.0/go.mod h1:NqM8EUOU14njkJ3fqMW+pc6Ldnwhi/IjpwHt7yyuwOQ=
+ golang.org/x/text v0.3.3/go.mod h1:5Zoc/QRtKVWzQhOtBMvqHzDpF6irO9z98xDceosuGiQ=
+ golang.org/x/text v0.3.7/go.mod h1:u+2+/6zg+i71rQMx5EYifcz6MCKuco9NR6JIITiCfzQ=
+ golang.org/x/text v0.3.8/go.mod h1:E6s5w1FMmriuDzIBO73fBruAKo1PCIq6d2Q6DHfQ8WQ=
+-golang.org/x/text v0.32.0 h1:ZD01bjUt1FQ9WJ0ClOL5vxgxOI/sVCNgX1YtKwcY0mU=
+-golang.org/x/text v0.32.0/go.mod h1:o/rUWzghvpD5TXrTIBuJU77MTaN0ljMWE47kxGJQ7jY=
++golang.org/x/text v0.34.0 h1:oL/Qq0Kdaqxa1KbNeMKwQq0reLCCaFtqu2eNuSeNHbk=
++golang.org/x/text v0.34.0/go.mod h1:homfLqTYRFyVYemLBFl5GgL/DWEiH5wcsQ5gSh1yziA=
+ golang.org/x/tools v0.0.0-20180917221912-90fa682c2a6e/go.mod h1:n7NCudcB/nEzxVGmLbDWY5pfWTLqBcC2KZ6jyYvM4mQ=
+ golang.org/x/tools v0.0.0-20191119224855-298f0cb1881e/go.mod h1:b+2E5dAYhXwXZwtnZ6UAqBI28+e2cm9otk0dWdXHAEo=
+ golang.org/x/tools v0.1.12/go.mod h1:hNGJHUnrk76NpqgfD5Aqm5Crs+Hm0VOH/i9J2+nxYbc=
+-golang.org/x/tools v0.39.0 h1:ik4ho21kwuQln40uelmciQPp9SipgNDdrafrYA4TmQQ=
+-golang.org/x/tools v0.39.0/go.mod h1:JnefbkDPyD8UU2kI5fuf8ZX4/yUeh9W877ZeBONxUqQ=
++golang.org/x/tools v0.42.0 h1:uNgphsn75Tdz5Ji2q36v/nsFSfR/9BRFvqhGBaJGd5k=
++golang.org/x/tools v0.42.0/go.mod h1:Ma6lCIwGZvHK6XtgbswSoWroEkhugApmsXyrUmBhfr0=
+ golang.org/x/xerrors v0.0.0-20190717185122-a985d3407aa7/go.mod h1:I/5z698sn9Ka8TeJc9MKroUUfqBBauWjQqLJ2OPfmY0=
+ golang.org/x/xerrors v0.0.0-20191204190536-9bdfabe68543/go.mod h1:I/5z698sn9Ka8TeJc9MKroUUfqBBauWjQqLJ2OPfmY0=
+ gonum.org/v1/gonum v0.16.0 h1:5+ul4Swaf3ESvrOnidPp4GZbzf0mxVQpDCYUQE7OJfk=
+diff --git a/internal/service/firewallruleset/helpers.go b/internal/service/firewallruleset/helpers.go
+new file mode 100644
+index 000000000..4fce9f5e8
+--- /dev/null
++++ b/internal/service/firewallruleset/helpers.go
+@@ -0,0 +1,18 @@
++package firewallruleset
++
++import (
++	"fmt"
++)
++
++func interfaceString(v interface{}) string {
++	if v == nil {
++		return ""
++	}
++
++	s, ok := v.(string)
++	if ok {
++		return s
++	}
++
++	return fmt.Sprint(v)
++}
+diff --git a/internal/service/firewallruleset/ruleset.go b/internal/service/firewallruleset/ruleset.go
+new file mode 100644
+index 000000000..2b34016ff
+--- /dev/null
++++ b/internal/service/firewallruleset/ruleset.go
+@@ -0,0 +1,788 @@
++package firewallruleset
++
++import (
++	"context"
++	"fmt"
++	"net/http"
++	"sort"
++
++	"github.com/UpCloudLtd/terraform-provider-upcloud/internal/utils"
++	v9 "github.com/UpCloudLtd/upcloud-go-api/v9/pkg/upcloud"
++	"github.com/google/uuid"
++	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
++	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
++	"github.com/hashicorp/terraform-plugin-framework/attr"
++	"github.com/hashicorp/terraform-plugin-framework/path"
++	"github.com/hashicorp/terraform-plugin-framework/resource"
++	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
++	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
++	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
++	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
++	"github.com/hashicorp/terraform-plugin-framework/types"
++)
++
++var (
++	_ resource.Resource                = &firewallRulesetResource{}
++	_ resource.ResourceWithConfigure   = &firewallRulesetResource{}
++	_ resource.ResourceWithImportState = &firewallRulesetResource{}
++)
++
++func NewFirewallRulesetResource() resource.Resource {
++	return &firewallRulesetResource{}
++}
++
++type firewallRulesetResource struct {
++	client *v9.ClientWithResponses
++}
++
++// ruleBlockModel is the inline rule model within a ruleset's rule list.
++// Position is computed-only; it reflects the 1-based index assigned by the API.
++type ruleBlockModel struct {
++	Action                  types.String `tfsdk:"action"`
++	Direction               types.String `tfsdk:"direction"`
++	Family                  types.String `tfsdk:"family"`
++	Protocol                types.String `tfsdk:"protocol"`
++	Enabled                 types.Bool   `tfsdk:"enabled"`
++	Comment                 types.String `tfsdk:"comment"`
++	Position                types.Int64  `tfsdk:"position"`
++	ICMPType                types.Int64  `tfsdk:"icmp_type"`
++	SourceAddressCIDR       types.String `tfsdk:"source_address_cidr"`
++	SourceAddressStart      types.String `tfsdk:"source_address_start"`
++	SourceAddressEnd        types.String `tfsdk:"source_address_end"`
++	SourcePortStart         types.Int64  `tfsdk:"source_port_start"`
++	SourcePortEnd           types.Int64  `tfsdk:"source_port_end"`
++	DestinationAddressCIDR  types.String `tfsdk:"destination_address_cidr"`
++	DestinationAddressStart types.String `tfsdk:"destination_address_start"`
++	DestinationAddressEnd   types.String `tfsdk:"destination_address_end"`
++	DestinationPortStart    types.Int64  `tfsdk:"destination_port_start"`
++	DestinationPortEnd      types.Int64  `tfsdk:"destination_port_end"`
++}
++
++type firewallRulesetModel struct {
++	ID                     types.String `tfsdk:"id"`
++	Name                   types.String `tfsdk:"name"`
++	Description            types.String `tfsdk:"description"`
++	Enabled                types.Bool   `tfsdk:"enabled"`
++	DefaultDNSRulesEnabled types.Bool   `tfsdk:"default_dns_rules_enabled"`
++	Labels                 types.Map    `tfsdk:"labels"`
++	ServerUUID             types.String `tfsdk:"server_uuid"`
++	Version                types.Int64  `tfsdk:"version"`
++	CreatedAt              types.String `tfsdk:"created_at"`
++	UpdatedAt              types.String `tfsdk:"updated_at"`
++	Rules                  types.List   `tfsdk:"rules"`
++}
++
++// ruleAttrTypes maps rule block attribute names to their Framework types.
++// Must be kept in sync with ruleBlockModel tfsdk tags and the rules schema.
++var ruleAttrTypes = map[string]attr.Type{
++	"action":                    types.StringType,
++	"direction":                 types.StringType,
++	"family":                    types.StringType,
++	"protocol":                  types.StringType,
++	"enabled":                   types.BoolType,
++	"comment":                   types.StringType,
++	"position":                  types.Int64Type,
++	"icmp_type":                 types.Int64Type,
++	"source_address_cidr":       types.StringType,
++	"source_address_start":      types.StringType,
++	"source_address_end":        types.StringType,
++	"source_port_start":         types.Int64Type,
++	"source_port_end":           types.Int64Type,
++	"destination_address_cidr":  types.StringType,
++	"destination_address_start": types.StringType,
++	"destination_address_end":   types.StringType,
++	"destination_port_start":    types.Int64Type,
++	"destination_port_end":      types.Int64Type,
++}
++
++// ruleObjectType returns the Framework object type for a single rule block element.
++func ruleObjectType() types.ObjectType {
++	return types.ObjectType{AttrTypes: ruleAttrTypes}
++}
++
++func (r *firewallRulesetResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
++	resp.TypeName = req.ProviderTypeName + "_firewall_ruleset"
++}
++
++func (r *firewallRulesetResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
++	r.client, resp.Diagnostics = utils.GetV9ClientFromProviderData(req.ProviderData)
++}
++
++func (r *firewallRulesetResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
++	resp.Schema = schema.Schema{
++		Description: "This resource represents an UpCloud SDN firewall ruleset. Rules are managed as an ordered list; their position in the API is determined by their order in the `rules` list.",
++		Attributes: map[string]schema.Attribute{
++			"id": schema.StringAttribute{
++				Description: "Firewall ruleset UUID.",
++				Computed:    true,
++				PlanModifiers: []planmodifier.String{
++					stringplanmodifier.UseStateForUnknown(),
++				},
++			},
++			"name": schema.StringAttribute{
++				Description: "Name of the firewall ruleset.",
++				Required:    true,
++			},
++			"description": schema.StringAttribute{
++				Description: "Description of the firewall ruleset.",
++				Optional:    true,
++				Computed:    true,
++			},
++			"enabled": schema.BoolAttribute{
++				Description: "Whether the ruleset is enabled.",
++				Optional:    true,
++				Computed:    true,
++			},
++			"default_dns_rules_enabled": schema.BoolAttribute{
++				Description: "Whether default DNS rules are enabled.",
++				Optional:    true,
++				Computed:    true,
++			},
++			"labels": schema.MapAttribute{
++				Description: "Ruleset labels as key/value pairs.",
++				Optional:    true,
++				ElementType: types.StringType,
++			},
++			"server_uuid": schema.StringAttribute{
++				Description: "Optional server UUID to bind with this ruleset. Create-only in API.",
++				Optional:    true,
++				PlanModifiers: []planmodifier.String{
++					stringplanmodifier.RequiresReplace(),
++				},
++			},
++			"version": schema.Int64Attribute{
++				Description: "Ruleset version.",
++				Computed:    true,
++			},
++			"created_at": schema.StringAttribute{
++				Description: "Creation timestamp.",
++				Computed:    true,
++			},
++			"updated_at": schema.StringAttribute{
++				Description: "Last update timestamp.",
++				Computed:    true,
++			},
++			"rules": schema.ListNestedAttribute{
++				Description: "Ordered list of firewall rules. Rules are applied in list order; the position attribute reflects the 1-based index assigned by the API and cannot be configured.",
++				Optional:    true,
++				Computed:    true,
++				NestedObject: schema.NestedAttributeObject{
++					Attributes: map[string]schema.Attribute{
++						"action": schema.StringAttribute{
++							Description: "Rule action.",
++							Required:    true,
++							Validators: []validator.String{
++								stringvalidator.OneOf("accept", "drop"),
++							},
++						},
++						"direction": schema.StringAttribute{
++							Description: "Traffic direction the rule applies to.",
++							Required:    true,
++							Validators: []validator.String{
++								stringvalidator.OneOf("in", "out"),
++							},
++						},
++						"family": schema.StringAttribute{
++							Description: "Address family.",
++							Required:    true,
++							Validators: []validator.String{
++								stringvalidator.OneOf("IPv4", "IPv6"),
++							},
++						},
++						"protocol": schema.StringAttribute{
++							Description: "IP protocol.",
++							Optional:    true,
++							Computed:    true,
++						},
++						"enabled": schema.BoolAttribute{
++							Description: "Whether the rule is enabled.",
++							Optional:    true,
++							Computed:    true,
++						},
++						"comment": schema.StringAttribute{
++							Description: "Rule comment.",
++							Optional:    true,
++							Computed:    true,
++						},
++						"position": schema.Int64Attribute{
++							Description: "Rule position (1-based). Computed from the rule's index in the list.",
++							Computed:    true,
++						},
++						"icmp_type": schema.Int64Attribute{
++							Description: "ICMP type number.",
++							Optional:    true,
++							Computed:    true,
++							Validators: []validator.Int64{
++								int64validator.Between(0, 255),
++							},
++						},
++						"source_address_cidr": schema.StringAttribute{
++							Description: "Source CIDR block.",
++							Optional:    true,
++							Computed:    true,
++						},
++						"source_address_start": schema.StringAttribute{
++							Description: "Start of source IP address range.",
++							Optional:    true,
++							Computed:    true,
++						},
++						"source_address_end": schema.StringAttribute{
++							Description: "End of source IP address range.",
++							Optional:    true,
++							Computed:    true,
++						},
++						"source_port_start": schema.Int64Attribute{
++							Description: "Start of source port range.",
++							Optional:    true,
++							Computed:    true,
++							Validators: []validator.Int64{
++								int64validator.Between(1, 65535),
++							},
++						},
++						"source_port_end": schema.Int64Attribute{
++							Description: "End of source port range.",
++							Optional:    true,
++							Computed:    true,
++							Validators: []validator.Int64{
++								int64validator.Between(1, 65535),
++							},
++						},
++						"destination_address_cidr": schema.StringAttribute{
++							Description: "Destination CIDR block.",
++							Optional:    true,
++							Computed:    true,
++						},
++						"destination_address_start": schema.StringAttribute{
++							Description: "Start of destination IP address range.",
++							Optional:    true,
++							Computed:    true,
++						},
++						"destination_address_end": schema.StringAttribute{
++							Description: "End of destination IP address range.",
++							Optional:    true,
++							Computed:    true,
++						},
++						"destination_port_start": schema.Int64Attribute{
++							Description: "Start of destination port range.",
++							Optional:    true,
++							Computed:    true,
++							Validators: []validator.Int64{
++								int64validator.Between(1, 65535),
++							},
++						},
++						"destination_port_end": schema.Int64Attribute{
++							Description: "End of destination port range.",
++							Optional:    true,
++							Computed:    true,
++							Validators: []validator.Int64{
++								int64validator.Between(1, 65535),
++							},
++						},
++					},
++				},
++			},
++		},
++	}
++}
++
++// ruleToCreate converts a ruleBlockModel to the API create body. Position is intentionally
++// omitted; the API assigns positions sequentially based on the order of rules in the array.
++func ruleToCreate(r ruleBlockModel) v9.FirewallRulesetFirewallRuleCreate {
++	rule := v9.FirewallRulesetFirewallRuleCreate{
++		Action:    r.Action.ValueString(),
++		Direction: r.Direction.ValueString(),
++		Family:    r.Family.ValueString(),
++	}
++	if !r.Protocol.IsNull() && !r.Protocol.IsUnknown() {
++		rule.Protocol = r.Protocol.ValueString()
++	}
++	if !r.Enabled.IsNull() && !r.Enabled.IsUnknown() {
++		rule.Enabled = r.Enabled.ValueBoolPointer()
++	}
++	if !r.Comment.IsNull() && !r.Comment.IsUnknown() {
++		rule.Comment = r.Comment.ValueStringPointer()
++	}
++	if !r.ICMPType.IsNull() && !r.ICMPType.IsUnknown() {
++		rule.IcmpType = r.ICMPType.ValueInt64Pointer()
++	}
++	if !r.SourceAddressCIDR.IsNull() && !r.SourceAddressCIDR.IsUnknown() {
++		rule.SourceAddressCidr = r.SourceAddressCIDR.ValueStringPointer()
++	}
++	if !r.SourceAddressStart.IsNull() && !r.SourceAddressStart.IsUnknown() {
++		rule.SourceAddressStart = r.SourceAddressStart.ValueStringPointer()
++	}
++	if !r.SourceAddressEnd.IsNull() && !r.SourceAddressEnd.IsUnknown() {
++		rule.SourceAddressEnd = r.SourceAddressEnd.ValueStringPointer()
++	}
++	if !r.SourcePortStart.IsNull() && !r.SourcePortStart.IsUnknown() {
++		rule.SourcePortStart = r.SourcePortStart.ValueInt64Pointer()
++	}
++	if !r.SourcePortEnd.IsNull() && !r.SourcePortEnd.IsUnknown() {
++		rule.SourcePortEnd = r.SourcePortEnd.ValueInt64Pointer()
++	}
++	if !r.DestinationAddressCIDR.IsNull() && !r.DestinationAddressCIDR.IsUnknown() {
++		rule.DestinationAddressCidr = r.DestinationAddressCIDR.ValueStringPointer()
++	}
++	if !r.DestinationAddressStart.IsNull() && !r.DestinationAddressStart.IsUnknown() {
++		rule.DestinationAddressStart = r.DestinationAddressStart.ValueStringPointer()
++	}
++	if !r.DestinationAddressEnd.IsNull() && !r.DestinationAddressEnd.IsUnknown() {
++		rule.DestinationAddressEnd = r.DestinationAddressEnd.ValueStringPointer()
++	}
++	if !r.DestinationPortStart.IsNull() && !r.DestinationPortStart.IsUnknown() {
++		rule.DestinationPortStart = r.DestinationPortStart.ValueInt64Pointer()
++	}
++	if !r.DestinationPortEnd.IsNull() && !r.DestinationPortEnd.IsUnknown() {
++		rule.DestinationPortEnd = r.DestinationPortEnd.ValueInt64Pointer()
++	}
++	return rule
++}
++
++// ruleFromAPI converts an API response rule into a ruleBlockModel.
++func ruleFromAPI(api v9.FirewallRulesetRuleDetailResponse) ruleBlockModel {
++	r := ruleBlockModel{
++		Action:    types.StringValue(interfaceString(api.Action)),
++		Direction: types.StringValue(interfaceString(api.Direction)),
++		Family:    types.StringValue(interfaceString(api.Family)),
++		Enabled:   types.BoolPointerValue(api.Enabled),
++		Comment:   types.StringPointerValue(api.Comment),
++		Position:  types.Int64PointerValue(api.Position),
++		ICMPType:  types.Int64PointerValue(api.IcmpType),
++
++		SourcePortStart:      types.Int64PointerValue(api.SourcePortStart),
++		SourcePortEnd:        types.Int64PointerValue(api.SourcePortEnd),
++		DestinationPortStart: types.Int64PointerValue(api.DestinationPortStart),
++		DestinationPortEnd:   types.Int64PointerValue(api.DestinationPortEnd),
++	}
++	if api.Protocol == nil {
++		r.Protocol = types.StringNull()
++	} else {
++		r.Protocol = types.StringValue(interfaceString(api.Protocol))
++	}
++	if api.SourceAddressCidr == nil || *api.SourceAddressCidr == "" {
++		r.SourceAddressCIDR = types.StringNull()
++	} else {
++		r.SourceAddressCIDR = types.StringValue(*api.SourceAddressCidr)
++	}
++	if api.SourceAddressStart == nil || *api.SourceAddressStart == "" {
++		r.SourceAddressStart = types.StringNull()
++	} else {
++		r.SourceAddressStart = types.StringValue(*api.SourceAddressStart)
++	}
++	if api.SourceAddressEnd == nil || *api.SourceAddressEnd == "" {
++		r.SourceAddressEnd = types.StringNull()
++	} else {
++		r.SourceAddressEnd = types.StringValue(*api.SourceAddressEnd)
++	}
++	if api.DestinationAddressCidr == nil || *api.DestinationAddressCidr == "" {
++		r.DestinationAddressCIDR = types.StringNull()
++	} else {
++		r.DestinationAddressCIDR = types.StringValue(*api.DestinationAddressCidr)
++	}
++	if api.DestinationAddressStart == nil || *api.DestinationAddressStart == "" {
++		r.DestinationAddressStart = types.StringNull()
++	} else {
++		r.DestinationAddressStart = types.StringValue(*api.DestinationAddressStart)
++	}
++	if api.DestinationAddressEnd == nil || *api.DestinationAddressEnd == "" {
++		r.DestinationAddressEnd = types.StringNull()
++	} else {
++		r.DestinationAddressEnd = types.StringValue(*api.DestinationAddressEnd)
++	}
++	return r
++}
++
++// putRules replaces the entire rule list for a ruleset using the bulk PUT endpoint.
++// The API ignores any position field in the request body and assigns positions 1, 2, 3...
++// based on the order of rules in the array.
++func putRules(ctx context.Context, client *v9.ClientWithResponses, rulesetUUID uuid.UUID, rules []ruleBlockModel) ([]ruleBlockModel, error) {
++	apiRules := make([]v9.FirewallRulesetFirewallRuleCreate, len(rules))
++	for i, r := range rules {
++		apiRules[i] = ruleToCreate(r)
++	}
++
++	body := v9.CreateMultipleFirewallRulesetRuleJSONRequestBody{
++		Rules: apiRules,
++	}
++
++	resp, err := client.CreateMultipleFirewallRulesetRuleWithResponse(ctx, rulesetUUID, body)
++	if err != nil {
++		return nil, fmt.Errorf("calling bulk PUT rules: %w", err)
++	}
++	if resp.StatusCode() != http.StatusOK {
++		return nil, fmt.Errorf("bulk PUT rules returned %s", resp.Status())
++	}
++	if resp.JSON200 == nil {
++		return nil, fmt.Errorf("bulk PUT rules returned no response body")
++	}
++
++	result := make([]ruleBlockModel, len(resp.JSON200.Rules))
++	for i, rule := range resp.JSON200.Rules {
++		result[i] = ruleFromAPI(rule)
++	}
++	return result, nil
++}
++
++// readRules fetches the current rule list for a ruleset from the API.
++func readRules(ctx context.Context, client *v9.ClientWithResponses, rulesetUUID uuid.UUID) ([]ruleBlockModel, error) {
++	resp, err := client.ListFirewallRulesetRulesWithResponse(ctx, rulesetUUID, nil)
++	if err != nil {
++		return nil, fmt.Errorf("listing rules: %w", err)
++	}
++	if resp.StatusCode() != http.StatusOK {
++		return nil, fmt.Errorf("list rules returned %s", resp.Status())
++	}
++	if resp.JSON200 == nil {
++		return nil, fmt.Errorf("list rules returned no response body")
++	}
++
++	result := make([]ruleBlockModel, len(resp.JSON200.Rules))
++	for i, rule := range resp.JSON200.Rules {
++		result[i] = ruleFromAPI(rule)
++	}
++	return result, nil
++}
++
++// rulesFromAPI fetches current rules and converts them to a types.List.
++func rulesFromAPI(ctx context.Context, client *v9.ClientWithResponses, rulesetUUID uuid.UUID) (types.List, error) {
++	rules, err := readRules(ctx, client, rulesetUUID)
++	if err != nil {
++		return types.ListNull(ruleObjectType()), err
++	}
++	if len(rules) == 0 {
++		return types.ListValueMust(ruleObjectType(), []attr.Value{}), nil
++	}
++	list, diags := types.ListValueFrom(ctx, ruleObjectType(), rules)
++	if diags.HasError() {
++		return types.ListNull(ruleObjectType()), fmt.Errorf("converting rules to list value")
++	}
++	return list, nil
++}
++
++// rulesFromPUT sends a bulk PUT and returns the resulting rules as a types.List.
++func rulesFromPUT(ctx context.Context, client *v9.ClientWithResponses, rulesetUUID uuid.UUID, configRules []ruleBlockModel) (types.List, error) {
++	rules, err := putRules(ctx, client, rulesetUUID, configRules)
++	if err != nil {
++		return types.ListNull(ruleObjectType()), err
++	}
++	if len(rules) == 0 {
++		return types.ListValueMust(ruleObjectType(), []attr.Value{}), nil
++	}
++	list, diags := types.ListValueFrom(ctx, ruleObjectType(), rules)
++	if diags.HasError() {
++		return types.ListNull(ruleObjectType()), fmt.Errorf("converting PUT response rules to list value")
++	}
++	return list, nil
++}
++
++func toAPILabels(ctx context.Context, labels types.Map) (*[]v9.FirewallRulesetCreateLabel, error) {
++	if labels.IsNull() || labels.IsUnknown() {
++		emptyLabels := []v9.FirewallRulesetCreateLabel{}
++		return &emptyLabels, nil
++	}
++
++	labelMap := map[string]string{}
++	if diags := labels.ElementsAs(ctx, &labelMap, false); diags.HasError() {
++		return nil, fmt.Errorf("unable to decode labels")
++	}
++
++	keys := make([]string, 0, len(labelMap))
++	for k := range labelMap {
++		keys = append(keys, k)
++	}
++	sort.Strings(keys)
++
++	apiLabels := make([]v9.FirewallRulesetCreateLabel, 0, len(labelMap))
++	for _, k := range keys {
++		apiLabels = append(apiLabels, v9.FirewallRulesetCreateLabel{Key: k, Value: labelMap[k]})
++	}
++	return &apiLabels, nil
++}
++
++func setRulesetValues(ctx context.Context, state *firewallRulesetModel, api *v9.FirewallRulesetDetailResponse) error {
++	if api.Uuid != nil {
++		state.ID = types.StringValue(api.Uuid.String())
++	}
++	if api.Name != nil {
++		state.Name = types.StringValue(*api.Name)
++	}
++	state.Description = types.StringPointerValue(api.Description)
++	state.Enabled = types.BoolPointerValue(api.Enabled)
++	state.DefaultDNSRulesEnabled = types.BoolPointerValue(api.DefaultDnsRulesEnabled)
++	if api.ServerUuid == nil {
++		state.ServerUUID = types.StringNull()
++	} else {
++		state.ServerUUID = types.StringValue(api.ServerUuid.String())
++	}
++	if api.Version == nil {
++		state.Version = types.Int64Null()
++	} else {
++		state.Version = types.Int64Value(int64(*api.Version))
++	}
++	if api.CreatedAt == nil {
++		state.CreatedAt = types.StringNull()
++	} else {
++		state.CreatedAt = types.StringValue(api.CreatedAt.String())
++	}
++	if api.UpdatedAt == nil {
++		state.UpdatedAt = types.StringNull()
++	} else {
++		state.UpdatedAt = types.StringValue(api.UpdatedAt.String())
++	}
++	if api.Labels == nil || len(*api.Labels) == 0 {
++		state.Labels = types.MapNull(types.StringType)
++	} else {
++		labels := map[string]string{}
++		for _, l := range *api.Labels {
++			labels[l.Key] = l.Value
++		}
++		mapped, diags := types.MapValueFrom(ctx, types.StringType, labels)
++		if diags.HasError() {
++			return fmt.Errorf("unable to set labels")
++		}
++		state.Labels = mapped
++	}
++	return nil
++}
++
++func (r *firewallRulesetResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
++	var plan firewallRulesetModel
++	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
++	if resp.Diagnostics.HasError() {
++		return
++	}
++
++	labels, err := toAPILabels(ctx, plan.Labels)
++	if err != nil {
++		resp.Diagnostics.AddError("Unable to create firewall ruleset", utils.ErrorDiagnosticDetail(err))
++		return
++	}
++
++	stateful := true
++	body := v9.CreateFirewallRulesetJSONRequestBody{
++		Name:     plan.Name.ValueString(),
++		Stateful: &stateful,
++	}
++	if !plan.Description.IsNull() && !plan.Description.IsUnknown() {
++		body.Description = plan.Description.ValueStringPointer()
++	}
++	if !plan.Enabled.IsNull() && !plan.Enabled.IsUnknown() {
++		body.Enabled = plan.Enabled.ValueBoolPointer()
++	}
++	if !plan.DefaultDNSRulesEnabled.IsNull() && !plan.DefaultDNSRulesEnabled.IsUnknown() {
++		body.DefaultDnsRulesEnabled = plan.DefaultDNSRulesEnabled.ValueBoolPointer()
++	}
++	if labels != nil {
++		body.Labels = labels
++	}
++	if !plan.ServerUUID.IsNull() && !plan.ServerUUID.IsUnknown() && plan.ServerUUID.ValueString() != "" {
++		serverUUID, err := uuid.Parse(plan.ServerUUID.ValueString())
++		if err != nil {
++			resp.Diagnostics.AddError("Invalid server UUID", utils.ErrorDiagnosticDetail(err))
++			return
++		}
++		body.ServerUuid = &serverUUID
++	}
++
++	apiResp, err := r.client.CreateFirewallRulesetWithResponse(ctx, body)
++	if err != nil {
++		resp.Diagnostics.AddError("Unable to create firewall ruleset", utils.ErrorDiagnosticDetail(err))
++		return
++	}
++	if apiResp.StatusCode() != http.StatusCreated {
++		detail := fmt.Sprintf("API returned unexpected status %s", apiResp.Status())
++		if apiResp.Body != nil {
++			detail = fmt.Sprintf("%s. Response: %s", detail, string(apiResp.Body))
++		}
++		resp.Diagnostics.AddError("Unable to create firewall ruleset", detail)
++		return
++	}
++
++	if err := setRulesetValues(ctx, &plan, apiResp.JSON201); err != nil {
++		resp.Diagnostics.AddError("Unable to create firewall ruleset", utils.ErrorDiagnosticDetail(err))
++		return
++	}
++
++	rulesetUUID, err := uuid.Parse(plan.ID.ValueString())
++	if err != nil {
++		resp.Diagnostics.AddError("Invalid ruleset UUID after create", utils.ErrorDiagnosticDetail(err))
++		return
++	}
++
++	if !plan.Rules.IsNull() && !plan.Rules.IsUnknown() {
++		var configRules []ruleBlockModel
++		resp.Diagnostics.Append(plan.Rules.ElementsAs(ctx, &configRules, false)...)
++		if resp.Diagnostics.HasError() {
++			return
++		}
++		plan.Rules, err = rulesFromPUT(ctx, r.client, rulesetUUID, configRules)
++		if err != nil {
++			resp.Diagnostics.AddError("Unable to set firewall rules", utils.ErrorDiagnosticDetail(err))
++			return
++		}
++	} else {
++		plan.Rules, err = rulesFromAPI(ctx, r.client, rulesetUUID)
++		if err != nil {
++			resp.Diagnostics.AddError("Unable to read firewall rules", utils.ErrorDiagnosticDetail(err))
++			return
++		}
++	}
++
++	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
++}
++
++func (r *firewallRulesetResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
++	var state firewallRulesetModel
++	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
++	if resp.Diagnostics.HasError() {
++		return
++	}
++	if state.ID.ValueString() == "" {
++		resp.State.RemoveResource(ctx)
++		return
++	}
++
++	rulesetUUID, err := uuid.Parse(state.ID.ValueString())
++	if err != nil {
++		resp.Diagnostics.AddError("Invalid ruleset UUID", utils.ErrorDiagnosticDetail(err))
++		return
++	}
++
++	apiResp, err := r.client.GetFirewallRulesetWithResponse(ctx, rulesetUUID)
++	if err != nil {
++		resp.Diagnostics.AddError("Unable to read firewall ruleset", utils.ErrorDiagnosticDetail(err))
++		return
++	}
++	if apiResp.StatusCode() == http.StatusNotFound {
++		resp.State.RemoveResource(ctx)
++		return
++	}
++	if apiResp.StatusCode() != http.StatusOK {
++		resp.Diagnostics.AddError(
++			"Unable to read firewall ruleset",
++			fmt.Sprintf("API returned unexpected status %s", apiResp.Status()),
++		)
++		return
++	}
++
++	if err := setRulesetValues(ctx, &state, apiResp.JSON200); err != nil {
++		resp.Diagnostics.AddError("Unable to read firewall ruleset", utils.ErrorDiagnosticDetail(err))
++		return
++	}
++
++	// Always refresh rules from API to keep state consistent.
++	state.Rules, err = rulesFromAPI(ctx, r.client, rulesetUUID)
++	if err != nil {
++		resp.Diagnostics.AddError("Unable to read firewall rules", utils.ErrorDiagnosticDetail(err))
++		return
++	}
++
++	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
++}
++
++func (r *firewallRulesetResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
++	var plan, state firewallRulesetModel
++	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
++	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
++	if resp.Diagnostics.HasError() {
++		return
++	}
++
++	labels, err := toAPILabels(ctx, plan.Labels)
++	if err != nil {
++		resp.Diagnostics.AddError("Unable to update firewall ruleset", utils.ErrorDiagnosticDetail(err))
++		return
++	}
++
++	body := v9.ModifyFirewallRulesetJSONRequestBody{
++		Name:   plan.Name.ValueStringPointer(),
++		Labels: labels,
++	}
++	if !plan.Description.IsNull() {
++		body.Description = plan.Description.ValueStringPointer()
++	}
++	if !plan.Enabled.IsNull() {
++		body.Enabled = plan.Enabled.ValueBoolPointer()
++	}
++	if !plan.DefaultDNSRulesEnabled.IsNull() {
++		body.DefaultDnsRulesEnabled = plan.DefaultDNSRulesEnabled.ValueBoolPointer()
++	}
++
++	rulesetUUID, err := uuid.Parse(state.ID.ValueString())
++	if err != nil {
++		resp.Diagnostics.AddError("Invalid ruleset UUID", utils.ErrorDiagnosticDetail(err))
++		return
++	}
++
++	apiResp, err := r.client.ModifyFirewallRulesetWithResponse(ctx, rulesetUUID, body)
++	if err != nil {
++		resp.Diagnostics.AddError("Unable to update firewall ruleset", utils.ErrorDiagnosticDetail(err))
++		return
++	}
++	if apiResp.StatusCode() != http.StatusOK {
++		resp.Diagnostics.AddError(
++			"Unable to update firewall ruleset",
++			fmt.Sprintf("API returned unexpected status %s", apiResp.Status()),
++		)
++		return
++	}
++
++	if err := setRulesetValues(ctx, &plan, apiResp.JSON200); err != nil {
++		resp.Diagnostics.AddError("Unable to update firewall ruleset", utils.ErrorDiagnosticDetail(err))
++		return
++	}
++
++	if !plan.Rules.IsNull() && !plan.Rules.IsUnknown() {
++		var configRules []ruleBlockModel
++		resp.Diagnostics.Append(plan.Rules.ElementsAs(ctx, &configRules, false)...)
++		if resp.Diagnostics.HasError() {
++			return
++		}
++		plan.Rules, err = rulesFromPUT(ctx, r.client, rulesetUUID, configRules)
++		if err != nil {
++			resp.Diagnostics.AddError("Unable to update firewall rules", utils.ErrorDiagnosticDetail(err))
++			return
++		}
++	} else {
++		plan.Rules, err = rulesFromAPI(ctx, r.client, rulesetUUID)
++		if err != nil {
++			resp.Diagnostics.AddError("Unable to read firewall rules", utils.ErrorDiagnosticDetail(err))
++			return
++		}
++	}
++
++	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
++}
++
++func (r *firewallRulesetResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
++	var state firewallRulesetModel
++	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
++	if resp.Diagnostics.HasError() {
++		return
++	}
++
++	rulesetUUID, err := uuid.Parse(state.ID.ValueString())
++	if err != nil {
++		resp.Diagnostics.AddError("Invalid ruleset UUID", utils.ErrorDiagnosticDetail(err))
++		return
++	}
++
++	apiResp, err := r.client.DeleteFirewallRuleset(ctx, rulesetUUID)
++	if err != nil {
++		resp.Diagnostics.AddError("Unable to delete firewall ruleset", utils.ErrorDiagnosticDetail(err))
++		return
++	}
++	if apiResp.Body != nil {
++		defer apiResp.Body.Close()
++	}
++	if apiResp.StatusCode != http.StatusNoContent && apiResp.StatusCode != http.StatusNotFound {
++		resp.Diagnostics.AddError(
++			"Unable to delete firewall ruleset",
++			fmt.Sprintf("API returned unexpected status %s", apiResp.Status),
++		)
++	}
++}
++
++func (r *firewallRulesetResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
++	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
++}
+diff --git a/internal/service/managedobjectstorage/bucket.go b/internal/service/managedobjectstorage/bucket.go
+index 496b2e939..58095bb6f 100644
+--- a/internal/service/managedobjectstorage/bucket.go
++++ b/internal/service/managedobjectstorage/bucket.go
+@@ -2,11 +2,12 @@ package managedobjectstorage
+ 
+ import (
+ 	"context"
++	"fmt"
++	"net/http"
+ 
+ 	"github.com/UpCloudLtd/terraform-provider-upcloud/internal/utils"
+-	"github.com/UpCloudLtd/upcloud-go-api/v8/upcloud"
+-	"github.com/UpCloudLtd/upcloud-go-api/v8/upcloud/request"
+-	"github.com/UpCloudLtd/upcloud-go-api/v8/upcloud/service"
++	v9 "github.com/UpCloudLtd/upcloud-go-api/v9/pkg/upcloud"
++	"github.com/google/uuid"
+ 	"github.com/hashicorp/terraform-plugin-framework/diag"
+ 	"github.com/hashicorp/terraform-plugin-framework/path"
+ 	"github.com/hashicorp/terraform-plugin-framework/resource"
+@@ -27,7 +28,7 @@ func NewBucketResource() resource.Resource {
+ }
+ 
+ type managedObjectStorageBucketResource struct {
+-	client *service.Service
++	client *v9.ClientWithResponses
+ }
+ 
+ func (r *managedObjectStorageBucketResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
+@@ -36,7 +37,7 @@ func (r *managedObjectStorageBucketResource) Metadata(_ context.Context, req res
+ 
+ // Configure adds the provider configured client to the resource.
+ func (r *managedObjectStorageBucketResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
+-	r.client, resp.Diagnostics = utils.GetClientFromProviderData(req.ProviderData)
++	r.client, resp.Diagnostics = utils.GetV9ClientFromProviderData(req.ProviderData)
+ }
+ 
+ type bucketModel struct {
+@@ -83,10 +84,35 @@ func (r *managedObjectStorageBucketResource) Schema(_ context.Context, _ resourc
+ 	}
+ }
+ 
+-func setBucketValues(data *bucketModel, bucket *upcloud.ManagedObjectStorageBucketMetrics) {
+-	data.Name = types.StringValue(bucket.Name)
+-	data.TotalObjects = types.Int64Value(int64(bucket.TotalObjects))
+-	data.TotalSizeBytes = types.Int64Value(int64(bucket.TotalSizeBytes))
++func setBucketValues(data *bucketModel, detail *v9.ObjectStorage2BucketDetailResponse, fallbackName string) {
++	if detail == nil {
++		return
++	}
++	if detail.Name != nil {
++		data.Name = types.StringValue(*detail.Name)
++	} else if fallbackName != "" {
++		data.Name = types.StringValue(fallbackName)
++	}
++	var totalObj int64
++	if detail.TotalObjects != nil {
++		totalObj = int64(*detail.TotalObjects)
++	}
++	data.TotalObjects = types.Int64Value(totalObj)
++	var totalSize int64
++	if detail.TotalSizeBytes != nil {
++		totalSize = *detail.TotalSizeBytes
++	}
++	data.TotalSizeBytes = types.Int64Value(totalSize)
++}
++
++func objectStorageAPIErrorDetail(prob *v9.ObjectStorage2ErrorResponse, body []byte) string {
++	if prob != nil {
++		return fmt.Sprintf("%s (HTTP %d, type=%s, correlation_id=%s)", prob.Title, prob.Status, prob.Type, prob.CorrelationId)
++	}
++	if len(body) > 0 {
++		return string(body)
++	}
++	return "unexpected API response"
+ }
+ 
+ func (r *managedObjectStorageBucketResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
+@@ -99,12 +125,18 @@ func (r *managedObjectStorageBucketResource) Create(ctx context.Context, req res
+ 
+ 	data.ID = types.StringValue(utils.MarshalID(data.ServiceUUID.ValueString(), data.Name.ValueString()))
+ 
+-	apiReq := &request.CreateManagedObjectStorageBucketRequest{
+-		Name:        data.Name.ValueString(),
+-		ServiceUUID: data.ServiceUUID.ValueString(),
++	svcUUID, err := uuid.Parse(data.ServiceUUID.ValueString())
++	if err != nil {
++		resp.Diagnostics.AddError(
++			"Unable to parse service UUID",
++			utils.ErrorDiagnosticDetail(err),
++		)
++		return
+ 	}
+ 
+-	bucket, err := r.client.CreateManagedObjectStorageBucket(ctx, apiReq)
++	apiResp, err := r.client.CreateObjectStorageBucketWithResponse(ctx, svcUUID, v9.CreateObjectStorageBucketJSONRequestBody{
++		Name: data.Name.ValueString(),
++	})
+ 	if err != nil {
+ 		resp.Diagnostics.AddError(
+ 			"Unable to create managed object storage bucket",
+@@ -112,30 +144,63 @@ func (r *managedObjectStorageBucketResource) Create(ctx context.Context, req res
+ 		)
+ 		return
+ 	}
++	if apiResp.StatusCode() != http.StatusCreated || apiResp.JSON201 == nil {
++		resp.Diagnostics.AddError(
++			"Unable to create managed object storage bucket",
++			objectStorageAPIErrorDetail(apiResp.ApplicationproblemJSONDefault, apiResp.Body),
++		)
++		return
++	}
+ 
+-	setBucketValues(&data, &bucket)
++	setBucketValues(&data, apiResp.JSON201, data.Name.ValueString())
+ 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
+ }
+ 
+-func getBucket(ctx context.Context, serviceUUID, name string, client *service.Service) (bucket *upcloud.ManagedObjectStorageBucketMetrics, diags diag.Diagnostics) {
+-	buckets, err := client.GetManagedObjectStorageBucketMetrics(ctx, &request.GetManagedObjectStorageBucketMetricsRequest{
+-		ServiceUUID: serviceUUID,
+-	})
++func getBucket(ctx context.Context, serviceUUID, name string, client *v9.ClientWithResponses) (*v9.ObjectStorage2BucketDetailResponse, diag.Diagnostics) {
++	var diags diag.Diagnostics
++
++	svcUUID, err := uuid.Parse(serviceUUID)
+ 	if err != nil {
+ 		diags.AddError(
+-			"Unable to read managed object storage buckets",
++			"Unable to parse service UUID",
+ 			utils.ErrorDiagnosticDetail(err),
+ 		)
+ 		return nil, diags
+ 	}
+ 
+-	for _, b := range buckets {
+-		if b.Name == name {
+-			bucket = &b
+-			break
++	apiResp, err := client.ListObjectStorageBucketMetricsWithResponse(ctx, svcUUID, nil)
++	if err != nil {
++		diags.AddError(
++			"Unable to read managed object storage buckets",
++			utils.ErrorDiagnosticDetail(err),
++		)
++		return nil, diags
++	}
++	if apiResp.StatusCode() == http.StatusNotFound {
++		diags.AddError(
++			"Unable to read managed object storage buckets",
++			objectStorageAPIErrorDetail(apiResp.ApplicationproblemJSONDefault, apiResp.Body),
++		)
++		return nil, diags
++	}
++	if apiResp.StatusCode() != http.StatusOK {
++		diags.AddError(
++			"Unable to read managed object storage buckets",
++			objectStorageAPIErrorDetail(apiResp.ApplicationproblemJSONDefault, apiResp.Body),
++		)
++		return nil, diags
++	}
++	if apiResp.JSON200 == nil {
++		return nil, diags
++	}
++	buckets := *apiResp.JSON200
++	for i := range buckets {
++		b := buckets[i]
++		if b.Name != nil && *b.Name == name {
++			return &b, diags
+ 		}
+ 	}
+-	return bucket, diags
++	return nil, diags
+ }
+ 
+ func (r *managedObjectStorageBucketResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
+@@ -162,12 +227,16 @@ func (r *managedObjectStorageBucketResource) Read(ctx context.Context, req resou
+ 	bucket, diags := getBucket(ctx, serviceUUID, name, r.client)
+ 	resp.Diagnostics.Append(diags...)
+ 
++	if resp.Diagnostics.HasError() {
++		return
++	}
++
+ 	if bucket == nil {
+ 		resp.State.RemoveResource(ctx)
+ 		return
+ 	}
+ 
+-	setBucketValues(&data, bucket)
++	setBucketValues(&data, bucket, name)
+ 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
+ }
+ 
+@@ -189,6 +258,9 @@ func (r *managedObjectStorageBucketResource) Update(ctx context.Context, req res
+ 
+ 	bucket, diags := getBucket(ctx, serviceUUID, name, r.client)
+ 	resp.Diagnostics.Append(diags...)
++	if resp.Diagnostics.HasError() {
++		return
++	}
+ 	if bucket == nil {
+ 		resp.Diagnostics.AddError(
+ 			"Bucket not found",
+@@ -197,7 +269,7 @@ func (r *managedObjectStorageBucketResource) Update(ctx context.Context, req res
+ 		return
+ 	}
+ 
+-	setBucketValues(&data, bucket)
++	setBucketValues(&data, bucket, name)
+ 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
+ }
+ 
+@@ -212,20 +284,29 @@ func (r *managedObjectStorageBucketResource) Delete(ctx context.Context, req res
+ 		return
+ 	}
+ 
+-	if err := r.client.DeleteManagedObjectStorageBucket(ctx, &request.DeleteManagedObjectStorageBucketRequest{
+-		ServiceUUID: serviceUUID,
+-		Name:        name,
+-	}); err != nil {
++	svcUUID, err := uuid.Parse(serviceUUID)
++	if err != nil {
++		resp.Diagnostics.AddError(
++			"Unable to parse service UUID",
++			utils.ErrorDiagnosticDetail(err),
++		)
++		return
++	}
++
++	apiResp, err := r.client.DeleteObjectStorageBucketWithResponse(ctx, svcUUID, name)
++	if err != nil {
+ 		resp.Diagnostics.AddError(
+ 			"Unable to delete managed object storage bucket",
+ 			utils.ErrorDiagnosticDetail(err),
+ 		)
++	} else if apiResp.StatusCode() < 200 || apiResp.StatusCode() >= 300 {
++		resp.Diagnostics.AddError(
++			"Unable to delete managed object storage bucket",
++			objectStorageAPIErrorDetail(apiResp.ApplicationproblemJSONDefault, apiResp.Body),
++		)
+ 	}
+ 
+-	if err := r.client.WaitForManagedObjectStorageBucketDeletion(ctx, &request.WaitForManagedObjectStorageBucketDeletionRequest{
+-		ServiceUUID: serviceUUID,
+-		Name:        name,
+-	}); err != nil {
++	if err := r.client.WaitForObjectStorageBucketDeletion(ctx, serviceUUID, name); err != nil {
+ 		resp.Diagnostics.AddError(
+ 			"The deleted bucket was not removed from the managed object storage service",
+ 			utils.ErrorDiagnosticDetail(err),
+diff --git a/internal/service/managedobjectstorage/custom_domain.go b/internal/service/managedobjectstorage/custom_domain.go
+index 8b1c7b79c..a097f02c1 100644
+--- a/internal/service/managedobjectstorage/custom_domain.go
++++ b/internal/service/managedobjectstorage/custom_domain.go
+@@ -2,10 +2,12 @@ package managedobjectstorage
+ 
+ import (
+ 	"context"
++	"fmt"
++	"net/http"
+ 
+ 	"github.com/UpCloudLtd/terraform-provider-upcloud/internal/utils"
+-	"github.com/UpCloudLtd/upcloud-go-api/v8/upcloud/request"
+-	"github.com/UpCloudLtd/upcloud-go-api/v8/upcloud/service"
++	v9 "github.com/UpCloudLtd/upcloud-go-api/v9/pkg/upcloud"
++	"github.com/google/uuid"
+ 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
+ 	"github.com/hashicorp/terraform-plugin-framework/path"
+ 	"github.com/hashicorp/terraform-plugin-framework/resource"
+@@ -28,7 +30,7 @@ func NewCustomDomainResource() resource.Resource {
+ }
+ 
+ type managedObjectStorageCustomDomainResource struct {
+-	client *service.Service
++	client *v9.ClientWithResponses
+ }
+ 
+ func (r *managedObjectStorageCustomDomainResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
+@@ -37,7 +39,7 @@ func (r *managedObjectStorageCustomDomainResource) Metadata(_ context.Context, r
+ 
+ // Configure adds the provider configured client to the resource.
+ func (r *managedObjectStorageCustomDomainResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
+-	r.client, resp.Diagnostics = utils.GetClientFromProviderData(req.ProviderData)
++	r.client, resp.Diagnostics = utils.GetV9ClientFromProviderData(req.ProviderData)
+ }
+ 
+ type customDomainModel struct {
+@@ -89,13 +91,16 @@ func (r *managedObjectStorageCustomDomainResource) Create(ctx context.Context, r
+ 
+ 	data.ID = types.StringValue(utils.MarshalID(data.ServiceUUID.ValueString(), data.DomainName.ValueString()))
+ 
+-	apiReq := &request.CreateManagedObjectStorageCustomDomainRequest{
+-		DomainName:  data.DomainName.ValueString(),
+-		Type:        data.Type.ValueString(),
+-		ServiceUUID: data.ServiceUUID.ValueString(),
++	serviceUUID, err := uuid.Parse(data.ServiceUUID.ValueString())
++	if err != nil {
++		resp.Diagnostics.AddError("Invalid service UUID", utils.ErrorDiagnosticDetail(err))
++		return
+ 	}
+ 
+-	err := r.client.CreateManagedObjectStorageCustomDomain(ctx, apiReq)
++	apiResp, err := r.client.AttachObjectStorageCustomDomainWithResponse(ctx, serviceUUID, v9.ObjectStorage2CustomDomainCreate{
++		DomainName: data.DomainName.ValueString(),
++		Type:       v9.ObjectStorage2CustomDomainCreateType(data.Type.ValueString()),
++	})
+ 	if err != nil {
+ 		resp.Diagnostics.AddError(
+ 			"Unable to create managed object storage custom domain",
+@@ -103,6 +108,13 @@ func (r *managedObjectStorageCustomDomainResource) Create(ctx context.Context, r
+ 		)
+ 		return
+ 	}
++	if apiResp.StatusCode() != http.StatusCreated {
++		resp.Diagnostics.AddError(
++			"Unable to create managed object storage custom domain",
++			fmt.Sprintf("API returned unexpected status %s", apiResp.Status()),
++		)
++		return
++	}
+ 
+ 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
+ }
+@@ -120,32 +132,47 @@ func (r *managedObjectStorageCustomDomainResource) Read(ctx context.Context, req
+ 		return
+ 	}
+ 
+-	var serviceUUID, domainName string
+-	resp.Diagnostics.Append(utils.UnmarshalIDDiag(data.ID.ValueString(), &serviceUUID, &domainName)...)
++	var serviceUUIDStr, domainName string
++	resp.Diagnostics.Append(utils.UnmarshalIDDiag(data.ID.ValueString(), &serviceUUIDStr, &domainName)...)
+ 
+ 	if resp.Diagnostics.HasError() {
+ 		return
+ 	}
+ 
+-	data.ServiceUUID = types.StringValue(serviceUUID)
+-	customDomain, err := r.client.GetManagedObjectStorageCustomDomain(ctx, &request.GetManagedObjectStorageCustomDomainRequest{
+-		DomainName:  domainName,
+-		ServiceUUID: serviceUUID,
+-	})
++	serviceUUID, err := uuid.Parse(serviceUUIDStr)
++	if err != nil {
++		resp.Diagnostics.AddError("Invalid service UUID", utils.ErrorDiagnosticDetail(err))
++		return
++	}
++
++	data.ServiceUUID = types.StringValue(serviceUUIDStr)
++	apiResp, err := r.client.GetObjectStorageCustomDomainWithResponse(ctx, serviceUUID, domainName)
+ 	if err != nil {
+-		if utils.IsNotFoundError(err) {
+-			resp.State.RemoveResource(ctx)
+-		} else {
+-			resp.Diagnostics.AddError(
+-				"Unable to read managed object storage custom domain details",
+-				utils.ErrorDiagnosticDetail(err),
+-			)
+-		}
++		resp.Diagnostics.AddError(
++			"Unable to read managed object storage custom domain details",
++			utils.ErrorDiagnosticDetail(err),
++		)
++		return
++	}
++	if apiResp.StatusCode() == http.StatusNotFound {
++		resp.State.RemoveResource(ctx)
++		return
++	}
++	if apiResp.StatusCode() != http.StatusOK {
++		resp.Diagnostics.AddError(
++			"Unable to read managed object storage custom domain details",
++			fmt.Sprintf("API returned unexpected status %s", apiResp.Status()),
++		)
+ 		return
+ 	}
+ 
+-	data.DomainName = types.StringValue(customDomain.DomainName)
+-	data.Type = types.StringValue(customDomain.Type)
++	customDomain := apiResp.JSON200
++	if customDomain.DomainName != nil {
++		data.DomainName = types.StringValue(*customDomain.DomainName)
++	}
++	if customDomain.Type != nil {
++		data.Type = types.StringValue(*customDomain.Type)
++	}
+ 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
+ }
+ 
+@@ -158,31 +185,48 @@ func (r *managedObjectStorageCustomDomainResource) Update(ctx context.Context, r
+ 		return
+ 	}
+ 
+-	var serviceUUID, domainName string
+-	resp.Diagnostics.Append(utils.UnmarshalIDDiag(state.ID.ValueString(), &serviceUUID, &domainName)...)
++	var serviceUUIDStr, domainName string
++	resp.Diagnostics.Append(utils.UnmarshalIDDiag(state.ID.ValueString(), &serviceUUIDStr, &domainName)...)
+ 
+ 	if resp.Diagnostics.HasError() {
+ 		return
+ 	}
+ 
+-	customDomain, err := r.client.ModifyManagedObjectStorageCustomDomain(ctx, &request.ModifyManagedObjectStorageCustomDomainRequest{
+-		DomainName:  domainName,
+-		ServiceUUID: serviceUUID,
+-		CustomDomain: request.ModifyCustomDomain{
+-			DomainName: data.DomainName.ValueString(),
+-			Type:       data.Type.ValueString(),
+-		},
++	serviceUUID, err := uuid.Parse(serviceUUIDStr)
++	if err != nil {
++		resp.Diagnostics.AddError("Invalid service UUID", utils.ErrorDiagnosticDetail(err))
++		return
++	}
++
++	newDomainName := data.DomainName.ValueString()
++	newType := v9.ObjectStorage2CustomDomainModifyType(data.Type.ValueString())
++	apiResp, err := r.client.ModifyObjectStorageCustomDomainWithResponse(ctx, serviceUUID, domainName, v9.ObjectStorage2CustomDomainModify{
++		DomainName: &newDomainName,
++		Type:       &newType,
+ 	})
+ 	if err != nil {
+ 		resp.Diagnostics.AddError(
+ 			"Unable to modify managed object storage custom domain",
+ 			utils.ErrorDiagnosticDetail(err),
+ 		)
++		return
++	}
++	if apiResp.StatusCode() != http.StatusOK {
++		resp.Diagnostics.AddError(
++			"Unable to modify managed object storage custom domain",
++			fmt.Sprintf("API returned unexpected status %s", apiResp.Status()),
++		)
++		return
+ 	}
+ 
++	customDomain := apiResp.JSON200
+ 	data.ID = types.StringValue(utils.MarshalID(data.ServiceUUID.ValueString(), data.DomainName.ValueString()))
+-	data.DomainName = types.StringValue(customDomain.DomainName)
+-	data.Type = types.StringValue(customDomain.Type)
++	if customDomain.DomainName != nil {
++		data.DomainName = types.StringValue(*customDomain.DomainName)
++	}
++	if customDomain.Type != nil {
++		data.Type = types.StringValue(*customDomain.Type)
++	}
+ 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
+ }
+ 
+@@ -190,21 +234,32 @@ func (r *managedObjectStorageCustomDomainResource) Delete(ctx context.Context, r
+ 	var data customDomainModel
+ 	resp.Diagnostics.Append(req.State.Get(ctx, &data)...)
+ 
+-	var serviceUUID, domainName string
+-	resp.Diagnostics.Append(utils.UnmarshalIDDiag(data.ID.ValueString(), &serviceUUID, &domainName)...)
++	var serviceUUIDStr, domainName string
++	resp.Diagnostics.Append(utils.UnmarshalIDDiag(data.ID.ValueString(), &serviceUUIDStr, &domainName)...)
+ 
+ 	if resp.Diagnostics.HasError() {
+ 		return
+ 	}
+ 
+-	if err := r.client.DeleteManagedObjectStorageCustomDomain(ctx, &request.DeleteManagedObjectStorageCustomDomainRequest{
+-		ServiceUUID: serviceUUID,
+-		DomainName:  domainName,
+-	}); err != nil {
++	serviceUUID, err := uuid.Parse(serviceUUIDStr)
++	if err != nil {
++		resp.Diagnostics.AddError("Invalid service UUID", utils.ErrorDiagnosticDetail(err))
++		return
++	}
++
++	apiResp, err := r.client.DeleteObjectStorageCustomDomainWithResponse(ctx, serviceUUID, domainName)
++	if err != nil {
+ 		resp.Diagnostics.AddError(
+ 			"Unable to delete managed object storage custom domain",
+ 			utils.ErrorDiagnosticDetail(err),
+ 		)
++		return
++	}
++	if apiResp.StatusCode() != http.StatusNoContent {
++		resp.Diagnostics.AddError(
++			"Unable to delete managed object storage custom domain",
++			fmt.Sprintf("API returned unexpected status %s", apiResp.Status()),
++		)
+ 	}
+ }
+ 
+diff --git a/internal/service/managedobjectstorage/policies_data_source.go b/internal/service/managedobjectstorage/policies_data_source.go
+index a1860a44e..1310bf76b 100644
+--- a/internal/service/managedobjectstorage/policies_data_source.go
++++ b/internal/service/managedobjectstorage/policies_data_source.go
+@@ -2,11 +2,11 @@ package managedobjectstorage
+ 
+ import (
+ 	"context"
++	"fmt"
+ 
+ 	"github.com/UpCloudLtd/terraform-provider-upcloud/internal/utils"
+-
+-	"github.com/UpCloudLtd/upcloud-go-api/v8/upcloud/request"
+-	"github.com/UpCloudLtd/upcloud-go-api/v8/upcloud/service"
++	v9 "github.com/UpCloudLtd/upcloud-go-api/v9/pkg/upcloud"
++	"github.com/google/uuid"
+ 	"github.com/hashicorp/terraform-plugin-framework/datasource"
+ 	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
+ 	"github.com/hashicorp/terraform-plugin-framework/types"
+@@ -22,7 +22,7 @@ var (
+ )
+ 
+ type managedObjectStoragePoliciesDataSource struct {
+-	client *service.Service
++	client *v9.ClientWithResponses
+ }
+ 
+ func (d *managedObjectStoragePoliciesDataSource) Metadata(_ context.Context, req datasource.MetadataRequest, resp *datasource.MetadataResponse) {
+@@ -30,7 +30,7 @@ func (d *managedObjectStoragePoliciesDataSource) Metadata(_ context.Context, req
+ }
+ 
+ func (d *managedObjectStoragePoliciesDataSource) Configure(_ context.Context, req datasource.ConfigureRequest, resp *datasource.ConfigureResponse) {
+-	d.client, resp.Diagnostics = utils.GetClientFromProviderData(req.ProviderData)
++	d.client, resp.Diagnostics = utils.GetV9ClientFromProviderData(req.ProviderData)
+ }
+ 
+ type managedObjectStoragePoliciesModel struct {
+@@ -124,9 +124,16 @@ func (d *managedObjectStoragePoliciesDataSource) Read(ctx context.Context, req d
+ 		return
+ 	}
+ 
+-	policies, err := d.client.GetManagedObjectStoragePolicies(ctx, &request.GetManagedObjectStoragePoliciesRequest{
+-		ServiceUUID: data.ServiceUUID.ValueString(),
+-	})
++	svcUUID, err := uuid.Parse(data.ServiceUUID.ValueString())
++	if err != nil {
++		resp.Diagnostics.AddError(
++			"Unable to read managed object-storage policies",
++			utils.ErrorDiagnosticDetail(err),
++		)
++		return
++	}
++
++	apiResp, err := d.client.ListObjectStoragePoliciesWithResponse(ctx, svcUUID)
+ 	if err != nil {
+ 		resp.Diagnostics.AddError(
+ 			"Unable to read managed object-storage policies",
+@@ -134,18 +141,33 @@ func (d *managedObjectStoragePoliciesDataSource) Read(ctx context.Context, req d
+ 		)
+ 		return
+ 	}
++	if apiResp.JSON200 == nil {
++		resp.Diagnostics.AddError(
++			"Unable to read managed object-storage policies",
++			utils.ErrorDiagnosticDetail(fmt.Errorf("unexpected response: %s", apiResp.HTTPResponse.Status)),
++		)
++		return
++	}
+ 
++	policies := *apiResp.JSON200
+ 	data.Policies = make([]managedObjectStoragePolicyModel, len(policies))
+ 	for i, policy := range policies {
+-		data.Policies[i].ARN = types.StringValue(policy.ARN)
+-		data.Policies[i].AttachmentCount = types.Int64Value(int64(policy.AttachmentCount))
+-		data.Policies[i].CreatedAt = types.StringValue(policy.CreatedAt.String())
+-		data.Policies[i].DefaultVersionID = types.StringValue(policy.DefaultVersionID)
+-		data.Policies[i].Description = types.StringValue(policy.Description)
+-		data.Policies[i].Document = types.StringValue(policy.Document)
+-		data.Policies[i].Name = types.StringValue(policy.Name)
+-		data.Policies[i].System = types.BoolValue(policy.System)
+-		data.Policies[i].UpdatedAt = types.StringValue(policy.UpdatedAt.String())
++		data.Policies[i].ServiceUUID = data.ServiceUUID
++		data.Policies[i].ARN = types.StringPointerValue(policy.Arn)
++		data.Policies[i].DefaultVersionID = types.StringPointerValue(policy.DefaultVersionId)
++		data.Policies[i].Description = types.StringPointerValue(policy.Description)
++		data.Policies[i].Document = types.StringPointerValue(policy.Document)
++		data.Policies[i].Name = types.StringPointerValue(policy.Name)
++		data.Policies[i].System = types.BoolPointerValue(policy.System)
++		if policy.AttachmentCount != nil {
++			data.Policies[i].AttachmentCount = types.Int64Value(int64(*policy.AttachmentCount))
++		}
++		if policy.CreatedAt != nil {
++			data.Policies[i].CreatedAt = types.StringValue(policy.CreatedAt.String())
++		}
++		if policy.UpdatedAt != nil {
++			data.Policies[i].UpdatedAt = types.StringValue(policy.UpdatedAt.String())
++		}
+ 	}
+ 
+ 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
+diff --git a/internal/service/managedobjectstorage/policy.go b/internal/service/managedobjectstorage/policy.go
+index 6a36bbbe3..a4dddb4f3 100644
+--- a/internal/service/managedobjectstorage/policy.go
++++ b/internal/service/managedobjectstorage/policy.go
+@@ -4,12 +4,12 @@ import (
+ 	"context"
+ 	"encoding/json"
+ 	"fmt"
++	"net/http"
+ 	"net/url"
+ 
+ 	"github.com/UpCloudLtd/terraform-provider-upcloud/internal/utils"
+-	"github.com/UpCloudLtd/upcloud-go-api/v8/upcloud"
+-	"github.com/UpCloudLtd/upcloud-go-api/v8/upcloud/request"
+-	"github.com/UpCloudLtd/upcloud-go-api/v8/upcloud/service"
++	v9 "github.com/UpCloudLtd/upcloud-go-api/v9/pkg/upcloud"
++	"github.com/google/uuid"
+ 	"github.com/hashicorp/terraform-plugin-framework/diag"
+ 	"github.com/hashicorp/terraform-plugin-framework/path"
+ 	"github.com/hashicorp/terraform-plugin-framework/resource"
+@@ -32,7 +32,7 @@ func NewPolicyResource() resource.Resource {
+ }
+ 
+ type managedObjectStoragePolicyResource struct {
+-	client *service.Service
++	client *v9.ClientWithResponses
+ }
+ 
+ func (r *managedObjectStoragePolicyResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
+@@ -41,7 +41,7 @@ func (r *managedObjectStoragePolicyResource) Metadata(_ context.Context, req res
+ 
+ // Configure adds the provider configured client to the resource.
+ func (r *managedObjectStoragePolicyResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
+-	r.client, resp.Diagnostics = utils.GetClientFromProviderData(req.ProviderData)
++	r.client, resp.Diagnostics = utils.GetV9ClientFromProviderData(req.ProviderData)
+ }
+ 
+ type policyModel struct {
+@@ -126,26 +126,36 @@ func (r *managedObjectStoragePolicyResource) Schema(_ context.Context, _ resourc
+ 	}
+ }
+ 
+-func setPolicyValues(_ context.Context, data *policyModel, policy *upcloud.ManagedObjectStoragePolicy) diag.Diagnostics {
++func setPolicyValues(_ context.Context, data *policyModel, policy *v9.ObjectStorage2PolicyDetailResponse) diag.Diagnostics {
+ 	var respDiagnostics diag.Diagnostics
+ 
+-	data.ARN = types.StringValue(policy.ARN)
+-	data.AttachmentCount = types.Int64Value(int64(policy.AttachmentCount))
+-	data.CreatedAt = types.StringValue(policy.CreatedAt.String())
+-	data.DefaultVersionID = types.StringValue(policy.DefaultVersionID)
+-	data.Name = types.StringValue(policy.Name)
+-	data.System = types.BoolValue(policy.System)
+-	data.UpdatedAt = types.StringValue(policy.UpdatedAt.String())
++	data.ARN = types.StringPointerValue(policy.Arn)
++	data.DefaultVersionID = types.StringPointerValue(policy.DefaultVersionId)
++	data.Name = types.StringPointerValue(policy.Name)
++	data.System = types.BoolPointerValue(policy.System)
++	if policy.AttachmentCount != nil {
++		data.AttachmentCount = types.Int64Value(int64(*policy.AttachmentCount))
++	}
++	if policy.CreatedAt != nil {
++		data.CreatedAt = types.StringValue(policy.CreatedAt.String())
++	}
++	if policy.UpdatedAt != nil {
++		data.UpdatedAt = types.StringValue(policy.UpdatedAt.String())
++	}
+ 
+ 	if data.Description.IsNull() || data.Description.IsUnknown() {
+-		if policy.Description == "" {
++		if policy.Description == nil || *policy.Description == "" {
+ 			data.Description = types.StringNull()
+ 		} else {
+-			data.Description = types.StringValue(policy.Description)
++			data.Description = types.StringPointerValue(policy.Description)
+ 		}
+ 	}
+ 
+-	apiDocument, diags := normalizePolicyDocument(policy.Document)
++	var apiDocStr string
++	if policy.Document != nil {
++		apiDocStr = *policy.Document
++	}
++	apiDocument, diags := normalizePolicyDocument(apiDocStr)
+ 	respDiagnostics.Append(diags...)
+ 	// Document is required, so it should only be empty during import.
+ 	if data.Document.IsNull() {
+@@ -175,17 +185,25 @@ func (r *managedObjectStoragePolicyResource) Create(ctx context.Context, req res
+ 
+ 	data.ID = types.StringValue(utils.MarshalID(data.ServiceUUID.ValueString(), data.Name.ValueString()))
+ 
+-	apiReq := &request.CreateManagedObjectStoragePolicyRequest{
+-		Name:        data.Name.ValueString(),
+-		Document:    data.Document.ValueString(),
+-		ServiceUUID: data.ServiceUUID.ValueString(),
++	svcUUID, err := uuid.Parse(data.ServiceUUID.ValueString())
++	if err != nil {
++		resp.Diagnostics.AddError(
++			"Unable to create managed object storage policy",
++			utils.ErrorDiagnosticDetail(err),
++		)
++		return
+ 	}
+ 
++	apiReq := v9.CreateObjectStoragePolicyJSONRequestBody{
++		Name:     data.Name.ValueString(),
++		Document: data.Document.ValueString(),
++	}
+ 	if !data.Description.IsNull() && !data.Description.IsUnknown() {
+-		apiReq.Description = data.Description.ValueString()
++		desc := data.Description.ValueString()
++		apiReq.Description = &desc
+ 	}
+ 
+-	policy, err := r.client.CreateManagedObjectStoragePolicy(ctx, apiReq)
++	apiResp, err := r.client.CreateObjectStoragePolicyWithResponse(ctx, svcUUID, apiReq)
+ 	if err != nil {
+ 		resp.Diagnostics.AddError(
+ 			"Unable to create managed object storage policy",
+@@ -193,8 +211,15 @@ func (r *managedObjectStoragePolicyResource) Create(ctx context.Context, req res
+ 		)
+ 		return
+ 	}
++	if apiResp.JSON201 == nil {
++		resp.Diagnostics.AddError(
++			"Unable to create managed object storage policy",
++			utils.ErrorDiagnosticDetail(fmt.Errorf("unexpected response: %s", apiResp.HTTPResponse.Status)),
++		)
++		return
++	}
+ 
+-	resp.Diagnostics.Append(setPolicyValues(ctx, &data, policy)...)
++	resp.Diagnostics.Append(setPolicyValues(ctx, &data, apiResp.JSON201)...)
+ 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
+ }
+ 
+@@ -220,23 +245,36 @@ func (r *managedObjectStoragePolicyResource) Read(ctx context.Context, req resou
+ 
+ 	data.ServiceUUID = types.StringValue(serviceUUID)
+ 
+-	policy, err := r.client.GetManagedObjectStoragePolicy(ctx, &request.GetManagedObjectStoragePolicyRequest{
+-		Name:        name,
+-		ServiceUUID: serviceUUID,
+-	})
++	svcUUID, err := uuid.Parse(serviceUUID)
+ 	if err != nil {
+-		if utils.IsNotFoundError(err) {
++		resp.Diagnostics.AddError(
++			"Unable to read managed object storage policy details",
++			utils.ErrorDiagnosticDetail(err),
++		)
++		return
++	}
++
++	apiResp, err := r.client.GetObjectStoragePolicyWithResponse(ctx, svcUUID, name)
++	if err != nil {
++		resp.Diagnostics.AddError(
++			"Unable to read managed object storage policy details",
++			utils.ErrorDiagnosticDetail(err),
++		)
++		return
++	}
++	if apiResp.JSON200 == nil {
++		if apiResp.HTTPResponse != nil && apiResp.HTTPResponse.StatusCode == http.StatusNotFound {
+ 			resp.State.RemoveResource(ctx)
+ 		} else {
+ 			resp.Diagnostics.AddError(
+ 				"Unable to read managed object storage policy details",
+-				utils.ErrorDiagnosticDetail(err),
++				utils.ErrorDiagnosticDetail(fmt.Errorf("unexpected response: %s", apiResp.HTTPResponse.Status)),
+ 			)
+ 		}
+ 		return
+ 	}
+ 
+-	resp.Diagnostics.Append(setPolicyValues(ctx, &data, policy)...)
++	resp.Diagnostics.Append(setPolicyValues(ctx, &data, apiResp.JSON200)...)
+ 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
+ }
+ 
+@@ -254,14 +292,23 @@ func (r *managedObjectStoragePolicyResource) Update(ctx context.Context, req res
+ 	stateDoc, diags := normalizePolicyDocument(state.Document.ValueString())
+ 	resp.Diagnostics.Append(diags...)
+ 
++	svcUUID, err := uuid.Parse(plan.ServiceUUID.ValueString())
++	if err != nil {
++		resp.Diagnostics.AddError(
++			"Unable to update managed object storage policy",
++			utils.ErrorDiagnosticDetail(err),
++		)
++		return
++	}
++
+ 	if planDoc != stateDoc {
+-		_, err := r.client.CreateManagedObjectStoragePolicyVersion(
++		apiResp, err := r.client.CreateObjectStoragePolicyVersionWithResponse(
+ 			ctx,
+-			&request.CreateManagedObjectStoragePolicyVersionRequest{
+-				ServiceUUID: plan.ServiceUUID.ValueString(),
+-				Name:        plan.Name.ValueString(),
+-				Document:    plan.Document.ValueString(),
+-				IsDefault:   true,
++			svcUUID,
++			plan.Name.ValueString(),
++			v9.CreateObjectStoragePolicyVersionJSONRequestBody{
++				Document:  plan.Document.ValueString(),
++				IsDefault: true,
+ 			},
+ 		)
+ 		if err != nil {
+@@ -271,12 +318,16 @@ func (r *managedObjectStoragePolicyResource) Update(ctx context.Context, req res
+ 			)
+ 			return
+ 		}
++		if apiResp.JSON201 == nil {
++			resp.Diagnostics.AddError(
++				"Unable to create managed object storage policy version",
++				utils.ErrorDiagnosticDetail(fmt.Errorf("unexpected response: %s", apiResp.HTTPResponse.Status)),
++			)
++			return
++		}
+ 	}
+ 
+-	policy, err := r.client.GetManagedObjectStoragePolicy(ctx, &request.GetManagedObjectStoragePolicyRequest{
+-		Name:        plan.Name.ValueString(),
+-		ServiceUUID: plan.ServiceUUID.ValueString(),
+-	})
++	readResp, err := r.client.GetObjectStoragePolicyWithResponse(ctx, svcUUID, plan.Name.ValueString())
+ 	if err != nil {
+ 		resp.Diagnostics.AddError(
+ 			"Unable to read managed object storage policy details",
+@@ -284,8 +335,15 @@ func (r *managedObjectStoragePolicyResource) Update(ctx context.Context, req res
+ 		)
+ 		return
+ 	}
++	if readResp.JSON200 == nil {
++		resp.Diagnostics.AddError(
++			"Unable to read managed object storage policy details",
++			utils.ErrorDiagnosticDetail(fmt.Errorf("unexpected response: %s", readResp.HTTPResponse.Status)),
++		)
++		return
++	}
+ 
+-	resp.Diagnostics.Append(setPolicyValues(ctx, &plan, policy)...)
++	resp.Diagnostics.Append(setPolicyValues(ctx, &plan, readResp.JSON200)...)
+ 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
+ }
+ 
+@@ -300,14 +358,26 @@ func (r *managedObjectStoragePolicyResource) Delete(ctx context.Context, req res
+ 		return
+ 	}
+ 
+-	if err := r.client.DeleteManagedObjectStoragePolicy(ctx, &request.DeleteManagedObjectStoragePolicyRequest{
+-		ServiceUUID: serviceUUID,
+-		Name:        name,
+-	}); err != nil {
++	svcUUID, err := uuid.Parse(serviceUUID)
++	if err != nil {
+ 		resp.Diagnostics.AddError(
+ 			"Unable to delete managed object storage policy",
+ 			utils.ErrorDiagnosticDetail(err),
+ 		)
++		return
++	}
++
++	apiResp, err := r.client.DeleteObjectStoragePolicyWithResponse(ctx, svcUUID, name)
++	if err != nil {
++		resp.Diagnostics.AddError(
++			"Unable to delete managed object storage policy",
++			utils.ErrorDiagnosticDetail(err),
++		)
++	} else if apiResp.StatusCode() < 200 || apiResp.StatusCode() >= 300 {
++		resp.Diagnostics.AddError(
++			"Unable to delete managed object storage policy",
++			objectStorageAPIErrorDetail(apiResp.ApplicationproblemJSONDefault, apiResp.Body),
++		)
+ 	}
+ }
+ 
+diff --git a/internal/service/managedobjectstorage/regions_data_source.go b/internal/service/managedobjectstorage/regions_data_source.go
+index 2296bc49f..9cabcdc5c 100644
+--- a/internal/service/managedobjectstorage/regions_data_source.go
++++ b/internal/service/managedobjectstorage/regions_data_source.go
+@@ -5,8 +5,7 @@ import (
+ 	"time"
+ 
+ 	"github.com/UpCloudLtd/terraform-provider-upcloud/internal/utils"
+-	"github.com/UpCloudLtd/upcloud-go-api/v8/upcloud/request"
+-	"github.com/UpCloudLtd/upcloud-go-api/v8/upcloud/service"
++	v9 "github.com/UpCloudLtd/upcloud-go-api/v9/pkg/upcloud"
+ 	"github.com/hashicorp/terraform-plugin-framework/datasource"
+ 	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
+ 	"github.com/hashicorp/terraform-plugin-framework/types"
+@@ -22,7 +21,7 @@ var (
+ )
+ 
+ type regionsDataSource struct {
+-	client *service.Service
++	client *v9.ClientWithResponses
+ }
+ 
+ func (d *regionsDataSource) Metadata(_ context.Context, req datasource.MetadataRequest, resp *datasource.MetadataResponse) {
+@@ -30,7 +29,7 @@ func (d *regionsDataSource) Metadata(_ context.Context, req datasource.MetadataR
+ }
+ 
+ func (d *regionsDataSource) Configure(_ context.Context, req datasource.ConfigureRequest, resp *datasource.ConfigureResponse) {
+-	d.client, resp.Diagnostics = utils.GetClientFromProviderData(req.ProviderData)
++	d.client, resp.Diagnostics = utils.GetV9ClientFromProviderData(req.ProviderData)
+ }
+ 
+ type regionsModel struct {
+@@ -82,7 +81,7 @@ func (d *regionsDataSource) Read(ctx context.Context, req datasource.ReadRequest
+ 
+ 	data.ID = types.StringValue(time.Now().UTC().String())
+ 
+-	regions, err := d.client.GetManagedObjectStorageRegions(ctx, &request.GetManagedObjectStorageRegionsRequest{})
++	result, err := d.client.ListObjectStorageRegionsWithResponse(ctx)
+ 	if err != nil {
+ 		resp.Diagnostics.AddError(
+ 			"Unable to read managed object-storage regions",
+@@ -90,15 +89,27 @@ func (d *regionsDataSource) Read(ctx context.Context, req datasource.ReadRequest
+ 		)
+ 		return
+ 	}
++	if result.JSON200 == nil {
++		resp.Diagnostics.AddError(
++			"Unable to read managed object-storage regions",
++			"Empty response received from the API",
++		)
++		return
++	}
+ 
++	regions := *result.JSON200
+ 	data.Regions = make([]regionModel, len(regions))
+ 	for i, region := range regions {
+-		data.Regions[i].Name = types.StringValue(region.Name)
+-		data.Regions[i].PrimaryZone = types.StringValue(region.PrimaryZone)
++		data.Regions[i].Name = types.StringPointerValue(region.Name)
++		data.Regions[i].PrimaryZone = types.StringPointerValue(region.PrimaryZone)
+ 
+ 		zonesSlice := make([]string, 0)
+-		for _, zone := range region.Zones {
+-			zonesSlice = append(zonesSlice, zone.Name)
++		if region.Zones != nil {
++			for _, zone := range *region.Zones {
++				if zone.Name != nil {
++					zonesSlice = append(zonesSlice, *zone.Name)
++				}
++			}
+ 		}
+ 
+ 		zones, diags := types.SetValueFrom(ctx, types.StringType, utils.NilAsEmptyList(zonesSlice))
+diff --git a/internal/service/managedobjectstorage/user.go b/internal/service/managedobjectstorage/user.go
+index 6b353ff36..1eb82722c 100644
+--- a/internal/service/managedobjectstorage/user.go
++++ b/internal/service/managedobjectstorage/user.go
+@@ -2,11 +2,12 @@ package managedobjectstorage
+ 
+ import (
+ 	"context"
++	"fmt"
++	"net/http"
+ 
+ 	"github.com/UpCloudLtd/terraform-provider-upcloud/internal/utils"
+-	"github.com/UpCloudLtd/upcloud-go-api/v8/upcloud"
+-	"github.com/UpCloudLtd/upcloud-go-api/v8/upcloud/request"
+-	"github.com/UpCloudLtd/upcloud-go-api/v8/upcloud/service"
++	v9 "github.com/UpCloudLtd/upcloud-go-api/v9/pkg/upcloud"
++	"github.com/google/uuid"
+ 	"github.com/hashicorp/terraform-plugin-framework/diag"
+ 	"github.com/hashicorp/terraform-plugin-framework/path"
+ 	"github.com/hashicorp/terraform-plugin-framework/resource"
+@@ -27,7 +28,7 @@ func NewUserResource() resource.Resource {
+ }
+ 
+ type managedObjectStorageUserResource struct {
+-	client *service.Service
++	client *v9.ClientWithResponses
+ }
+ 
+ func (r *managedObjectStorageUserResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
+@@ -36,7 +37,7 @@ func (r *managedObjectStorageUserResource) Metadata(_ context.Context, req resou
+ 
+ // Configure adds the provider configured client to the resource.
+ func (r *managedObjectStorageUserResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
+-	r.client, resp.Diagnostics = utils.GetClientFromProviderData(req.ProviderData)
++	r.client, resp.Diagnostics = utils.GetV9ClientFromProviderData(req.ProviderData)
+ }
+ 
+ type userModel struct {
+@@ -90,12 +91,14 @@ func (r *managedObjectStorageUserResource) Schema(_ context.Context, _ resource.
+ 	}
+ }
+ 
+-func setUserValues(_ context.Context, data *userModel, user *upcloud.ManagedObjectStorageUser) diag.Diagnostics {
++func setUserValues(_ context.Context, data *userModel, user *v9.ObjectStorage2UserDetailResponse) diag.Diagnostics {
+ 	var respDiagnostics diag.Diagnostics
+ 
+-	data.ARN = types.StringValue(user.ARN)
+-	data.CreatedAt = types.StringValue(user.CreatedAt.String())
+-	data.Username = types.StringValue(user.Username)
++	data.ARN = types.StringPointerValue(user.Arn)
++	if user.CreatedAt != nil {
++		data.CreatedAt = types.StringValue(user.CreatedAt.String())
++	}
++	data.Username = types.StringPointerValue(user.Username)
+ 
+ 	return respDiagnostics
+ }
+@@ -110,12 +113,18 @@ func (r *managedObjectStorageUserResource) Create(ctx context.Context, req resou
+ 
+ 	data.ID = types.StringValue(utils.MarshalID(data.ServiceUUID.ValueString(), data.Username.ValueString()))
+ 
+-	apiReq := &request.CreateManagedObjectStorageUserRequest{
+-		Username:    data.Username.ValueString(),
+-		ServiceUUID: data.ServiceUUID.ValueString(),
++	svcUUID, err := uuid.Parse(data.ServiceUUID.ValueString())
++	if err != nil {
++		resp.Diagnostics.AddError(
++			"Unable to create managed object storage user",
++			utils.ErrorDiagnosticDetail(err),
++		)
++		return
+ 	}
+ 
+-	user, err := r.client.CreateManagedObjectStorageUser(ctx, apiReq)
++	apiResp, err := r.client.CreateObjectStorageUserWithResponse(ctx, svcUUID, v9.CreateObjectStorageUserJSONRequestBody{
++		Username: data.Username.ValueString(),
++	})
+ 	if err != nil {
+ 		resp.Diagnostics.AddError(
+ 			"Unable to create managed object storage user",
+@@ -123,8 +132,15 @@ func (r *managedObjectStorageUserResource) Create(ctx context.Context, req resou
+ 		)
+ 		return
+ 	}
++	if apiResp.JSON201 == nil {
++		resp.Diagnostics.AddError(
++			"Unable to create managed object storage user",
++			utils.ErrorDiagnosticDetail(fmt.Errorf("unexpected response: %s", apiResp.HTTPResponse.Status)),
++		)
++		return
++	}
+ 
+-	resp.Diagnostics.Append(setUserValues(ctx, &data, user)...)
++	resp.Diagnostics.Append(setUserValues(ctx, &data, apiResp.JSON201)...)
+ 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
+ }
+ 
+@@ -150,23 +166,36 @@ func (r *managedObjectStorageUserResource) Read(ctx context.Context, req resourc
+ 
+ 	data.ServiceUUID = types.StringValue(serviceUUID)
+ 
+-	user, err := r.client.GetManagedObjectStorageUser(ctx, &request.GetManagedObjectStorageUserRequest{
+-		Username:    username,
+-		ServiceUUID: serviceUUID,
+-	})
++	svcUUID, err := uuid.Parse(serviceUUID)
+ 	if err != nil {
+-		if utils.IsNotFoundError(err) {
++		resp.Diagnostics.AddError(
++			"Unable to read managed object storage user details",
++			utils.ErrorDiagnosticDetail(err),
++		)
++		return
++	}
++
++	apiResp, err := r.client.GetObjectStorageUserWithResponse(ctx, svcUUID, username)
++	if err != nil {
++		resp.Diagnostics.AddError(
++			"Unable to read managed object storage user details",
++			utils.ErrorDiagnosticDetail(err),
++		)
++		return
++	}
++	if apiResp.JSON200 == nil {
++		if apiResp.HTTPResponse != nil && apiResp.HTTPResponse.StatusCode == http.StatusNotFound {
+ 			resp.State.RemoveResource(ctx)
+ 		} else {
+ 			resp.Diagnostics.AddError(
+ 				"Unable to read managed object storage user details",
+-				utils.ErrorDiagnosticDetail(err),
++				utils.ErrorDiagnosticDetail(fmt.Errorf("unexpected response: %s", apiResp.HTTPResponse.Status)),
+ 			)
+ 		}
+ 		return
+ 	}
+ 
+-	resp.Diagnostics.Append(setUserValues(ctx, &data, user)...)
++	resp.Diagnostics.Append(setUserValues(ctx, &data, apiResp.JSON200)...)
+ 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
+ }
+ 
+@@ -189,10 +218,17 @@ func (r *managedObjectStorageUserResource) Delete(ctx context.Context, req resou
+ 		return
+ 	}
+ 
+-	if err := r.client.DeleteManagedObjectStorageUser(ctx, &request.DeleteManagedObjectStorageUserRequest{
+-		ServiceUUID: serviceUUID,
+-		Username:    username,
+-	}); err != nil {
++	svcUUID, err := uuid.Parse(serviceUUID)
++	if err != nil {
++		resp.Diagnostics.AddError(
++			"Unable to delete managed object storage user",
++			utils.ErrorDiagnosticDetail(err),
++		)
++		return
++	}
++
++	_, err = r.client.DeleteObjectStorageUserWithResponse(ctx, svcUUID, username)
++	if err != nil {
+ 		resp.Diagnostics.AddError(
+ 			"Unable to delete managed object storage user",
+ 			utils.ErrorDiagnosticDetail(err),
+diff --git a/internal/service/managedobjectstorage/user_access_key.go b/internal/service/managedobjectstorage/user_access_key.go
+index f511e677b..a6049c306 100644
+--- a/internal/service/managedobjectstorage/user_access_key.go
++++ b/internal/service/managedobjectstorage/user_access_key.go
+@@ -2,11 +2,12 @@ package managedobjectstorage
+ 
+ import (
+ 	"context"
++	"fmt"
++	"net/http"
+ 
+ 	"github.com/UpCloudLtd/terraform-provider-upcloud/internal/utils"
+-	"github.com/UpCloudLtd/upcloud-go-api/v8/upcloud"
+-	"github.com/UpCloudLtd/upcloud-go-api/v8/upcloud/request"
+-	"github.com/UpCloudLtd/upcloud-go-api/v8/upcloud/service"
++	v9 "github.com/UpCloudLtd/upcloud-go-api/v9/pkg/upcloud"
++	"github.com/google/uuid"
+ 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
+ 	"github.com/hashicorp/terraform-plugin-framework/diag"
+ 	"github.com/hashicorp/terraform-plugin-framework/path"
+@@ -29,7 +30,7 @@ func NewUserAccessKeyResource() resource.Resource {
+ }
+ 
+ type managedObjectStorageUserAccessKeyResource struct {
+-	client *service.Service
++	client *v9.ClientWithResponses
+ }
+ 
+ func (r *managedObjectStorageUserAccessKeyResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
+@@ -38,7 +39,7 @@ func (r *managedObjectStorageUserAccessKeyResource) Metadata(_ context.Context,
+ 
+ // Configure adds the provider configured client to the resource.
+ func (r *managedObjectStorageUserAccessKeyResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
+-	r.client, resp.Diagnostics = utils.GetClientFromProviderData(req.ProviderData)
++	r.client, resp.Diagnostics = utils.GetV9ClientFromProviderData(req.ProviderData)
+ }
+ 
+ type userAccessKeyModel struct {
+@@ -101,8 +102,8 @@ func (r *managedObjectStorageUserAccessKeyResource) Schema(_ context.Context, _
+ 				Required:    true,
+ 				Validators: []validator.String{
+ 					stringvalidator.OneOf(
+-						string(upcloud.ManagedObjectStorageUserAccessKeyStatusActive),
+-						string(upcloud.ManagedObjectStorageUserAccessKeyStatusInactive),
++						string(v9.ObjectStorage2AccessKeyDetailResponseStatusActive),
++						string(v9.ObjectStorage2AccessKeyDetailResponseStatusInactive),
+ 					),
+ 				},
+ 			},
+@@ -117,15 +118,20 @@ func (r *managedObjectStorageUserAccessKeyResource) Schema(_ context.Context, _
+ 	}
+ }
+ 
+-func setUserAccessKeyValues(_ context.Context, data *userAccessKeyModel, accessKey *upcloud.ManagedObjectStorageUserAccessKey) diag.Diagnostics {
++func setUserAccessKeyValues(data *userAccessKeyModel, accessKey *v9.ObjectStorage2AccessKeyDetailResponse) diag.Diagnostics {
+ 	var respDiagnostics diag.Diagnostics
+ 
+-	data.AccessKeyID = types.StringValue(accessKey.AccessKeyID)
+-	data.CreatedAt = types.StringValue(accessKey.CreatedAt.String())
+-	data.LastUsedAt = types.StringValue(accessKey.LastUsedAt.String())
+-
+-	if accessKey.SecretAccessKey != nil {
+-		data.SecretAccessKey = types.StringValue(*accessKey.SecretAccessKey)
++	if accessKey.AccessKeyId != nil {
++		data.AccessKeyID = types.StringValue(*accessKey.AccessKeyId)
++	}
++	if accessKey.CreatedAt != nil {
++		data.CreatedAt = types.StringValue(accessKey.CreatedAt.String())
++	}
++	if accessKey.LastUsedAt != nil {
++		data.LastUsedAt = types.StringValue(accessKey.LastUsedAt.String())
++	}
++	if accessKey.Status != nil {
++		data.Status = types.StringValue(string(*accessKey.Status))
+ 	}
+ 
+ 	return respDiagnostics
+@@ -139,12 +145,13 @@ func (r *managedObjectStorageUserAccessKeyResource) Create(ctx context.Context,
+ 		return
+ 	}
+ 
+-	apiReq := &request.CreateManagedObjectStorageUserAccessKeyRequest{
+-		Username:    data.Username.ValueString(),
+-		ServiceUUID: data.ServiceUUID.ValueString(),
++	svcUUID, err := uuid.Parse(data.ServiceUUID.ValueString())
++	if err != nil {
++		resp.Diagnostics.AddError("Invalid service UUID", utils.ErrorDiagnosticDetail(err))
++		return
+ 	}
+ 
+-	accessKey, err := r.client.CreateManagedObjectStorageUserAccessKey(ctx, apiReq)
++	apiResp, err := r.client.CreateObjectStorageAccessKeyWithResponse(ctx, svcUUID, data.Username.ValueString())
+ 	if err != nil {
+ 		resp.Diagnostics.AddError(
+ 			"Unable to create managed object storage user access key",
+@@ -152,14 +159,32 @@ func (r *managedObjectStorageUserAccessKeyResource) Create(ctx context.Context,
+ 		)
+ 		return
+ 	}
++	if apiResp.StatusCode() != http.StatusCreated {
++		resp.Diagnostics.AddError(
++			"Unable to create managed object storage user access key",
++			objectStorageAPIErrorDetail(apiResp.ApplicationproblemJSONDefault, apiResp.Body),
++		)
++		return
++	}
++	if apiResp.JSON201 == nil {
++		resp.Diagnostics.AddError(
++			"Unable to create managed object storage user access key",
++			utils.ErrorDiagnosticDetail(fmt.Errorf("unexpected response: %s", apiResp.HTTPResponse.Status)),
++		)
++		return
++	}
++
++	created := apiResp.JSON201
++	accessKeyID := ""
++	if created.AccessKeyId != nil {
++		accessKeyID = *created.AccessKeyId
++	}
+ 
+ 	// Status can be set only after creation
+-	if data.Status.ValueString() != string(accessKey.Status) {
+-		_, err = r.client.ModifyManagedObjectStorageUserAccessKey(ctx, &request.ModifyManagedObjectStorageUserAccessKeyRequest{
+-			ServiceUUID: data.ServiceUUID.ValueString(),
+-			Username:    data.Username.ValueString(),
+-			AccessKeyID: accessKey.AccessKeyID,
+-			Status:      upcloud.ManagedObjectStorageUserAccessKeyStatus(data.Status.ValueString()),
++	desiredStatus := v9.ObjectStorage2AccessKeyModifyStatus(data.Status.ValueString())
++	if created.Status == nil || string(*created.Status) != data.Status.ValueString() {
++		modResp, err := r.client.ModifyObjectStorageAccessKeyDetailsWithResponse(ctx, svcUUID, data.Username.ValueString(), accessKeyID, v9.ModifyObjectStorageAccessKeyDetailsJSONRequestBody{
++			Status: &desiredStatus,
+ 		})
+ 		if err != nil {
+ 			resp.Diagnostics.AddError(
+@@ -168,11 +193,29 @@ func (r *managedObjectStorageUserAccessKeyResource) Create(ctx context.Context,
+ 			)
+ 			return
+ 		}
++		if modResp.StatusCode() != http.StatusOK {
++			resp.Diagnostics.AddError(
++				"Unable to set managed object storage user access key status",
++				objectStorageAPIErrorDetail(modResp.ApplicationproblemJSONDefault, modResp.Body),
++			)
++			return
++		}
+ 	}
+ 
+-	data.ID = types.StringValue(utils.MarshalID(data.ServiceUUID.ValueString(), data.Username.ValueString(), accessKey.AccessKeyID))
++	data.ID = types.StringValue(utils.MarshalID(data.ServiceUUID.ValueString(), data.Username.ValueString(), accessKeyID))
++	if created.SecretAccessKey != nil {
++		data.SecretAccessKey = types.StringValue(*created.SecretAccessKey)
++	}
++	if created.AccessKeyId != nil {
++		data.AccessKeyID = types.StringValue(*created.AccessKeyId)
++	}
++	if created.CreatedAt != nil {
++		data.CreatedAt = types.StringValue(created.CreatedAt.String())
++	}
++	if created.LastUsedAt != nil {
++		data.LastUsedAt = types.StringValue(created.LastUsedAt.String())
++	}
+ 
+-	resp.Diagnostics.Append(setUserAccessKeyValues(ctx, &data, accessKey)...)
+ 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
+ }
+ 
+@@ -200,26 +243,40 @@ func (r *managedObjectStorageUserAccessKeyResource) Read(ctx context.Context, re
+ 	data.Username = types.StringValue(username)
+ 	data.AccessKeyID = types.StringValue(accessKeyID)
+ 
+-	accessKey, err := r.client.GetManagedObjectStorageUserAccessKey(ctx, &request.GetManagedObjectStorageUserAccessKeyRequest{
+-		Username:    username,
+-		ServiceUUID: serviceUUID,
+-		AccessKeyID: accessKeyID,
+-	})
++	svcUUID, err := uuid.Parse(serviceUUID)
+ 	if err != nil {
+-		if utils.IsNotFoundError(err) {
+-			resp.State.RemoveResource(ctx)
+-		} else {
+-			resp.Diagnostics.AddError(
+-				"Unable to read managed object storage user access key details",
+-				utils.ErrorDiagnosticDetail(err),
+-			)
+-		}
++		resp.Diagnostics.AddError("Invalid service UUID", utils.ErrorDiagnosticDetail(err))
+ 		return
+ 	}
+ 
+-	data.Status = types.StringValue(string(accessKey.Status))
++	apiResp, err := r.client.GetObjectStorageAccessKeyDetailsWithResponse(ctx, svcUUID, username, accessKeyID)
++	if err != nil {
++		resp.Diagnostics.AddError(
++			"Unable to read managed object storage user access key details",
++			utils.ErrorDiagnosticDetail(err),
++		)
++		return
++	}
++	if apiResp.StatusCode() == http.StatusNotFound {
++		resp.State.RemoveResource(ctx)
++		return
++	}
++	if apiResp.StatusCode() != http.StatusOK {
++		resp.Diagnostics.AddError(
++			"Unable to read managed object storage user access key details",
++			objectStorageAPIErrorDetail(apiResp.ApplicationproblemJSONDefault, apiResp.Body),
++		)
++		return
++	}
++	if apiResp.JSON200 == nil {
++		resp.Diagnostics.AddError(
++			"Unable to read managed object storage user access key details",
++			utils.ErrorDiagnosticDetail(fmt.Errorf("unexpected response: %s", apiResp.HTTPResponse.Status)),
++		)
++		return
++	}
+ 
+-	resp.Diagnostics.Append(setUserAccessKeyValues(ctx, &data, accessKey)...)
++	resp.Diagnostics.Append(setUserAccessKeyValues(&data, apiResp.JSON200)...)
+ 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
+ }
+ 
+@@ -231,11 +288,15 @@ func (r *managedObjectStorageUserAccessKeyResource) Update(ctx context.Context,
+ 		return
+ 	}
+ 
+-	accessKey, err := r.client.ModifyManagedObjectStorageUserAccessKey(ctx, &request.ModifyManagedObjectStorageUserAccessKeyRequest{
+-		ServiceUUID: data.ServiceUUID.ValueString(),
+-		Username:    data.Username.ValueString(),
+-		AccessKeyID: data.AccessKeyID.ValueString(),
+-		Status:      upcloud.ManagedObjectStorageUserAccessKeyStatus(data.Status.ValueString()),
++	svcUUID, err := uuid.Parse(data.ServiceUUID.ValueString())
++	if err != nil {
++		resp.Diagnostics.AddError("Invalid service UUID", utils.ErrorDiagnosticDetail(err))
++		return
++	}
++
++	desiredStatus := v9.ObjectStorage2AccessKeyModifyStatus(data.Status.ValueString())
++	apiResp, err := r.client.ModifyObjectStorageAccessKeyDetailsWithResponse(ctx, svcUUID, data.Username.ValueString(), data.AccessKeyID.ValueString(), v9.ModifyObjectStorageAccessKeyDetailsJSONRequestBody{
++		Status: &desiredStatus,
+ 	})
+ 	if err != nil {
+ 		resp.Diagnostics.AddError(
+@@ -244,8 +305,22 @@ func (r *managedObjectStorageUserAccessKeyResource) Update(ctx context.Context,
+ 		)
+ 		return
+ 	}
++	if apiResp.StatusCode() != http.StatusOK {
++		resp.Diagnostics.AddError(
++			"Unable to update managed object storage user access key",
++			objectStorageAPIErrorDetail(apiResp.ApplicationproblemJSONDefault, apiResp.Body),
++		)
++		return
++	}
++	if apiResp.JSON200 == nil {
++		resp.Diagnostics.AddError(
++			"Unable to update managed object storage user access key",
++			utils.ErrorDiagnosticDetail(fmt.Errorf("unexpected response: %s", apiResp.HTTPResponse.Status)),
++		)
++		return
++	}
+ 
+-	resp.Diagnostics.Append(setUserAccessKeyValues(ctx, &data, accessKey)...)
++	resp.Diagnostics.Append(setUserAccessKeyValues(&data, apiResp.JSON200)...)
+ 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
+ }
+ 
+@@ -260,17 +335,26 @@ func (r *managedObjectStorageUserAccessKeyResource) Delete(ctx context.Context,
+ 		return
+ 	}
+ 
+-	if err := r.client.DeleteManagedObjectStorageUserAccessKey(ctx, &request.DeleteManagedObjectStorageUserAccessKeyRequest{
+-		ServiceUUID: serviceUUID,
+-		Username:    username,
+-		AccessKeyID: accessKeyID,
+-	}); err != nil {
++	svcUUID, err := uuid.Parse(serviceUUID)
++	if err != nil {
++		resp.Diagnostics.AddError("Invalid service UUID", utils.ErrorDiagnosticDetail(err))
++		return
++	}
++
++	apiResp, err := r.client.DeleteObjectStorageAccessKeyWithResponse(ctx, svcUUID, username, accessKeyID)
++	if err != nil {
+ 		resp.Diagnostics.AddError(
+ 			"Unable to delete managed object storage user access key",
+ 			utils.ErrorDiagnosticDetail(err),
+ 		)
+ 		return
+ 	}
++	if apiResp.StatusCode() != http.StatusNoContent && apiResp.StatusCode() != http.StatusNotFound {
++		resp.Diagnostics.AddError(
++			"Unable to delete managed object storage user access key",
++			objectStorageAPIErrorDetail(apiResp.ApplicationproblemJSONDefault, apiResp.Body),
++		)
++	}
+ }
+ 
+ func (r *managedObjectStorageUserAccessKeyResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+diff --git a/internal/service/managedobjectstorage/user_policy.go b/internal/service/managedobjectstorage/user_policy.go
+index 62c5b4a80..e8702c325 100644
+--- a/internal/service/managedobjectstorage/user_policy.go
++++ b/internal/service/managedobjectstorage/user_policy.go
+@@ -2,11 +2,12 @@ package managedobjectstorage
+ 
+ import (
+ 	"context"
++	"fmt"
++	"net/http"
+ 
+ 	"github.com/UpCloudLtd/terraform-provider-upcloud/internal/utils"
+-	"github.com/UpCloudLtd/upcloud-go-api/v8/upcloud"
+-	"github.com/UpCloudLtd/upcloud-go-api/v8/upcloud/request"
+-	"github.com/UpCloudLtd/upcloud-go-api/v8/upcloud/service"
++	v9 "github.com/UpCloudLtd/upcloud-go-api/v9/pkg/upcloud"
++	"github.com/google/uuid"
+ 	"github.com/hashicorp/terraform-plugin-framework/path"
+ 	"github.com/hashicorp/terraform-plugin-framework/resource"
+ 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+@@ -26,7 +27,7 @@ func NewUserPolicyResource() resource.Resource {
+ }
+ 
+ type managedObjectStorageUserPolicyResource struct {
+-	client *service.Service
++	client *v9.ClientWithResponses
+ }
+ 
+ func (r *managedObjectStorageUserPolicyResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
+@@ -35,7 +36,7 @@ func (r *managedObjectStorageUserPolicyResource) Metadata(_ context.Context, req
+ 
+ // Configure adds the provider configured client to the resource.
+ func (r *managedObjectStorageUserPolicyResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
+-	r.client, resp.Diagnostics = utils.GetClientFromProviderData(req.ProviderData)
++	r.client, resp.Diagnostics = utils.GetV9ClientFromProviderData(req.ProviderData)
+ }
+ 
+ type userPolicyModel struct {
+@@ -91,13 +92,18 @@ func (r *managedObjectStorageUserPolicyResource) Create(ctx context.Context, req
+ 
+ 	data.ID = types.StringValue(utils.MarshalID(data.ServiceUUID.ValueString(), data.Username.ValueString(), data.Name.ValueString()))
+ 
+-	apiReq := &request.AttachManagedObjectStorageUserPolicyRequest{
+-		ServiceUUID: data.ServiceUUID.ValueString(),
+-		Username:    data.Username.ValueString(),
+-		Name:        data.Name.ValueString(),
++	serviceUUID, err := uuid.Parse(data.ServiceUUID.ValueString())
++	if err != nil {
++		resp.Diagnostics.AddError(
++			"Unable to create managed object storage user policy",
++			utils.ErrorDiagnosticDetail(err),
++		)
++		return
+ 	}
+ 
+-	err := r.client.AttachManagedObjectStorageUserPolicy(ctx, apiReq)
++	apiResp, err := r.client.AttachObjectStorageUserPolicyWithResponse(ctx, serviceUUID, data.Username.ValueString(), v9.AttachObjectStorageUserPolicyJSONRequestBody{
++		Name: data.Name.ValueString(),
++	})
+ 	if err != nil {
+ 		resp.Diagnostics.AddError(
+ 			"Unable to create managed object storage user policy",
+@@ -105,13 +111,20 @@ func (r *managedObjectStorageUserPolicyResource) Create(ctx context.Context, req
+ 		)
+ 		return
+ 	}
++	if apiResp.StatusCode() >= http.StatusBadRequest {
++		resp.Diagnostics.AddError(
++			"Unable to create managed object storage user policy",
++			fmt.Sprintf("API returned status %s", apiResp.Status()),
++		)
++		return
++	}
+ 
+ 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
+ }
+ 
+-func policyExists(policies []upcloud.ManagedObjectStorageUserPolicy, name string) bool {
++func policyExists(policies []v9.ObjectStorage2PolicyAttachmentResponse, name string) bool {
+ 	for _, p := range policies {
+-		if p.Name == name {
++		if p.Name != nil && *p.Name == name {
+ 			return true
+ 		}
+ 	}
+@@ -142,23 +155,38 @@ func (r *managedObjectStorageUserPolicyResource) Read(ctx context.Context, req r
+ 	data.Username = types.StringValue(username)
+ 	data.Name = types.StringValue(name)
+ 
+-	policies, err := r.client.GetManagedObjectStorageUserPolicies(ctx, &request.GetManagedObjectStorageUserPoliciesRequest{
+-		Username:    username,
+-		ServiceUUID: serviceUUID,
+-	})
++	svcUUID, err := uuid.Parse(serviceUUID)
+ 	if err != nil {
+-		if utils.IsNotFoundError(err) {
+-			resp.State.RemoveResource(ctx)
+-		} else {
+-			resp.Diagnostics.AddError(
+-				"Unable to read managed object storage user policies",
+-				utils.ErrorDiagnosticDetail(err),
+-			)
+-		}
++		resp.Diagnostics.AddError(
++			"Unable to read managed object storage user policies",
++			utils.ErrorDiagnosticDetail(err),
++		)
++		return
++	}
++
++	apiResp, err := r.client.ListObjectStorageAttachedUserPoliciesWithResponse(ctx, svcUUID, username)
++	if err != nil {
++		resp.Diagnostics.AddError(
++			"Unable to read managed object storage user policies",
++			utils.ErrorDiagnosticDetail(err),
++		)
+ 		return
+ 	}
+ 
+-	if !policyExists(policies, name) {
++	if apiResp.StatusCode() == http.StatusNotFound {
++		resp.State.RemoveResource(ctx)
++		return
++	}
++
++	if apiResp.JSON200 == nil {
++		resp.Diagnostics.AddError(
++			"Unable to read managed object storage user policies",
++			fmt.Sprintf("API returned status %s", apiResp.Status()),
++		)
++		return
++	}
++
++	if !policyExists(*apiResp.JSON200, name) {
+ 		resp.State.RemoveResource(ctx)
+ 	}
+ 
+@@ -173,22 +201,35 @@ func (r *managedObjectStorageUserPolicyResource) Delete(ctx context.Context, req
+ 	var data userPolicyModel
+ 	resp.Diagnostics.Append(req.State.Get(ctx, &data)...)
+ 
+-	var serviceUUID, username, name string
+-	resp.Diagnostics.Append(utils.UnmarshalIDDiag(data.ID.ValueString(), &serviceUUID, &username, &name)...)
++	var serviceUUIDStr, username, name string
++	resp.Diagnostics.Append(utils.UnmarshalIDDiag(data.ID.ValueString(), &serviceUUIDStr, &username, &name)...)
+ 
+ 	if resp.Diagnostics.HasError() {
+ 		return
+ 	}
+ 
+-	if err := r.client.DetachManagedObjectStorageUserPolicy(ctx, &request.DetachManagedObjectStorageUserPolicyRequest{
+-		ServiceUUID: serviceUUID,
+-		Username:    username,
+-		Name:        name,
+-	}); err != nil {
++	serviceUUID, err := uuid.Parse(serviceUUIDStr)
++	if err != nil {
++		resp.Diagnostics.AddError(
++			"Unable to delete managed object storage user policy",
++			utils.ErrorDiagnosticDetail(err),
++		)
++		return
++	}
++
++	apiResp, err := r.client.DetachObjectStorageUserPolicyWithResponse(ctx, serviceUUID, username, name)
++	if err != nil {
+ 		resp.Diagnostics.AddError(
+ 			"Unable to delete managed object storage user policy",
+ 			utils.ErrorDiagnosticDetail(err),
+ 		)
++		return
++	}
++	if apiResp.StatusCode() >= http.StatusBadRequest {
++		resp.Diagnostics.AddError(
++			"Unable to delete managed object storage user policy",
++			fmt.Sprintf("API returned status %s", apiResp.Status()),
++		)
+ 	}
+ }
+ 
+diff --git a/internal/utils/client.go b/internal/utils/client.go
+index 00205bd18..397f59da7 100644
+--- a/internal/utils/client.go
++++ b/internal/utils/client.go
+@@ -4,21 +4,47 @@ import (
+ 	"fmt"
+ 
+ 	"github.com/UpCloudLtd/upcloud-go-api/v8/upcloud/service"
++	v9 "github.com/UpCloudLtd/upcloud-go-api/v9/pkg/upcloud"
+ 	"github.com/hashicorp/terraform-plugin-framework/diag"
+ )
+ 
+-func GetClientFromProviderData(providerData any) (client *service.Service, diags diag.Diagnostics) {
++type ServiceWithV9Client struct {
++	Service  *service.Service
++	V9Client *v9.ClientWithResponses
++}
++
++func getServiceWithV9ClientFromProviderData(providerData any) (*ServiceWithV9Client, diag.Diagnostics) {
++	var diags diag.Diagnostics
++
+ 	if providerData == nil {
+ 		return nil, diags
+ 	}
+ 
+-	client, ok := providerData.(*service.Service)
++	withV9, ok := providerData.(ServiceWithV9Client)
+ 	if !ok {
+ 		diags.AddError(
+-			"Unexpected resource Configure type",
+-			fmt.Sprintf("Expected *service.Service, got: %T. Please report this issue to the provider developers.", providerData),
++			"Unexpected provider data type",
++			fmt.Sprintf("Expected ServiceWithV9Client, got: %T. Please report this issue to the provider developers.", providerData),
+ 		)
+ 	}
+ 
+-	return client, diags
++	return &withV9, diags
++}
++
++func GetClientFromProviderData(providerData any) (client *service.Service, diags diag.Diagnostics) {
++	withV9, diags := getServiceWithV9ClientFromProviderData(providerData)
++	if diags.HasError() || withV9 == nil {
++		return nil, diags
++	}
++
++	return withV9.Service, diags
++}
++
++func GetV9ClientFromProviderData(providerData any) (*v9.ClientWithResponses, diag.Diagnostics) {
++	withV9, diags := getServiceWithV9ClientFromProviderData(providerData)
++	if diags.HasError() || withV9 == nil {
++		return nil, diags
++	}
++
++	return withV9.V9Client, diags
+ }
+diff --git a/subcategories.json b/subcategories.json
+index 2f3c1b5ae..6b9e448f8 100644
+--- a/subcategories.json
++++ b/subcategories.json
+@@ -21,6 +21,7 @@
+   },
+   "resources": {
+     "firewall_rules.md": "Servers",
++    "firewall_ruleset.md": "Servers",
+     "server.md": "Servers",
+     "server_group.md": "Servers",
+     "storage.md": "Storage",
+diff --git a/upcloud/firewall/resource_upcloud_firewall_ruleset_rules_test.go b/upcloud/firewall/resource_upcloud_firewall_ruleset_rules_test.go
+new file mode 100644
+index 000000000..e17dcb01f
+--- /dev/null
++++ b/upcloud/firewall/resource_upcloud_firewall_ruleset_rules_test.go
+@@ -0,0 +1,87 @@
++package firewalltests
++
++import (
++	"fmt"
++	"testing"
++
++	"github.com/UpCloudLtd/terraform-provider-upcloud/internal/utils"
++	"github.com/UpCloudLtd/terraform-provider-upcloud/upcloud"
++	"github.com/hashicorp/terraform-plugin-testing/config"
++	"github.com/hashicorp/terraform-plugin-testing/helper/acctest"
++	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
++)
++
++// TestAccUpCloudFirewallRuleset_withRules creates a ruleset with two rules, verifies
++// order and positions, imports the ruleset (including rules), then updates the rule
++// list by reordering and adding a third rule, and finally clears all rules.
++func TestAccUpCloudFirewallRuleset_withRules(t *testing.T) {
++	testDataS1 := utils.ReadTestDataFile(t, "testdata/upcloud_firewall_ruleset_rules_s1.tf")
++	testDataS2 := utils.ReadTestDataFile(t, "testdata/upcloud_firewall_ruleset_rules_s2.tf")
++	testDataS3 := utils.ReadTestDataFile(t, "testdata/upcloud_firewall_ruleset_rules_s3.tf")
++
++	rulesetName := fmt.Sprintf("tf-acc-test-rules-%s", acctest.RandString(10))
++	vars := map[string]config.Variable{"ruleset_name": config.StringVariable(rulesetName)}
++
++	resource.ParallelTest(t, resource.TestCase{
++		PreCheck:                 func() { upcloud.TestAccPreCheck(t) },
++		ProtoV6ProviderFactories: upcloud.TestAccProviderFactories,
++		Steps: []resource.TestStep{
++			{
++				// Create ruleset with two rules.
++				Config:          testDataS1,
++				ConfigVariables: vars,
++				Check: resource.ComposeAggregateTestCheckFunc(
++					resource.TestCheckResourceAttr("upcloud_firewall_ruleset.test", "rules.#", "2"),
++					// First rule: HTTP
++					resource.TestCheckResourceAttr("upcloud_firewall_ruleset.test", "rules.0.action", "accept"),
++					resource.TestCheckResourceAttr("upcloud_firewall_ruleset.test", "rules.0.direction", "in"),
++					resource.TestCheckResourceAttr("upcloud_firewall_ruleset.test", "rules.0.family", "IPv4"),
++					resource.TestCheckResourceAttr("upcloud_firewall_ruleset.test", "rules.0.protocol", "tcp"),
++					resource.TestCheckResourceAttr("upcloud_firewall_ruleset.test", "rules.0.destination_port_start", "80"),
++					resource.TestCheckResourceAttr("upcloud_firewall_ruleset.test", "rules.0.destination_port_end", "80"),
++					resource.TestCheckResourceAttr("upcloud_firewall_ruleset.test", "rules.0.comment", "Allow HTTP"),
++					resource.TestCheckResourceAttr("upcloud_firewall_ruleset.test", "rules.0.position", "1"),
++					// Second rule: HTTPS
++					resource.TestCheckResourceAttr("upcloud_firewall_ruleset.test", "rules.1.action", "accept"),
++					resource.TestCheckResourceAttr("upcloud_firewall_ruleset.test", "rules.1.destination_port_start", "443"),
++					resource.TestCheckResourceAttr("upcloud_firewall_ruleset.test", "rules.1.comment", "Allow HTTPS"),
++					resource.TestCheckResourceAttr("upcloud_firewall_ruleset.test", "rules.1.position", "2"),
++				),
++			},
++			{
++				// Import the ruleset; rules must be read back correctly.
++				ResourceName:            "upcloud_firewall_ruleset.test",
++				ImportState:             true,
++				ImportStateVerify:       true,
++				ImportStateVerifyIgnore: []string{"updated_at", "version"},
++				Config:                  testDataS1,
++				ConfigVariables:         vars,
++			},
++			{
++				// Reorder (HTTPS first, HTTP second) and add SSH as third rule.
++				Config:          testDataS2,
++				ConfigVariables: vars,
++				Check: resource.ComposeAggregateTestCheckFunc(
++					resource.TestCheckResourceAttr("upcloud_firewall_ruleset.test", "rules.#", "3"),
++					resource.TestCheckResourceAttr("upcloud_firewall_ruleset.test", "rules.0.destination_port_start", "443"),
++					resource.TestCheckResourceAttr("upcloud_firewall_ruleset.test", "rules.0.comment", "Allow HTTPS"),
++					resource.TestCheckResourceAttr("upcloud_firewall_ruleset.test", "rules.0.position", "1"),
++					resource.TestCheckResourceAttr("upcloud_firewall_ruleset.test", "rules.1.destination_port_start", "80"),
++					resource.TestCheckResourceAttr("upcloud_firewall_ruleset.test", "rules.1.comment", "Allow HTTP"),
++					resource.TestCheckResourceAttr("upcloud_firewall_ruleset.test", "rules.1.position", "2"),
++					resource.TestCheckResourceAttr("upcloud_firewall_ruleset.test", "rules.2.destination_port_start", "22"),
++					resource.TestCheckResourceAttr("upcloud_firewall_ruleset.test", "rules.2.comment", "Allow SSH"),
++					resource.TestCheckResourceAttr("upcloud_firewall_ruleset.test", "rules.2.position", "3"),
++				),
++			},
++			{
++				// Clear all rules.
++				Config:          testDataS3,
++				ConfigVariables: vars,
++				Check: resource.ComposeAggregateTestCheckFunc(
++					resource.TestCheckResourceAttr("upcloud_firewall_ruleset.test", "rules.#", "0"),
++				),
++			},
++		},
++	})
++}
+diff --git a/upcloud/firewall/resource_upcloud_firewall_ruleset_test.go b/upcloud/firewall/resource_upcloud_firewall_ruleset_test.go
+new file mode 100644
+index 000000000..dd5015b16
+--- /dev/null
++++ b/upcloud/firewall/resource_upcloud_firewall_ruleset_test.go
+@@ -0,0 +1,186 @@
++package firewalltests
++
++import (
++	"fmt"
++	"testing"
++
++	"github.com/UpCloudLtd/terraform-provider-upcloud/internal/utils"
++	"github.com/UpCloudLtd/terraform-provider-upcloud/upcloud"
++	"github.com/hashicorp/terraform-plugin-testing/config"
++	"github.com/hashicorp/terraform-plugin-testing/helper/acctest"
++	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
++	"github.com/hashicorp/terraform-plugin-testing/plancheck"
++)
++
++func TestAccUpCloudFirewallRuleset_update(t *testing.T) {
++	testDataS1 := utils.ReadTestDataFile(t, "testdata/upcloud_firewall_ruleset_s1.tf")
++	testDataS2 := utils.ReadTestDataFile(t, "testdata/upcloud_firewall_ruleset_s2.tf")
++	testDataS3 := utils.ReadTestDataFile(t, "testdata/upcloud_firewall_ruleset_s3.tf")
++
++	rulesetName := fmt.Sprintf("tf-acc-test-ruleset-%s", acctest.RandString(10))
++	rulesetNameUpdated := fmt.Sprintf("tf-acc-test-ruleset-updated-%s", acctest.RandString(10))
++
++	resource.ParallelTest(t, resource.TestCase{
++		PreCheck:                 func() { upcloud.TestAccPreCheck(t) },
++		ProtoV6ProviderFactories: upcloud.TestAccProviderFactories,
++		Steps: []resource.TestStep{
++			{
++				Config: testDataS1,
++				ConfigVariables: map[string]config.Variable{
++					"ruleset_name": config.StringVariable(rulesetName),
++				},
++				Check: resource.ComposeAggregateTestCheckFunc(
++					resource.TestCheckResourceAttr("upcloud_firewall_ruleset.test", "name", rulesetName),
++					resource.TestCheckResourceAttr("upcloud_firewall_ruleset.test", "description", "Test firewall ruleset"),
++					resource.TestCheckResourceAttr("upcloud_firewall_ruleset.test", "enabled", "true"),
++					resource.TestCheckResourceAttr("upcloud_firewall_ruleset.test", "default_dns_rules_enabled", "false"),
++				),
++			},
++			{
++				Config: testDataS2,
++				ConfigVariables: map[string]config.Variable{
++					"ruleset_name": config.StringVariable(rulesetNameUpdated),
++				},
++				ConfigPlanChecks: resource.ConfigPlanChecks{
++					PreApply: []plancheck.PlanCheck{
++						plancheck.ExpectResourceAction("upcloud_firewall_ruleset.test", plancheck.ResourceActionUpdate),
++					},
++				},
++				Check: resource.ComposeAggregateTestCheckFunc(
++					resource.TestCheckResourceAttr("upcloud_firewall_ruleset.test", "name", rulesetNameUpdated),
++					resource.TestCheckResourceAttr("upcloud_firewall_ruleset.test", "description", "Updated description"),
++					resource.TestCheckResourceAttr("upcloud_firewall_ruleset.test", "enabled", "false"),
++					resource.TestCheckResourceAttr("upcloud_firewall_ruleset.test", "default_dns_rules_enabled", "true"),
++				),
++			},
++			{
++				// Test removing optional description field - API doesn't clear it, field is sticky
++				Config: testDataS3,
++				ConfigVariables: map[string]config.Variable{
++					"ruleset_name": config.StringVariable(rulesetNameUpdated),
++				},
++				Check: resource.ComposeAggregateTestCheckFunc(
++					resource.TestCheckResourceAttr("upcloud_firewall_ruleset.test", "name", rulesetNameUpdated),
++					// API keeps the previous value when description is removed from config
++					resource.TestCheckResourceAttr("upcloud_firewall_ruleset.test", "description", "Updated description"),
++					resource.TestCheckResourceAttr("upcloud_firewall_ruleset.test", "enabled", "false"),
++				),
++			},
++		},
++	})
++}
++
++func TestAccUpCloudFirewallRuleset_labels(t *testing.T) {
++	testDataS1 := utils.ReadTestDataFile(t, "testdata/upcloud_firewall_ruleset_labels_s1.tf")
++	testDataS2 := utils.ReadTestDataFile(t, "testdata/upcloud_firewall_ruleset_labels_s2.tf")
++	testDataS3 := utils.ReadTestDataFile(t, "testdata/upcloud_firewall_ruleset_labels_s3.tf")
++
++	rulesetName := fmt.Sprintf("tf-acc-test-ruleset-labels-%s", acctest.RandString(10))
++
++	resource.ParallelTest(t, resource.TestCase{
++		PreCheck:                 func() { upcloud.TestAccPreCheck(t) },
++		ProtoV6ProviderFactories: upcloud.TestAccProviderFactories,
++		Steps: []resource.TestStep{
++			{
++				// Create with labels
++				Config: testDataS1,
++				ConfigVariables: map[string]config.Variable{
++					"ruleset_name": config.StringVariable(rulesetName),
++				},
++				Check: resource.ComposeAggregateTestCheckFunc(
++					resource.TestCheckResourceAttr("upcloud_firewall_ruleset.test", "name", rulesetName),
++					resource.TestCheckResourceAttr("upcloud_firewall_ruleset.test", "labels.%", "3"),
++					resource.TestCheckResourceAttr("upcloud_firewall_ruleset.test", "labels.env", "test"),
++					resource.TestCheckResourceAttr("upcloud_firewall_ruleset.test", "labels.managed-by", "terraform"),
++					resource.TestCheckResourceAttr("upcloud_firewall_ruleset.test", "labels.purpose", "acceptance-test"),
++				),
++			},
++			{
++				Config: testDataS1,
++				ConfigVariables: map[string]config.Variable{
++					"ruleset_name": config.StringVariable(rulesetName),
++				},
++				ResourceName:      "upcloud_firewall_ruleset.test",
++				ImportState:       true,
++				ImportStateVerify: true,
++			},
++			{
++				// Update labels - modify and remove some
++				Config: testDataS2,
++				ConfigVariables: map[string]config.Variable{
++					"ruleset_name": config.StringVariable(rulesetName),
++				},
++				ConfigPlanChecks: resource.ConfigPlanChecks{
++					PreApply: []plancheck.PlanCheck{
++						plancheck.ExpectResourceAction("upcloud_firewall_ruleset.test", plancheck.ResourceActionUpdate),
++					},
++				},
++				Check: resource.ComposeAggregateTestCheckFunc(
++					resource.TestCheckResourceAttr("upcloud_firewall_ruleset.test", "labels.%", "2"),
++					resource.TestCheckResourceAttr("upcloud_firewall_ruleset.test", "labels.env", "production"),
++					resource.TestCheckResourceAttr("upcloud_firewall_ruleset.test", "labels.managed-by", "terraform"),
++				),
++			},
++			{
++				// Remove all labels
++				Config: testDataS3,
++				ConfigVariables: map[string]config.Variable{
++					"ruleset_name": config.StringVariable(rulesetName),
++				},
++				Check: resource.ComposeAggregateTestCheckFunc(
++					resource.TestCheckResourceAttr("upcloud_firewall_ruleset.test", "labels.%", "0"),
++				),
++			},
++		},
++	})
++}
++
++// TestAccUpCloudFirewallRuleset_minimalToFull creates with only a name, imports,
++// then adds all optional fields — covering both the minimal and null-to-value cases
++// in one create/destroy cycle.
++func TestAccUpCloudFirewallRuleset_minimalToFull(t *testing.T) {
++	testDataMinimal := utils.ReadTestDataFile(t, "testdata/upcloud_firewall_ruleset_minimal.tf")
++	testDataFull := utils.ReadTestDataFile(t, "testdata/upcloud_firewall_ruleset_s1.tf")
++
++	rulesetName := fmt.Sprintf("tf-acc-test-ruleset-minimal-%s", acctest.RandString(10))
++	vars := map[string]config.Variable{"ruleset_name": config.StringVariable(rulesetName)}
++
++	resource.ParallelTest(t, resource.TestCase{
++		PreCheck:                 func() { upcloud.TestAccPreCheck(t) },
++		ProtoV6ProviderFactories: upcloud.TestAccProviderFactories,
++		Steps: []resource.TestStep{
++			{
++				// Create with only a name — verifies minimal config works and computed attrs are set.
++				Config:          testDataMinimal,
++				ConfigVariables: vars,
++				Check: resource.ComposeAggregateTestCheckFunc(
++					resource.TestCheckResourceAttr("upcloud_firewall_ruleset.test", "name", rulesetName),
++					resource.TestCheckResourceAttrSet("upcloud_firewall_ruleset.test", "id"),
++					resource.TestCheckResourceAttrSet("upcloud_firewall_ruleset.test", "version"),
++					resource.TestCheckResourceAttrSet("upcloud_firewall_ruleset.test", "created_at"),
++					resource.TestCheckResourceAttrSet("upcloud_firewall_ruleset.test", "updated_at"),
++					// Description is Optional+Computed; when omitted it must be null in state.
++					resource.TestCheckNoResourceAttr("upcloud_firewall_ruleset.test", "description"),
++				),
++			},
++			{
++				ResourceName:      "upcloud_firewall_ruleset.test",
++				ImportState:       true,
++				ImportStateVerify: true,
++				Config:            testDataMinimal,
++				ConfigVariables:   vars,
++			},
++			{
++				// Add all optional fields — verifies null-to-value transitions produce no spurious replace.
++				Config:          testDataFull,
++				ConfigVariables: vars,
++				Check: resource.ComposeAggregateTestCheckFunc(
++					resource.TestCheckResourceAttr("upcloud_firewall_ruleset.test", "name", rulesetName),
++					resource.TestCheckResourceAttr("upcloud_firewall_ruleset.test", "description", "Test firewall ruleset"),
++					resource.TestCheckResourceAttr("upcloud_firewall_ruleset.test", "enabled", "true"),
++					resource.TestCheckResourceAttr("upcloud_firewall_ruleset.test", "default_dns_rules_enabled", "false"),
++				),
++			},
++		},
++	})
++}
+diff --git a/upcloud/firewall/testdata/upcloud_firewall_ruleset_labels_s1.tf b/upcloud/firewall/testdata/upcloud_firewall_ruleset_labels_s1.tf
+new file mode 100644
+index 000000000..04d280702
+--- /dev/null
++++ b/upcloud/firewall/testdata/upcloud_firewall_ruleset_labels_s1.tf
+@@ -0,0 +1,13 @@
++variable "ruleset_name" {
++  type = string
++}
++
++resource "upcloud_firewall_ruleset" "test" {
++  name     = var.ruleset_name
++
++  labels = {
++    env        = "test"
++    managed-by = "terraform"
++    purpose    = "acceptance-test"
++  }
++}
+diff --git a/upcloud/firewall/testdata/upcloud_firewall_ruleset_labels_s2.tf b/upcloud/firewall/testdata/upcloud_firewall_ruleset_labels_s2.tf
+new file mode 100644
+index 000000000..8df9f4b2c
+--- /dev/null
++++ b/upcloud/firewall/testdata/upcloud_firewall_ruleset_labels_s2.tf
+@@ -0,0 +1,12 @@
++variable "ruleset_name" {
++  type = string
++}
++
++resource "upcloud_firewall_ruleset" "test" {
++  name     = var.ruleset_name
++
++  labels = {
++    env        = "production"
++    managed-by = "terraform"
++  }
++}
+diff --git a/upcloud/firewall/testdata/upcloud_firewall_ruleset_labels_s3.tf b/upcloud/firewall/testdata/upcloud_firewall_ruleset_labels_s3.tf
+new file mode 100644
+index 000000000..343b3c575
+--- /dev/null
++++ b/upcloud/firewall/testdata/upcloud_firewall_ruleset_labels_s3.tf
+@@ -0,0 +1,7 @@
++variable "ruleset_name" {
++  type = string
++}
++
++resource "upcloud_firewall_ruleset" "test" {
++  name     = var.ruleset_name
++}
+diff --git a/upcloud/firewall/testdata/upcloud_firewall_ruleset_minimal.tf b/upcloud/firewall/testdata/upcloud_firewall_ruleset_minimal.tf
+new file mode 100644
+index 000000000..9122dd91e
+--- /dev/null
++++ b/upcloud/firewall/testdata/upcloud_firewall_ruleset_minimal.tf
+@@ -0,0 +1,7 @@
++variable "ruleset_name" {
++  type = string
++}
++
++resource "upcloud_firewall_ruleset" "test" {
++  name = var.ruleset_name
++}
+diff --git a/upcloud/firewall/testdata/upcloud_firewall_ruleset_rules_s1.tf b/upcloud/firewall/testdata/upcloud_firewall_ruleset_rules_s1.tf
+new file mode 100644
+index 000000000..35b98746f
+--- /dev/null
++++ b/upcloud/firewall/testdata/upcloud_firewall_ruleset_rules_s1.tf
+@@ -0,0 +1,31 @@
++variable "ruleset_name" {
++  type = string
++}
++
++resource "upcloud_firewall_ruleset" "test" {
++  name    = var.ruleset_name
++  enabled = true
++
++  rules = [
++    {
++      action                 = "accept"
++      direction              = "in"
++      family                 = "IPv4"
++      protocol               = "tcp"
++      destination_port_start = 80
++      destination_port_end   = 80
++      enabled                = true
++      comment                = "Allow HTTP"
++    },
++    {
++      action                 = "accept"
++      direction              = "in"
++      family                 = "IPv4"
++      protocol               = "tcp"
++      destination_port_start = 443
++      destination_port_end   = 443
++      enabled                = true
++      comment                = "Allow HTTPS"
++    },
++  ]
++}
+diff --git a/upcloud/firewall/testdata/upcloud_firewall_ruleset_rules_s2.tf b/upcloud/firewall/testdata/upcloud_firewall_ruleset_rules_s2.tf
+new file mode 100644
+index 000000000..da572cc1d
+--- /dev/null
++++ b/upcloud/firewall/testdata/upcloud_firewall_ruleset_rules_s2.tf
+@@ -0,0 +1,41 @@
++variable "ruleset_name" {
++  type = string
++}
++
++resource "upcloud_firewall_ruleset" "test" {
++  name    = var.ruleset_name
++  enabled = true
++
++  rules = [
++    {
++      action                 = "accept"
++      direction              = "in"
++      family                 = "IPv4"
++      protocol               = "tcp"
++      destination_port_start = 443
++      destination_port_end   = 443
++      enabled                = true
++      comment                = "Allow HTTPS"
++    },
++    {
++      action                 = "accept"
++      direction              = "in"
++      family                 = "IPv4"
++      protocol               = "tcp"
++      destination_port_start = 80
++      destination_port_end   = 80
++      enabled                = true
++      comment                = "Allow HTTP"
++    },
++    {
++      action                 = "accept"
++      direction              = "in"
++      family                 = "IPv4"
++      protocol               = "tcp"
++      destination_port_start = 22
++      destination_port_end   = 22
++      enabled                = true
++      comment                = "Allow SSH"
++    },
++  ]
++}
+diff --git a/upcloud/firewall/testdata/upcloud_firewall_ruleset_rules_s3.tf b/upcloud/firewall/testdata/upcloud_firewall_ruleset_rules_s3.tf
+new file mode 100644
+index 000000000..1840c9d89
+--- /dev/null
++++ b/upcloud/firewall/testdata/upcloud_firewall_ruleset_rules_s3.tf
+@@ -0,0 +1,10 @@
++variable "ruleset_name" {
++  type = string
++}
++
++resource "upcloud_firewall_ruleset" "test" {
++  name    = var.ruleset_name
++  enabled = true
++
++  rules = []
++}
+diff --git a/upcloud/firewall/testdata/upcloud_firewall_ruleset_s1.tf b/upcloud/firewall/testdata/upcloud_firewall_ruleset_s1.tf
+new file mode 100644
+index 000000000..536e8be68
+--- /dev/null
++++ b/upcloud/firewall/testdata/upcloud_firewall_ruleset_s1.tf
+@@ -0,0 +1,10 @@
++variable "ruleset_name" {
++  type = string
++}
++
++resource "upcloud_firewall_ruleset" "test" {
++  name                      = var.ruleset_name
++  description               = "Test firewall ruleset"
++  enabled                   = true
++  default_dns_rules_enabled = false
++}
+diff --git a/upcloud/firewall/testdata/upcloud_firewall_ruleset_s2.tf b/upcloud/firewall/testdata/upcloud_firewall_ruleset_s2.tf
+new file mode 100644
+index 000000000..0fb5d2d83
+--- /dev/null
++++ b/upcloud/firewall/testdata/upcloud_firewall_ruleset_s2.tf
+@@ -0,0 +1,10 @@
++variable "ruleset_name" {
++  type = string
++}
++
++resource "upcloud_firewall_ruleset" "test" {
++  name                      = var.ruleset_name
++  description               = "Updated description"
++  enabled                   = false
++  default_dns_rules_enabled = true
++}
+diff --git a/upcloud/firewall/testdata/upcloud_firewall_ruleset_s3.tf b/upcloud/firewall/testdata/upcloud_firewall_ruleset_s3.tf
+new file mode 100644
+index 000000000..5b0f00775
+--- /dev/null
++++ b/upcloud/firewall/testdata/upcloud_firewall_ruleset_s3.tf
+@@ -0,0 +1,8 @@
++variable "ruleset_name" {
++  type = string
++}
++
++resource "upcloud_firewall_ruleset" "test" {
++  name    = var.ruleset_name
++  enabled = false
++}
+diff --git a/upcloud/firewall/testdata/upcloud_firewall_ruleset_stateful.tf b/upcloud/firewall/testdata/upcloud_firewall_ruleset_stateful.tf
+new file mode 100644
+index 000000000..767dceffb
+--- /dev/null
++++ b/upcloud/firewall/testdata/upcloud_firewall_ruleset_stateful.tf
+@@ -0,0 +1,8 @@
++variable "ruleset_name" {
++  type = string
++}
++
++resource "upcloud_firewall_ruleset" "test" {
++  name     = var.ruleset_name
++  stateful = true
++}
+diff --git a/upcloud/firewall/testdata/upcloud_firewall_ruleset_stateless.tf b/upcloud/firewall/testdata/upcloud_firewall_ruleset_stateless.tf
+new file mode 100644
+index 000000000..5ccfc5431
+--- /dev/null
++++ b/upcloud/firewall/testdata/upcloud_firewall_ruleset_stateless.tf
+@@ -0,0 +1,8 @@
++variable "ruleset_name" {
++  type = string
++}
++
++resource "upcloud_firewall_ruleset" "test" {
++  name     = var.ruleset_name
++  stateful = false
++}
+diff --git a/upcloud/provider.go b/upcloud/provider.go
+index 27b485d46..e0ffebbea 100644
+--- a/upcloud/provider.go
++++ b/upcloud/provider.go
+@@ -10,6 +10,7 @@ import (
+ 	"github.com/UpCloudLtd/terraform-provider-upcloud/internal/service/database"
+ 	"github.com/UpCloudLtd/terraform-provider-upcloud/internal/service/filestorage"
+ 	"github.com/UpCloudLtd/terraform-provider-upcloud/internal/service/firewall"
++	"github.com/UpCloudLtd/terraform-provider-upcloud/internal/service/firewallruleset"
+ 	"github.com/UpCloudLtd/terraform-provider-upcloud/internal/service/ip"
+ 	"github.com/UpCloudLtd/terraform-provider-upcloud/internal/service/kubernetes"
+ 	"github.com/UpCloudLtd/terraform-provider-upcloud/internal/service/loadbalancer"
+@@ -20,7 +21,9 @@ import (
+ 	"github.com/UpCloudLtd/terraform-provider-upcloud/internal/service/server"
+ 	"github.com/UpCloudLtd/terraform-provider-upcloud/internal/service/servergroup"
+ 	"github.com/UpCloudLtd/terraform-provider-upcloud/internal/service/storage"
++	"github.com/UpCloudLtd/terraform-provider-upcloud/internal/utils"
+ 	"github.com/UpCloudLtd/upcloud-go-api/credentials"
++	v9 "github.com/UpCloudLtd/upcloud-go-api/v9/pkg/upcloud"
+ 
+ 	retryablehttp "github.com/hashicorp/go-retryablehttp"
+ 	"github.com/hashicorp/terraform-plugin-framework/datasource"
+@@ -152,9 +155,20 @@ func (p *upcloudProvider) Configure(ctx context.Context, req provider.ConfigureR
+ 
+ 	tflog.Info(ctx, "UpCloud service connection configured for plugin framework provider", map[string]interface{}{"http_client": fmt.Sprintf("%#v", httpClient), "request_timeout": requestTimeout})
+ 
+-	resp.DataSourceData = service
+-	resp.EphemeralResourceData = service
+-	resp.ResourceData = service
++	v9client, err := v9.New("", v9.WithCredentials(creds))
++	if err != nil {
++		resp.Diagnostics.AddError("Failed to create V9 client", err.Error())
++		return
++	}
++
++	withV9 := utils.ServiceWithV9Client{
++		Service:  service,
++		V9Client: v9client,
++	}
++
++	resp.DataSourceData = withV9
++	resp.EphemeralResourceData = withV9
++	resp.ResourceData = withV9
+ }
+ 
+ func (p *upcloudProvider) Resources(_ context.Context) []func() resource.Resource {
+@@ -165,6 +179,7 @@ func (p *upcloudProvider) Resources(_ context.Context) []func() resource.Resourc
+ 		database.NewValkeyResource,
+ 		database.NewUserResource,
+ 		firewall.NewFirewallRulesResource,
++		firewallruleset.NewFirewallRulesetResource,
+ 		ip.NewFloatingIPAddressResource,
+ 		kubernetes.NewKubernetesClusterResource,
+ 		kubernetes.NewKubernetesNodeGroupResource,

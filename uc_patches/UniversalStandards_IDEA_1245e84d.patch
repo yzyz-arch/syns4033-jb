@@ -1,0 +1,52 @@
+From 1245e84d10ebedca1e1e8c67dd3a71094303125f Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 1 Oct 2026 14:06:39 -0700
+Subject: [PATCH] chore: add worker-factory/Vault vars to .env.example
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Follow-up to ba7c5a6 — src/config.ts added ENABLE_UPCLOUD_WORKER_FACTORY,
+UPCLOUD_BROKER_URL, UPCLOUD_BROKER_API_KEY, WORKER_SESSION_DEFAULT_TTL_MS,
+WORKER_SESSION_MAX_TTL_MS, WORKER_POOL_WARM_SIZE, VAULT_ADDR, VAULT_ROLE_ID,
+VAULT_SECRET_ID, VAULT_SECRET_MOUNT but .env.example was not updated to
+match, which AGENTS.md's own PR checklist requires.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01NaMrQ4NGni9rU7GmSqSg5E
+---
+ .env.example | 21 +++++++++++++++++++++
+ 1 file changed, 21 insertions(+)
+
+diff --git a/.env.example b/.env.example
+index 859604a..2049e8f 100644
+--- a/.env.example
++++ b/.env.example
+@@ -100,6 +100,27 @@ ENABLE_RUNTIME_HEALTH_RECOVERY=true
+ REDIS_URL=
+ # Example: REDIS_URL=redis://localhost:6379
+ 
++# =========================================================
++# UpCloud Worker Factory (ephemeral browser/desktop sessions)
++# Only required when ENABLE_UPCLOUD_WORKER_FACTORY=true
++# See docs/gates/upcloud-worker-factory.md for the full contract
++# =========================================================
++ENABLE_UPCLOUD_WORKER_FACTORY=false
++UPCLOUD_BROKER_URL=
++UPCLOUD_BROKER_API_KEY=
++WORKER_SESSION_DEFAULT_TTL_MS=900000
++WORKER_SESSION_MAX_TTL_MS=3600000
++WORKER_POOL_WARM_SIZE=0
++
++# =========================================================
++# HashiCorp Vault (dynamic secret leasing for worker sessions)
++# Only required when ENABLE_UPCLOUD_WORKER_FACTORY=true
++# =========================================================
++VAULT_ADDR=
++VAULT_ROLE_ID=
++VAULT_SECRET_ID=
++VAULT_SECRET_MOUNT=secret
++
+ # =========================================================
+ # Observability
+ # =========================================================

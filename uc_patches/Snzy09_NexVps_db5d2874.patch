@@ -1,0 +1,302 @@
+From db5d2874c1b3bac4149cc9d572c2c8660f963140 Mon Sep 17 00:00:00 2001
+From: Sanzz-MD <user@example.com>
+Date: Sat, 17 Oct 2026 10:34:56 +0700
+Subject: [PATCH] fix(upcloud): resolve masked token testing, add Accept
+ headers, and display detailed status codes
+
+---
+ client/src/components/AdminDashboard.tsx | 30 +++++----
+ server/src/routes/api.ts                 | 10 ++-
+ server/src/services/upcloudService.ts    | 86 ++++++++++++++++++++----
+ 3 files changed, 96 insertions(+), 30 deletions(-)
+
+diff --git a/client/src/components/AdminDashboard.tsx b/client/src/components/AdminDashboard.tsx
+index 22fbff6..2a5f886 100644
+--- a/client/src/components/AdminDashboard.tsx
++++ b/client/src/components/AdminDashboard.tsx
+@@ -163,12 +163,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBackToStore, o
+     if (!upcloudTestStatus.result?.results) return undefined;
+     const badges: Record<number, { text: string; variant?: 'success' | 'warning' | 'error' | 'neutral' }> = {};
+     upcloudTestStatus.result.results.forEach((res: any, idx: number) => {
+-      if (res.status === 'valid') {
++      if (res.success || res.status === 'valid') {
+         badges[idx] = { text: 'Valid & Siap', variant: 'success' };
+-      } else if (res.status === 'rate_limited') {
+-        badges[idx] = { text: 'Rate Limited', variant: 'warning' };
++      } else if (res.status === 429 || res.status === 'rate_limited') {
++        badges[idx] = { text: 'Rate Limited (429)', variant: 'warning' };
++      } else if (res.status === 401) {
++        badges[idx] = { text: '401 Unauthorized', variant: 'error' };
++      } else if (res.status === 403) {
++        badges[idx] = { text: '403 Forbidden', variant: 'error' };
+       } else {
+-        badges[idx] = { text: 'Gagal / Error', variant: 'error' };
++        badges[idx] = { text: res.status ? `Error (${res.status})` : 'Gagal / Error', variant: 'error' };
+       }
+     });
+     return badges;
+@@ -1167,27 +1171,27 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBackToStore, o
+                                 <span>{r.key}</span>
+                               </div>
+                               <div className="text-[10px] text-slate-500 dark:text-slate-400 font-mono">
+-                                {r.maskedToken}
++                                {r.maskedValue || r.maskedToken}
+                               </div>
+-                              {r.username && (
++                              {(r.data?.username || r.username) && (
+                                 <div className="text-[10px] text-slate-600 dark:text-slate-300">
+-                                  User: <span className="text-slate-900 dark:text-white font-medium">{r.username}</span> • Saldo: <span className="text-emerald-600 dark:text-emerald-400 font-semibold">{r.credits !== undefined ? `${r.credits}` : 'OK'}</span>
++                                  User: <span className="text-slate-900 dark:text-white font-medium">{r.data?.username || r.username}</span> • Saldo: <span className="text-emerald-600 dark:text-emerald-400 font-semibold">{r.data?.credits !== undefined ? `${r.data.credits}` : (r.credits !== undefined ? `${r.credits}` : 'OK')}</span>
+                                 </div>
+                               )}
+-                              {r.error && (
+-                                <div className="text-[10px] text-rose-600 dark:text-rose-400 truncate max-w-[200px]" title={r.error}>
+-                                  {r.error}
++                              {(r.message || r.error) && !r.success && (
++                                <div className="text-[10px] text-rose-600 dark:text-rose-400 max-w-[280px]" title={r.message || r.error}>
++                                  {r.status ? `[HTTP ${r.status}] ` : ''}{r.message || r.error}
+                                 </div>
+                               )}
+                             </div>
+                             <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider shrink-0 ${
+-                              r.status === 'valid'
++                              r.success || r.status === 'valid'
+                                 ? 'bg-emerald-500/10 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30'
+-                                : r.status === 'rate_limited'
++                                : r.status === 429 || r.status === 'rate_limited'
+                                 ? 'bg-amber-500/10 dark:bg-amber-500/20 text-amber-700 dark:text-amber-400 border border-amber-500/30'
+                                 : 'bg-rose-500/10 dark:bg-rose-500/20 text-rose-700 dark:text-rose-400 border border-rose-500/30'
+                             }`}>
+-                              {r.status === 'valid' ? 'Valid' : r.status === 'rate_limited' ? 'Rate Limit' : 'Error'}
++                              {r.success || r.status === 'valid' ? 'Valid' : r.status === 429 || r.status === 'rate_limited' ? 'Rate Limit' : r.status ? `Error ${r.status}` : 'Error'}
+                             </span>
+                           </div>
+                         ))}
+diff --git a/server/src/routes/api.ts b/server/src/routes/api.ts
+index 7d78f55..5aaa4fd 100644
+--- a/server/src/routes/api.ts
++++ b/server/src/routes/api.ts
+@@ -535,13 +535,17 @@ router.post('/admin/settings', requireAdmin, (req: Request, res: Response) => {
+ 
+         let val = submitted.value?.trim() || '';
+         if (val.includes('••••')) {
+-          // Find matching existing token by key or index
++          // Find matching existing token by key or index, then check process.env
+           const matched = existingTokens.find(e => e.key === key) || existingTokens[i];
+-          if (matched && matched.value) {
++          if (matched?.value && !matched.value.includes('••••')) {
+             val = matched.value;
++          } else if (process.env[key] && !process.env[key]!.includes('••••')) {
++            val = process.env[key]!;
++          } else if (i === 0 && process.env.UPCLOUD_API_TOKEN && !process.env.UPCLOUD_API_TOKEN.includes('••••')) {
++            val = process.env.UPCLOUD_API_TOKEN;
+           }
+         }
+-        if (val) {
++        if (val && !val.includes('••••')) {
+           resolvedTokens.push({ key, value: val });
+         }
+       }
+diff --git a/server/src/services/upcloudService.ts b/server/src/services/upcloudService.ts
+index 88d2a4b..c8106cd 100644
+--- a/server/src/services/upcloudService.ts
++++ b/server/src/services/upcloudService.ts
+@@ -109,6 +109,7 @@ export class UpCloudService {
+           timeout: 30000,
+           headers: {
+             'Content-Type': 'application/json',
++            'Accept': 'application/json',
+             Authorization: `Bearer ${tokenInfo.value}`
+           }
+         });
+@@ -134,7 +135,30 @@ export class UpCloudService {
+         }
+       }
+ 
+-      // If all tokens failed
++      // Try basic auth fallback before throwing if configured
++      const username = settings.upcloudUsername?.trim();
++      const password = settings.upcloudPassword?.trim();
++      if (username && password) {
++        try {
++          console.log(`🔄 [UpCloud Failover] Semua token gagal, mencoba fallback ke Basic Auth (${username})...`);
++          const basic = Buffer.from(`${username}:${password}`).toString('base64');
++          const client = axios.create({
++            baseURL: 'https://api.upcloud.com/1.3',
++            timeout: 30000,
++            headers: {
++              'Content-Type': 'application/json',
++              'Accept': 'application/json',
++              Authorization: `Basic ${basic}`
++            }
++          });
++          return await operation(client, { key: 'BASIC_AUTH', value: username });
++        } catch (basicErr: any) {
++          const bMsg = basicErr.response?.data?.error?.error_message || basicErr.message;
++          errorReports.push({ key: 'BASIC_AUTH', status: basicErr.response?.status, message: bMsg });
++        }
++      }
++
++      // If all tokens (and fallback) failed
+       const summary = errorReports
+         .map(e => `[${e.key}: HTTP ${e.status || 'ERR'} - ${e.message}]`)
+         .join('; ');
+@@ -151,6 +175,7 @@ export class UpCloudService {
+         timeout: 30000,
+         headers: {
+           'Content-Type': 'application/json',
++          'Accept': 'application/json',
+           Authorization: `Basic ${basic}`
+         }
+       });
+@@ -173,6 +198,7 @@ export class UpCloudService {
+   }> {
+     const existingTokens = this.getAllTokens();
+     let tokens: { key: string; value: string }[] = [];
++    const results: UpCloudTokenTestResult[] = [];
+ 
+     if (Array.isArray(customTokens) && customTokens.length > 0) {
+       for (let i = 0; i < customTokens.length; i++) {
+@@ -181,20 +207,34 @@ export class UpCloudService {
+         let val = item.value?.trim() || '';
+         if (val.includes('••••')) {
+           const matched = existingTokens.find(e => e.key === key) || existingTokens[i];
+-          if (matched) val = matched.value;
++          if (matched?.value && !matched.value.includes('••••')) {
++            val = matched.value;
++          } else if (process.env[key] && !process.env[key]!.includes('••••')) {
++            val = process.env[key]!;
++          } else if (i === 0 && process.env.UPCLOUD_API_TOKEN && !process.env.UPCLOUD_API_TOKEN.includes('••••')) {
++            val = process.env.UPCLOUD_API_TOKEN;
++          }
+         }
+-        if (val && !val.includes('••••')) {
+-          tokens.push({ key, value: val });
++        if (val.includes('••••') || !val) {
++          results.push({
++            key,
++            maskedValue: val || '••••••••',
++            success: false,
++            message: val ? 'Token ter-masking (••••). Masukkan ulang token lengkap untuk menguji token baru.' : 'Nilai token kosong.',
++            status: 400
++          });
++          continue;
+         }
++        tokens.push({ key, value: val });
+       }
+     }
+ 
+-    if (tokens.length === 0) {
++    if (tokens.length === 0 && results.length === 0) {
+       tokens = existingTokens;
+     }
+     const settings = store.getSettings();
+ 
+-    if (tokens.length === 0) {
++    if (tokens.length === 0 && results.length === 0) {
+       const username = settings.upcloudUsername?.trim();
+       const password = settings.upcloudPassword?.trim();
+       if (username && password) {
+@@ -204,7 +244,11 @@ export class UpCloudService {
+           const client = axios.create({
+             baseURL: 'https://api.upcloud.com/1.3',
+             timeout: 15000,
+-            headers: { Authorization: `Basic ${basic}` }
++            headers: {
++              'Content-Type': 'application/json',
++              'Accept': 'application/json',
++              Authorization: `Basic ${basic}`
++            }
+           });
+           const res = await client.get('/account');
+           return {
+@@ -217,12 +261,17 @@ export class UpCloudService {
+               key: 'BASIC_AUTH',
+               maskedValue: `${username}:••••••••`,
+               success: true,
++              status: 200,
+               message: 'Akun Aktif',
+               data: res.data?.account || res.data
+             }]
+           };
+         } catch (err: any) {
+-          const msg = err.response?.data?.error?.error_message || err.message;
++          const status = err.response?.status;
++          let msg = err.response?.data?.error?.error_message || err.message;
++          if (status === 401) {
++            msg = '401 Unauthorized: Username atau password UpCloud salah.';
++          }
+           return {
+             success: false,
+             totalTokens: 1,
+@@ -232,7 +281,7 @@ export class UpCloudService {
+               maskedValue: `${username}:••••••••`,
+               success: false,
+               message: msg,
+-              status: err.response?.status
++              status
+             }]
+           };
+         }
+@@ -246,7 +295,6 @@ export class UpCloudService {
+       };
+     }
+ 
+-    const results: UpCloudTokenTestResult[] = [];
+     let firstWorkingToken: { key: string; data: any } | null = null;
+ 
+     for (const item of tokens) {
+@@ -259,6 +307,7 @@ export class UpCloudService {
+         timeout: 15000,
+         headers: {
+           'Content-Type': 'application/json',
++          'Accept': 'application/json',
+           Authorization: `Bearer ${item.value}`
+         }
+       });
+@@ -270,6 +319,7 @@ export class UpCloudService {
+           key: item.key,
+           maskedValue: masked,
+           success: true,
++          status: 200,
+           message: `Koneksi Berhasil (${acct?.username || 'Valid'})`,
+           data: acct
+         });
+@@ -279,7 +329,14 @@ export class UpCloudService {
+         }
+       } catch (err: any) {
+         const status = err.response?.status;
+-        const msg = err.response?.data?.error?.error_message || err.message;
++        let msg = err.response?.data?.error?.error_message || err.response?.data?.message || err.message;
++        if (status === 401) {
++          msg = '401 Unauthorized: Token tidak valid, kedaluwarsa, dicabut, atau IP dibatasi (Allowed IP) di panel UpCloud.';
++        } else if (status === 403) {
++          msg = '403 Forbidden: Token tidak memiliki izin akses.';
++        } else if (status === 429) {
++          msg = '429 Rate Limit: Batas kuota request UpCloud API terlampaui.';
++        }
+         results.push({
+           key: item.key,
+           maskedValue: masked,
+@@ -292,17 +349,18 @@ export class UpCloudService {
+ 
+     const workingCount = results.filter(r => r.success).length;
+     const overallSuccess = workingCount > 0;
++    const totalCount = results.length;
+ 
+     let summaryMessage = '';
+     if (overallSuccess) {
+-      summaryMessage = `Koneksi UpCloud OK! ${workingCount} dari ${tokens.length} token aktif (Prioritas aktif: ${firstWorkingToken?.key}).`;
++      summaryMessage = `Koneksi UpCloud OK! ${workingCount} dari ${totalCount} token aktif (Prioritas aktif: ${firstWorkingToken?.key}).`;
+     } else {
+-      summaryMessage = `Semua (${tokens.length}) token UpCloud gagal terkoneksi.`;
++      summaryMessage = `Semua (${totalCount}) token UpCloud gagal terkoneksi.`;
+     }
+ 
+     return {
+       success: overallSuccess,
+-      totalTokens: tokens.length,
++      totalTokens: totalCount,
+       activeToken: firstWorkingToken?.key,
+       message: summaryMessage,
+       data: firstWorkingToken?.data,

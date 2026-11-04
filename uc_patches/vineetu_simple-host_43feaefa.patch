@@ -1,0 +1,391 @@
+From 43feaefa8c72d45755e45dcce1b431b55ca98436 Mon Sep 17 00:00:00 2001
+From: "Nintu (agent)" <nintu@simple-host.local>
+Date: Sun, 27 Sep 2026 22:09:51 +0000
+Subject: [PATCH] Setup helper: installer fetched by commit and checked against
+ its sha256; shell-quoted command values and strict emails; UpCloud password
+ read with read -rs under an echo-restoring trap, with advice to unset and
+ limit the API user
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ CHANGELOG.md                                  |  1 +
+ FEATURES.md                                   | 16 +++--
+ docs/advanced/README.md                       |  4 ++
+ .../askdata/setup-troubleshoot-small-box.txt  |  1 +
+ internal/handler/setuphelper_test.go          | 66 ++++++++++++++++---
+ internal/handler/static/setup/setup.js        | 60 +++++++++++------
+ scripts/e2e-setup-assist.js                   | 14 +++-
+ 7 files changed, 123 insertions(+), 39 deletions(-)
+
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index ecb5cb63..52b6419d 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -4,6 +4,7 @@ One line per shipped change, newest first. Add a line here in the same commit as
+ 
+ ## Unreleased
+ 
++- Setup helper: the install command fetches the installer by its release's commit and runs it only if its sha256 matches the one the page pins (`sha256sum -c`), from a `mktemp` file instead of `/tmp/install.sh`; values in generated commands are shell-quoted when needed and email fields take plain addresses only; the UpCloud terminal line reads the password with `read -rs` and a trap that turns echo back on after Ctrl-C, and the page, the prompt and the advanced docs say to `unset UPCLOUD_USERNAME UPCLOUD_PASSWORD` when the server is up and to limit the API user to server permissions and your own IP.
+ - Setup assistant: a basic answer applied after the Basics step (switching to Google sign-in, turning on SMTP, picking a bucket provider) runs the Basics checks again, and if they fail the page goes back to Basics with the errors shown and offers no files until they pass, so an Enterprise config where any Google account can sign in cannot come out of it. The server now keeps suggested basic answers only on the first two steps; past them the assistant says to go back to Basics.
+ - Setup assistant review fixes: pasted output loses more secret shapes before it is sent (JSON keys, `docker compose logs` prefixes, terminal colour codes, quoted values, `curl -uuser:pass`/`-fsSu`, `--password`, `mysql -p`, Authorization/Cookie/Set-Cookie/X-…-Key headers, `SMTP_PASS`/`*_PASSPHRASE`/`SECRET_KEY_BASE`, URL passwords with `/`, Azure SAS `sig=`, UpCloud `ucat_` tokens, non-ASCII emails), the same in the page and on the server; the hint now says we remove the ones we recognise and to check before sending.
+ - **UpCloud, recommended for a small box** on https://simple-host.app/setup?product=small-box: "Where it runs" offers UpCloud (recommended) or a server you already have. UpCloud shows why (the smallest server, 1 CPU and 1 GB for about $5/month, runs Simple Host comfortably; we test on it), a **Create your UpCloud account — $25 in credits** button (a referral link, and the page says so: the credit is UpCloud's offer for new accounts through it, on their terms) and the steps: create the account, create an API user in the UpCloud control panel, answer the questions, then give your AI agent the prompt. The files step gives a one-line command that sets the API user in your own terminal (the password is not shown) and a prompt that has your agent create the smallest Ubuntu 24.04 server with `upctl` or the UpCloud API, add your SSH key, have you add the DNS records, install, check health and HTTPS and tell you the admin page; the page never asks for UpCloud credentials. The install command now fetches the installer from its pinned release instead of `main`. The advanced docs and the run-hackathon skill's install and provider pages carry the recommendation. Skills 0.26.2.
+diff --git a/FEATURES.md b/FEATURES.md
+index 97571c1c..6e553b22 100644
+--- a/FEATURES.md
++++ b/FEATURES.md
+@@ -696,8 +696,10 @@ UpCloud account — $25 in credits** button to the referral link `https://signup
+ terms apply." under it, and the steps (create the account → create an API user, a sub-account with API access, in the
+ UpCloud control panel → answer the questions → on the files step, set the API user in your terminal and give your agent
+ the prompt); the page has no field for UpCloud credentials and never asks for them. Output: small box → the one-line
+-`install.sh` command, fetched from the release the installer pins (`INSTALLER_RELEASE` in setup.js, equal to
+-`VERSION` in `install.sh` by test), not `main` (its flags
++`install.sh` command, fetched from the release the installer pins by that release's commit (`INSTALLER_RELEASE`,
++`INSTALLER_COMMIT` in setup.js) into a `mktemp` file and run only if its sha256 matches `INSTALLER_SHA256` (tag, commit
++and hash agree by test, which also fails once `install.sh`'s `VERSION` is tagged but not pinned), not `main`; every value
++in a generated command is shell-quoted when it needs it, and emails must be plain addresses (its flags
+ for host, sites host, email, `--max-site-mb`, `--keep-versions`) and the `/opt/simple-host/.env` lines (only changed
+ and needed values; Copy, Download) with where to paste them and the restart line; Enterprise → `config.env` for
+ `deploy/overlays/byo` (the ConfigMap), a `secrets.env` template naming every secret as a blank with how to generate
+@@ -709,15 +711,17 @@ the install command, the `.env` lines, `docker compose up -d`; Enterprise: clone
+ (`/healthz` → 200, `docker compose ps`, the sites host's certificate; `/readyz`, an owner host, an admin sign-in) and, where
+ the assistant is on, "paste the error at `<origin>/setup?product=<p>#help`"; secrets stay blanks for the agent to ask for.
+ On UpCloud the files step leads with this block, headed **Set it up on UpCloud with your AI agent**: a one-line
+-command for the person's own terminal (`printf`/`read`, the password read with `stty -echo`, then `export
+-UPCLOUD_USERNAME UPCLOUD_PASSWORD`; bash and zsh) and the prompt, which tells the agent to use those variables only from
++command for the person's own terminal (`printf`/`read`, the password read with `read -rs` under a trap that turns echo back on after Ctrl-C, then `export
++UPCLOUD_USERNAME UPCLOUD_PASSWORD`; bash and zsh), a note to `unset UPCLOUD_USERNAME UPCLOUD_PASSWORD` (or close the
++terminal) when the server is up and to limit the API user to server permissions and, where possible, the person's own IP, and the prompt, which tells the agent to use those variables only from
+ the environment (never ask for them in chat, print them or write them anywhere), to use `upctl` or the UpCloud API,
+ create an SSH key `~/.ssh/simple-host` if missing, list plans and take the smallest with 1 CPU and 1 GB
+ (`STARTER-1xCPU-1GB` today; tell the person the price first), ask for the zone, take the plain Ubuntu Server 24.04 LTS
+ template (not the CUDA one), the plan's disk at tier `standard`, root login with the key, a public IPv4; DNS A records
+ for the domain and `*.<domain>` (plus the sites hostname when it is not under the domain), checked with `dig`; run the
+ pinned installer over SSH; the `.env` lines; `/healthz`, `docker compose ps` and the sites host's certificate; then
+-report the admin page `https://<domain>/admin` and the server's UUID, address, plan and zone. The by-hand steps follow
++report the admin page `https://<domain>/admin` and the server's UUID, address, plan and zone, and remind the person to unset
++the credentials. The by-hand steps follow
+ ("Or do it by hand"). Where it runs is one entry per target in `TARGETS` (setup.js: small box `upcloud`, `server`;
+ Enterprise `kubernetes`), so another platform is one more entry and one more choice. `/setup?product=enterprise` or `?product=small-box` preselects the first choice (the
+ links on the enterprise and hosted pages). Runs in the browser (its only requests are its own files, the optional
+@@ -765,7 +769,7 @@ message is redacted too. The conversation (last 4 turns per product) lives in th
+ | Assist route | `POST /v1/setup/assist` `{product, step: choose\|basics\|advanced\|files, mode?, area?, choices?, basics?, message, pasted?, history?}` → `{answer, changes: [{setting, value, why}], basics: {key: value}}`, or with `Accept: text/event-stream` `data: {"t"}` pieces (stopped before the changes marker, even one arriving in pieces) then `data: {"done":true,"answer","changes","basics"}`. Request: unknown fields 400 `invalid_body`; `choices` exactly as the check takes settings (0–80; `unknown_setting`, `secret_not_accepted`, `setting_not_checkable`, `invalid_value`); `basics` only the answers picked from lists (small box `codes`, `google`; Enterprise `idp`, `certs`, `smtp`, `bucket`, `creds`; else `unknown_basic`/`invalid_value`); `message` 1–500 characters; `pasted` ≤ 8 KB (`paste_too_long`); message, pasted output and earlier questions redacted again on the server (`h/setupredact.go`, the same rules as the page's). Response: every change checked — dropped if the helper does not write that setting (a basic question's, a secret, free text, or on a small box one Compose does not pass through), the value is outside its range, equals the current value, or loosens a security-sensitive setting past both its default and the current value (the check's rules, `strict_order` and `zero_is_never` included); canonical values; at most 12; `why` ≤ 200 characters with no links; basic answers kept only when `step` is `choose` or `basics` (past them the answer says to go back to Basics); answer plain with no links. Same-origin only, shares Ask's per-IP/per-network buckets, its own in-flight cap `SETUP_ASSIST_MAX_IN_FLIGHT` (1), per-network count per UTC day in memory `SETUP_ASSIST_PER_NETWORK_DAILY` (40), daily count `SETUP_ASSIST_DAILY_MAX` (300; 0 turns it off and hides the panel) in table `setup_assist_daily` (migration `v073-setup-assist-daily.sql`); left out of `h/cors.go` and `h/apimetrics.go` |
+ | Assist Go | `h/setupassist.go` (prompt = rules, the product's basic questions (proposable ones with their values, typed ones never proposed), the check's FACTS, the product guide `h/askdata/setup-<product>.txt` through the Ask filter, troubleshooting `h/askdata/setup-troubleshoot-<product>.txt` through a lighter filter that keeps install commands, and the settings the helper writes area by area with type, default, range, security flag and description; ASK_MODEL and ASK_REASONING_EFFORT, up to 1200 tokens; one request, never retried; log line: product, step, number of choices, whether output was pasted, the day's count), `h/setupredact.go`, `h/chrome.go` (`<!--sh:setup-assist-->` → the script tag when on) |
+ | Assist page | `st/setup/assist.js` (panel, streaming, items, redaction and review, `#help`), `st/setup/setup.js` (`window.shSetup`: context, describe, apply, describeBasic, applyBasic, refresh; `<setupBasics>` block), styles in `st/setup-helper.html` |
+-| UpCloud | `st/setup/setup.js` (`UPCLOUD_SIGNUP`, `upcloudOffer`, `renderWhere`, `TARGETS`, `UPCLOUD_CREDS`, `handoff`), styles `.cta`/`.fine` in `st/setup-helper.html`; `h/setuphelper_test.go` (`TestSetupHelperInstallerRelease`: pinned release equals `install.sh`, the exact referral URL); the assistant's knowledge (`h/askdata/setup-small-box.txt`, UpCloud errors in `setup-troubleshoot-small-box.txt`); `docs/advanced/README.md` and the run-hackathon skill's `install.md`/`providers.md` carry the recommendation and the referral note; pasted `curl -u`/`--user` passwords are redacted |
++| UpCloud | `st/setup/setup.js` (`UPCLOUD_SIGNUP`, `upcloudOffer`, `renderWhere`, `TARGETS`, `UPCLOUD_CREDS`, `handoff`), styles `.cta`/`.fine` in `st/setup-helper.html`; `h/setuphelper_test.go` (`TestSetupHelperInstallerRelease`: the command fetches install.sh by the pinned release's commit and checks its sha256 before running it; tag, commit and hash agree, and a tagged `install.sh` release must be the one pinned; `TestSetupHelperUpCloudReferral`: the exact referral URL); the assistant's knowledge (`h/askdata/setup-small-box.txt`, UpCloud errors in `setup-troubleshoot-small-box.txt`); `docs/advanced/README.md` and the run-hackathon skill's `install.md`/`providers.md` carry the recommendation and the referral note; pasted `curl -u`/`--user` passwords are redacted |
+ | Assist tests | `h/setupassist_test.go` (validation, dropped changes, no looser changes, reply shapes, prompt contents and no leaks, streaming, caps and own slots, no CORS or metrics, redaction cases in Go and the page's JS against `h/testdata/setup-redact-cases.json`, knowledge filters, basics lists equal the page's, the script only when on); `scripts/e2e-setup-assist.js` with `scripts/e2e-setup-assist-sidecar.py` drives the page in Chromium (ask → items → apply → files reflect it, clean-up, paste → review → send, both products, 390 and 1280; the UpCloud block: the button's text, exact URL, new tab and noopener, the referral note, no credential field on the page; the prompt's pinned installer URL, chosen settings, UpCloud steps and credential rules; a server of your own gets no UpCloud steps) |
+ 
+ | Surface | Details |
+diff --git a/docs/advanced/README.md b/docs/advanced/README.md
+index 1fed3b4f..d360a969 100644
+--- a/docs/advanced/README.md
++++ b/docs/advanced/README.md
+@@ -28,6 +28,8 @@ apply.)
+ 
+ 1. Create your UpCloud account.
+ 2. In the UpCloud control panel, create an API user: a sub-account with API access allowed.
++   Give it only the server permissions it needs and, if you can, allow only your own IP
++   address in its API settings.
+ 3. Answer the questions at https://simple-host.app/setup?product=small-box, with **UpCloud** as
+    where it runs.
+ 4. On the files step, run the one line it gives in your own terminal (it asks for the API user's
+@@ -37,6 +39,8 @@ apply.)
+    (your domain and `*.<domain>`), runs the installer from its pinned release with your choices,
+    checks `/healthz` and HTTPS, and tells you the admin page. If anything fails, paste the error
+    at https://simple-host.app/setup?product=small-box#help.
++5. When the server is up, run `unset UPCLOUD_USERNAME UPCLOUD_PASSWORD` in that terminal (or
++   close it): until then every program started there can read the API user.
+ 
+ The setup page never asks for or accepts UpCloud credentials.
+ 
+diff --git a/internal/handler/askdata/setup-troubleshoot-small-box.txt b/internal/handler/askdata/setup-troubleshoot-small-box.txt
+index b9ed86d8..ff5bd684 100644
+--- a/internal/handler/askdata/setup-troubleshoot-small-box.txt
++++ b/internal/handler/askdata/setup-troubleshoot-small-box.txt
+@@ -9,6 +9,7 @@ The installer:
+ - "FAILED: a database volume exists but .env is missing": the database password lived only in that file. Restore the .env from a backup, or discard the old instance and its data (the installer prints the command).
+ - "--max-site-mb must be a whole number" or "must be at least": a flag value is wrong; fix the flag.
+ - "unknown argument": a flag the installer does not have; the flags are --host, --content, --email, --max-site-mb, --keep-versions.
++- "sha256sum: WARNING: 1 computed checksum did NOT match" or "FAILED" before anything installs: the downloaded install.sh is not the pinned file, so it was not run. Run the command again; if it repeats, do not run the file by hand, and write to support@simple-host.app.
+ - Docker could not be installed: the installer expects a fresh Ubuntu server with sudo.
+ 
+ Creating the server at UpCloud:
+diff --git a/internal/handler/setuphelper_test.go b/internal/handler/setuphelper_test.go
+index 8e57675d..d14d8613 100644
+--- a/internal/handler/setuphelper_test.go
++++ b/internal/handler/setuphelper_test.go
+@@ -1,8 +1,11 @@
+ package handler
+ 
+ import (
++	"crypto/sha256"
++	"fmt"
+ 	"net/http"
+ 	"os"
++	"os/exec"
+ 	"regexp"
+ 	"strings"
+ 	"testing"
+@@ -47,8 +50,10 @@ func TestSetupHelper(t *testing.T) {
+ }
+ 
+ // The helper's install command fetches the installer from the release the
+-// installer pins, so the two must name the same tag: bumping VERSION in
+-// install.sh without setup.js would hand out an older installer.
++// installer pins, by that release's commit, and checks its sha256 before
++// running it. The tag, the commit and the hash agree, and once install.sh's
++// release is tagged the page pins it (bumping VERSION in install.sh without
++// setup.js would hand out an older installer).
+ func TestSetupHelperInstallerRelease(t *testing.T) {
+ 	js, err := staticFiles.ReadFile("static/setup/setup.js")
+ 	if err != nil {
+@@ -59,18 +64,61 @@ func TestSetupHelperInstallerRelease(t *testing.T) {
+ 		t.Fatal(err)
+ 	}
+ 	page := regexp.MustCompile(`var INSTALLER_RELEASE = '(v[0-9.]+)';`).FindSubmatch(js)
++	commit := regexp.MustCompile(`var INSTALLER_COMMIT = '([0-9a-f]{40})';`).FindSubmatch(js)
++	sum := regexp.MustCompile(`var INSTALLER_SHA256 = '([0-9a-f]{64})';`).FindSubmatch(js)
+ 	pinned := regexp.MustCompile(`(?m)^VERSION="(v[0-9.]+)"$`).FindSubmatch(sh)
+-	if page == nil || pinned == nil {
+-		t.Fatalf("release not found: setup.js %q, install.sh %q", page, pinned)
++	if page == nil || commit == nil || sum == nil || pinned == nil {
++		t.Fatalf("pin not found: setup.js release %q commit %q sha256 %q, install.sh %q", page, commit, sum, pinned)
+ 	}
++	if !strings.Contains(string(js), "'https://raw.githubusercontent.com/vineetu/simple-host/' + INSTALLER_COMMIT + '/deploy/install/install.sh'") {
++		t.Error("the install command must fetch install.sh by the pinned commit, not a tag or a branch")
++	}
++	if !strings.Contains(string(js), `' -o "$f" && printf \'%s  %s\\n\' ' + INSTALLER_SHA256 + ' "$f" | sha256sum -c --quiet - && sudo bash "$f" '`) {
++		t.Error("the install command must check install.sh's sha256 before running it")
++	}
++	// Against the repository, when its history is here: the release's tag
++	// points at the pinned commit, and install.sh there has the pinned hash
++	// and names the release.
++	git := func(args ...string) ([]byte, error) {
++		cmd := exec.Command("git", args...)
++		cmd.Dir = "../.."
++		return cmd.Output()
++	}
++	if _, err := git("cat-file", "-e", string(commit[1])+"^{commit}"); err != nil {
++		if string(page[1]) != string(pinned[1]) {
++			t.Errorf("setup.js INSTALLER_RELEASE = %s, install.sh pins %s", page[1], pinned[1])
++		}
++		t.Skipf("commit %s is not in this checkout's history; hash not checked", commit[1])
++	}
++	// While a new release is prepared (VERSION bumped, not yet tagged) the
++	// page keeps the last tagged one; once the tag exists, the page pins it.
+ 	if string(page[1]) != string(pinned[1]) {
+-		t.Errorf("setup.js INSTALLER_RELEASE = %s, install.sh pins %s", page[1], pinned[1])
++		if _, err := git("rev-parse", "-q", "--verify", string(pinned[1])+"^{commit}"); err == nil {
++			t.Errorf("install.sh is release %s, which is tagged; setup.js still pins %s", pinned[1], page[1])
++		}
++	}
++	if tag, err := git("rev-parse", "-q", "--verify", string(page[1])+"^{commit}"); err == nil && strings.TrimSpace(string(tag)) != string(commit[1]) {
++		t.Errorf("tag %s is commit %s, setup.js pins %s", page[1], strings.TrimSpace(string(tag)), commit[1])
++	}
++	at, err := git("show", string(commit[1])+":deploy/install/install.sh")
++	if err != nil {
++		t.Fatalf("install.sh at %s: %v", commit[1], err)
++	}
++	if got := fmt.Sprintf("%x", sha256.Sum256(at)); got != string(sum[1]) {
++		t.Errorf("install.sh at %s has sha256 %s, setup.js pins %s", commit[1], got, sum[1])
+ 	}
+-	if !strings.Contains(string(js), "'https://raw.githubusercontent.com/vineetu/simple-host/' + INSTALLER_RELEASE + '/deploy/install/install.sh'") {
+-		t.Error("the install command must fetch install.sh from the pinned release, not a branch")
++	if v := regexp.MustCompile(`(?m)^VERSION="(v[0-9.]+)"$`).FindSubmatch(at); v == nil || string(v[1]) != string(page[1]) {
++		t.Errorf("install.sh at %s does not name release %s", commit[1], page[1])
++	}
++}
++
++// The UpCloud button is the referral link, exactly, opened apart from this
++// page.
++func TestSetupHelperUpCloudReferral(t *testing.T) {
++	js, err := staticFiles.ReadFile("static/setup/setup.js")
++	if err != nil {
++		t.Fatal(err)
+ 	}
+-	// The UpCloud button is the referral link, exactly, opened apart from
+-	// this page.
+ 	if !strings.Contains(string(js), "var UPCLOUD_SIGNUP = 'https://signup.upcloud.com/?promo=JF2WCV';") {
+ 		t.Error("UPCLOUD_SIGNUP changed")
+ 	}
+diff --git a/internal/handler/static/setup/setup.js b/internal/handler/static/setup/setup.js
+index b5c54677..882d1961 100644
+--- a/internal/handler/static/setup/setup.js
++++ b/internal/handler/static/setup/setup.js
+@@ -12,11 +12,18 @@
+   'use strict';
+ 
+   var FILES = { small: '/setup/small-box-settings.json', ent: '/setup/enterprise-settings.json' };
+-  // The release the installer pins (VERSION in deploy/install/install.sh; a
+-  // Go test keeps the two equal). The command fetches the installer from
+-  // that tag, so what it installs is fixed, not whatever main holds that day.
++  // The release the installer pins (VERSION in deploy/install/install.sh),
++  // the commit its tag points at, and install.sh's sha256 in that commit.
++  // The command fetches the installer by commit (a tag can be moved) and
++  // checks the hash before running it, so what it installs is fixed, not
++  // whatever main holds that day. After tagging a new release, set all
++  // three: git rev-parse vX.Y.Z^{commit}, and
++  // git show vX.Y.Z:deploy/install/install.sh | sha256sum. A Go test
++  // (TestSetupHelperInstallerRelease) checks them against the tag.
+   var INSTALLER_RELEASE = 'v0.7.1';
+-  var INSTALL_URL = 'https://raw.githubusercontent.com/vineetu/simple-host/' + INSTALLER_RELEASE + '/deploy/install/install.sh';
++  var INSTALLER_COMMIT = '4ec7452eb67c7bf39f45c5685a1a180a4d7d7e24';
++  var INSTALLER_SHA256 = 'c79bc74a3e2b85ccf5a561143e1c1c968a2cebd13826a9ced8823f21df052700';
++  var INSTALL_URL = 'https://raw.githubusercontent.com/vineetu/simple-host/' + INSTALLER_COMMIT + '/deploy/install/install.sh';
+   // Where a small box is recommended to run. A referral link: the page says so.
+   var UPCLOUD_SIGNUP = 'https://signup.upcloud.com/?promo=JF2WCV';
+   // What install.sh writes when its flag is not given (deploy/install/install.sh).
+@@ -285,7 +292,13 @@
+     ]);
+   }
+   var HOST = /^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{0,61}[a-z0-9]$/;
+-  var EMAIL = /^[^\s@<>,"']+@[^\s@<>,"']+\.[^\s@<>,"']+$/;
++  var EMAIL = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/;
++  // sh quotes a value for a shell command: bare when it has only characters
++  // no shell treats specially, else in single quotes.
++  function sh(v) {
++    v = String(v);
++    return /^[A-Za-z0-9@%+=:,.\/_-]+$/.test(v) ? v : "'" + v.replace(/'/g, "'\\''") + "'";
++  }
+ 
+   // upcloudOffer is the recommendation: why, the sign-up button (a referral
+   // link, and the page says so) and what to do there.
+@@ -296,7 +309,7 @@
+       el('p', { class: 'fine', text: 'Referral link. New accounts through this link get $25 of UpCloud credit; their terms apply.' }),
+       el('ol', { class: 'steps' }, [
+         el('li', { text: 'Create your UpCloud account.' }),
+-        el('li', { text: 'In the UpCloud control panel, create an API user: a sub-account with API access allowed. Its username and password stay with you; this page never asks for them.' }),
++        el('li', { text: 'In the UpCloud control panel, create an API user: a sub-account with API access allowed. ' + UPCLOUD_LIMIT + ' Its username and password stay with you; this page never asks for them.' }),
+         el('li', { text: 'Answer the questions on this page.' }),
+         el('li', { text: 'On the last step, set the API user in your terminal (the page gives the command) and copy the prompt into your AI agent. It creates the server, sets it up and checks it.' })
+       ])
+@@ -425,7 +438,7 @@
+       if (!HOST.test(b.domain)) e.domain = 'A domain name like hack.example.com.';
+       if (b.content && (!HOST.test(b.content) || b.content === b.domain)) e.content = 'A different hostname, like sites.' + (b.domain || 'hack.example.com') + '.';
+       if (b.email && !EMAIL.test(b.email)) e.email = 'An email address, or leave it empty.';
+-      if (b.mailFrom && /[\r\n]/.test(b.mailFrom)) e.mailFrom = 'One line.';
++      if (b.mailFrom && /[\r\n`]/.test(b.mailFrom)) e.mailFrom = 'One line, with no backticks.';
+       if (b.googleId && !/^[A-Za-z0-9._-]+$/.test(b.googleId)) e.googleId = 'The client ID as Google shows it.';
+     } else {
+       b.host = b.host.toLowerCase().replace(/^https?:\/\//, '').replace(/\/+$/, '');
+@@ -578,13 +591,13 @@
+ 
+     if (p === 'small') {
+       var content = b.content || 'sites.' + b.domain;
+-      var flags = ['--host', b.domain, '--content', content];
++      var flags = ['--host', sh(b.domain), '--content', sh(content)];
+       chosen.push(['Where it runs', targetOf('small').name], ['Domain', b.domain], ['Sites hostname', content]);
+-      if (b.email) { flags.push('--email', b.email); chosen.push(['Certificate notices', b.email]); }
++      if (b.email) { flags.push('--email', sh(b.email)); chosen.push(['Certificate notices', b.email]); }
+       var env = [];
+       extra.forEach(function (n) {
+         var s = byName(n);
+-        if (s.install_flag) { flags.push(s.install_flag, changed[n]); }
++        if (s.install_flag) { flags.push(s.install_flag, sh(changed[n])); }
+         else env.push(envLine(n, changed[n]));
+         chosen.push([n, changed[n] + '  (default ' + (defaultOf(s) || 'none') + ')']);
+       });
+@@ -602,7 +615,7 @@
+       if (!b.codes && !b.google) chosen.push(['Sign-in', 'admin key only']);
+       fill = fill.concat(optionalSecrets);
+       var envText = env.concat(secretBlock(fill)).join('\n');
+-      var cmd = 'curl -fsSL ' + INSTALL_URL + ' -o /tmp/install.sh && sudo bash /tmp/install.sh ' + flags.join(' ');
++      var cmd = 'f=$(mktemp) && curl -fsSL ' + INSTALL_URL + ' -o "$f" && printf \'%s  %s\\n\' ' + INSTALLER_SHA256 + ' "$f" | sha256sum -c --quiet - && sudo bash "$f" ' + flags.join(' ');
+       return { chosen: chosen, cmd: cmd, env: envText ? '# Simple Host settings (https://simple-host.app/setup)\n' + envText + '\n' : '' };
+     }
+ 
+@@ -679,9 +692,13 @@
+   }
+   // UPCLOUD_CREDS is the line the person runs in their own terminal before
+   // starting their agent: it asks for the API user's name and password
+-  // (the password without echo) and exports both, so they never pass through
+-  // this page, the agent's chat or the shell history. bash and zsh alike.
+-  var UPCLOUD_CREDS = "printf 'UpCloud API username: '; read -r UPCLOUD_USERNAME; printf 'UpCloud API password: '; stty -echo; read -r UPCLOUD_PASSWORD; stty echo; echo; export UPCLOUD_USERNAME UPCLOUD_PASSWORD";
++  // (the password without echo: read -s, with a trap that turns echo back on
++  // if Ctrl-C stops it) and exports both, so they never pass through this
++  // page, the agent's chat or the shell history. bash and zsh alike.
++  var UPCLOUD_CREDS = "printf 'UpCloud API username: '; read -r UPCLOUD_USERNAME; printf 'UpCloud API password: '; trap 'stty echo 2>/dev/null' INT; read -rs UPCLOUD_PASSWORD; trap - INT; echo; export UPCLOUD_USERNAME UPCLOUD_PASSWORD";
++  // What to do with the API user afterwards, on the page and in the prompt.
++  var UPCLOUD_UNSET = 'unset UPCLOUD_USERNAME UPCLOUD_PASSWORD';
++  var UPCLOUD_LIMIT = 'Give the API user only the server permissions it needs and, if you can, allow only your own IP address in its API settings.';
+   // dnsNames are the A records the installer needs: the domain, and the
+   // sites hostname, which a wildcard covers when it sits under the domain.
+   function dnsRecords(domain, content) {
+@@ -720,16 +737,16 @@
+         L.push('   - UpCloud’s firewall is off for a new server. If it is on, allow ports 22, 80 and 443 in.', '');
+         host = 'the server (`' + ssh + '`)';
+       }
+-      L.push(n++ + '. DNS: at my domain’s DNS provider these A records must point at the server’s public IPv4 address: ' + recs.join(', ') + (recs.length === 2 ? ' (the wildcard covers ' + content + ')' : '') + '. If you can manage that DNS provider from here, ask me before changing anything; otherwise tell me the exact records to add and wait for me. Check that `dig +short ' + b.domain + '` and `dig +short ' + content + '` both print the address. Certificates are issued on the first visit, so both names must point at the server first.', '');
++      L.push(n++ + '. DNS: at my domain’s DNS provider these A records must point at the server’s public IPv4 address: ' + recs.join(', ') + (recs.length === 2 ? ' (the wildcard covers ' + content + ')' : '') + '. If you can manage that DNS provider from here, ask me before changing anything; otherwise tell me the exact records to add and wait for me. Check that `dig +short ' + sh(b.domain) + '` and `dig +short ' + sh(content) + '` both print the address. Certificates are issued on the first visit, so both names must point at the server first.', '');
+       L.push(n++ + '. Install: on ' + host + ', run this. It installs Docker, starts Simple Host from the release it pins (' + INSTALLER_RELEASE + ') and prints the admin key once: give the admin key to me and do not write it anywhere else.', '', FENCE + 'sh', r.cmd, FENCE, '');
+       if (r.env) {
+         L.push(n++ + '. Settings: add these lines to the end of /opt/simple-host/.env on the server (it needs sudo). Ask me for each blank value; do not invent one. Then run `cd /opt/simple-host && sudo docker compose up -d`.', '', FENCE, r.env.replace(/\n$/, ''), FENCE, '');
+       }
+       L.push(n++ + '. Check it works:');
+-      L.push('   - `curl -sS -o /dev/null -w \'%{http_code}\\n\' https://' + b.domain + '/healthz` prints 200.');
++      L.push('   - `curl -sS -o /dev/null -w \'%{http_code}\\n\' ' + sh('https://' + b.domain + '/healthz') + '` prints 200.');
+       L.push('   - `cd /opt/simple-host && sudo docker compose ps`, on the server, shows every service running.');
+-      L.push('   - `curl -sS -o /dev/null -w \'%{http_code}\\n\' https://' + content + '/` prints a status code with no certificate error.', '');
+-      L.push(n++ + '. Tell me: the admin page, https://' + b.domain + '/admin (it signs in with the admin key)' + (t.id === 'upcloud' ? ', the server’s UUID, address, plan and zone' : '') + '.', '');
++      L.push('   - `curl -sS -o /dev/null -w \'%{http_code}\\n\' ' + sh('https://' + content + '/') + '` prints a status code with no certificate error.', '');
++      L.push(n++ + '. Tell me: the admin page, https://' + b.domain + '/admin (it signs in with the admin key)' + (t.id === 'upcloud' ? ', the server’s UUID, address, plan and zone. Then remind me to run `' + UPCLOUD_UNSET + '` in this terminal (or close it) once you are done with UpCloud, and to keep the API user limited to server permissions and, if I can, to my own IP address' : '') + '.', '');
+     } else {
+       L.push('1. Get the package: `git clone https://github.com/vineetu/simple-host-enterprise && cd simple-host-enterprise`. Its INSTALL.md is a runbook written for AI agents: follow it top to bottom, and use the two files below as the config.env and secrets.env it asks for. Name the kubectl context on every call.', '');
+       L.push('2. Save this as deploy/overlays/byo/config.env:', '', FENCE, r.config.replace(/\n$/, ''), FENCE, '');
+@@ -737,8 +754,8 @@
+       L.push('4. In deploy/overlays/byo, set the image digest in kustomization.yaml and the address in ingress-patch.yaml, and save the database’s CA certificate as db-ca.crt (INSTALL.md, section 5).', '');
+       L.push('5. Apply: `make install OVERLAY=deploy/overlays/byo INSTALL_CONTEXT=<the kubectl context>`, then `kubectl --context <the kubectl context> -n simple-host rollout status deploy/simple-host --timeout=300s`.', '');
+       L.push('6. Check it works:');
+-      L.push('   - `curl -fsS https://' + b.host + '/readyz` prints {"status":"ok"}.');
+-      L.push('   - `curl -sS -o /dev/null -w \'%{http_code}\\n\' https://install-check.' + b.host + '/healthz` prints a status code (401 or 404 is fine; a TLS or DNS error is not).');
++      L.push('   - `curl -fsS ' + sh('https://' + b.host + '/readyz') + '` prints {"status":"ok"}.');
++      L.push('   - `curl -sS -o /dev/null -w \'%{http_code}\\n\' ' + sh('https://install-check.' + b.host + '/healthz') + '` prints a status code (401 or 404 is fine; a TLS or DNS error is not).');
+       L.push('   - An admin signs in at https://' + b.host + '/auth/login.', '');
+     }
+     L.push(window.shSetupAssist
+@@ -888,7 +905,8 @@
+         ]),
+         block('In your terminal', UPCLOUD_CREDS),
+         el('ol', { class: 'steps', start: '3' }, [el('li', { text: 'Start your AI agent in that terminal and give it this.' })]),
+-        block('For your AI agent', agent, 'simple-host-setup.md')
++        block('For your AI agent', agent, 'simple-host-setup.md'),
++        el('p', { class: 'note', style: 'margin:8px 0 0' }, ['When the server is up, run ', el('code', { text: UPCLOUD_UNSET }), ' in that terminal, or close it: until then every program started there can read the API user. ' + UPCLOUD_LIMIT])
+       ]));
+     }
+     if (S.product === 'small') {
+diff --git a/scripts/e2e-setup-assist.js b/scripts/e2e-setup-assist.js
+index a8fc5142..ddf13523 100644
+--- a/scripts/e2e-setup-assist.js
++++ b/scripts/e2e-setup-assist.js
+@@ -236,20 +236,28 @@ async function smallBox(browser, width) {
+   assert(await turn.locator('.sh-assist-done.is-applied').count() === 3, 'Apply all applies every change');
+   await shot(page, `${tag}-3-applied`);
+   if (width < 600) await closeWithEscape(page);
++  await page.fill('#f-email', 'a;id@x.co');
++  await page.getByRole('button', { name: 'Show my files' }).click();
++  assert(await page.locator('#files').count() === 0 && await page.locator('#f-email.bad').count() === 1, 'an email with shell characters is refused');
++  await page.fill('#f-email', 'ops+alerts@example.com');
+   await page.getByRole('button', { name: 'Show my files' }).click();
+   await page.waitForSelector('#files pre');
++  assert((await page.locator('#files pre').first().innerText()).includes('--email ops+alerts@example.com'), 'a plain email goes into the command');
+   let env = await page.locator('#files pre').nth(1).innerText();
+   for (const line of ['RATE_LIMIT_UPLOAD=120,2s', 'RATE_LIMIT_STATE=240,250ms', 'MAX_SITES_PER_ACCOUNT=20']) assert(env.includes(line), '.env has ' + line);
+   assert(await page.locator('#agent').evaluate(n => n === document.querySelector('#app .card')), 'on UpCloud the block for your agent comes first');
+   const creds = await page.locator('#agent pre').first().innerText();
+-  assert(/read -r UPCLOUD_USERNAME/.test(creds) && /stty -echo; read -r UPCLOUD_PASSWORD; stty echo/.test(creds) && /export UPCLOUD_USERNAME UPCLOUD_PASSWORD$/.test(creds) && !creds.includes('\n'), 'the terminal line asks for the API user and keeps the password unseen: ' + creds);
++  assert(/read -r UPCLOUD_USERNAME/.test(creds) && /trap 'stty echo 2>\/dev\/null' INT; read -rs UPCLOUD_PASSWORD; trap - INT/.test(creds) && /export UPCLOUD_USERNAME UPCLOUD_PASSWORD$/.test(creds) && !creds.includes('\n'), 'the terminal line asks for the API user and keeps the password unseen: ' + creds);
+   const agent = await page.locator('#agent pre').last().innerText();
+-  const pinned = /curl -fsSL https:\/\/raw\.githubusercontent\.com\/vineetu\/simple-host\/v\d+\.\d+\.\d+\/deploy\/install\/install\.sh -o \/tmp\/install\.sh && sudo bash \/tmp\/install\.sh --host hack\.example\.com --content sites\.hack\.example\.com/;
+-  assert(pinned.test(agent) && !/simple-host\/main\//.test(agent), 'the prompt runs the installer from the pinned release with this page\'s flags');
++  const pinned = /f=\$\(mktemp\) && curl -fsSL https:\/\/raw\.githubusercontent\.com\/vineetu\/simple-host\/[0-9a-f]{40}\/deploy\/install\/install\.sh -o "\$f" && printf '%s  %s\\n' [0-9a-f]{64} "\$f" \| sha256sum -c --quiet - && sudo bash "\$f" --host hack\.example\.com --content sites\.hack\.example\.com/;
++  assert(pinned.test(agent) && !/simple-host\/main\//.test(agent), 'the prompt runs the installer from the pinned commit, checked against its sha256, with this page\'s flags');
+   assert(pinned.test(await page.locator('#files pre').first().innerText()), 'so does the install command');
+   for (const want of ['UpCloud', 'UPCLOUD_USERNAME', 'upctl', 'STARTER-1xCPU-1GB', 'Ubuntu Server 24.04 LTS', 'tier `standard`', '~/.ssh/simple-host.pub', 'hack.example.com, *.hack.example.com', 'https://hack.example.com/admin', 'https://hack.example.com/healthz', 'root@<the server’s IPv4>'])
+     assert(agent.includes(want), 'the UpCloud prompt has ' + want);
+   assert(/never ask me to paste them into this chat, never print them, and never write them to a file/.test(agent), 'the prompt keeps the UpCloud credentials in the environment');
++  assert(agent.includes('unset UPCLOUD_USERNAME UPCLOUD_PASSWORD') && /own IP address/.test(agent), 'the prompt ends with unsetting the API user and keeping it limited');
++  const agentCard = await page.locator('#agent').innerText();
++  assert(agentCard.includes('unset UPCLOUD_USERNAME UPCLOUD_PASSWORD') && /only the server permissions it needs/.test(agentCard), 'the page says to unset the API user afterwards and to limit it');
+   assert(!/UPCLOUD_PASSWORD=\S/.test(agent) && !/curl[^\n]* -u /.test(agent), 'the prompt holds no credential value and never puts one in a command\'s arguments');
+   assert(agent.includes(`printf 'header = "Authorization: Basic %s"\\n' "$(printf '%s:%s' "$UPCLOUD_USERNAME" "$UPCLOUD_PASSWORD" | base64 | tr -d '\\n')" | curl -fsS -K - https://api.upcloud.com/1.3/account`), 'curl reads the API user from its standard input');
+   assert(agent.includes('dig +short hack.example.com') && agent.includes('RATE_LIMIT_UPLOAD=120,2s') && agent.includes('/healthz') && agent.includes('/setup?product=small-box#help'), 'the block for your AI agent has DNS, the files, the checks and the help link');

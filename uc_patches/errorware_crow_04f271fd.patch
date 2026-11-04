@@ -1,0 +1,1746 @@
+From 04f271fdac3425f8b68ec0cf13c7f4fa225c694f Mon Sep 17 00:00:00 2001
+From: Nelson <nelson@errorware.net>
+Date: Fri, 25 Sep 2026 18:03:19 +0100
+Subject: [PATCH] feat(providers): provider-core contract, Linode and UpCloud
+ providers (ERR-42, ERR-43, ERR-44)
+
+- crates/crow-provider-core: the provider.hosts contract (ListInstances,
+  PowerControl, Snapshots) behind a Provider trait with capability
+  accessors; check_declarations keeps manifests and code in agreement.
+  Sync and data-shaped. HTTP is injected: CurlHttp sends the whole request,
+  credentials included, on curl's stdin; tests use recorded responses.
+- crates/crow-provider-linode: instances across pages, power, backup
+  snapshots with an actionable message when Backups are off.
+- crates/crow-provider-upcloud: servers plus addresses in two calls, soft
+  power actions, token or sub-account login, no snapshots declared.
+- Crow is now a workspace; providers are compiled in behind
+  provider-linode / provider-upcloud features (src/providers.rs).
+- Region tables learn UpCloud zones; Crow's settings manifest declares
+  config.format.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ Cargo.lock                                    |  31 ++
+ Cargo.toml                                    |  12 +
+ crates/crow-provider-core/Cargo.toml          |  19 +
+ crates/crow-provider-core/src/curl.rs         | 159 +++++++++
+ crates/crow-provider-core/src/error.rs        |  22 ++
+ crates/crow-provider-core/src/hosts.rs        | 110 ++++++
+ crates/crow-provider-core/src/http.rs         | 192 +++++++++++
+ crates/crow-provider-core/src/lib.rs          | 112 ++++++
+ crates/crow-provider-core/src/settings.rs     |  43 +++
+ crates/crow-provider-core/src/testing.rs      |  42 +++
+ crates/crow-provider-linode/Cargo.toml        |  17 +
+ crates/crow-provider-linode/src/lib.rs        | 326 ++++++++++++++++++
+ crates/crow-provider-linode/src/manifest.toml |  13 +
+ crates/crow-provider-upcloud/Cargo.toml       |  17 +
+ crates/crow-provider-upcloud/src/lib.rs       | 286 +++++++++++++++
+ .../crow-provider-upcloud/src/manifest.toml   |  24 ++
+ src/config/manifest.toml                      |   1 +
+ src/main.rs                                   |   1 +
+ src/providers.rs                              |  68 ++++
+ src/region.rs                                 |  21 ++
+ 20 files changed, 1516 insertions(+)
+ create mode 100644 crates/crow-provider-core/Cargo.toml
+ create mode 100644 crates/crow-provider-core/src/curl.rs
+ create mode 100644 crates/crow-provider-core/src/error.rs
+ create mode 100644 crates/crow-provider-core/src/hosts.rs
+ create mode 100644 crates/crow-provider-core/src/http.rs
+ create mode 100644 crates/crow-provider-core/src/lib.rs
+ create mode 100644 crates/crow-provider-core/src/settings.rs
+ create mode 100644 crates/crow-provider-core/src/testing.rs
+ create mode 100644 crates/crow-provider-linode/Cargo.toml
+ create mode 100644 crates/crow-provider-linode/src/lib.rs
+ create mode 100644 crates/crow-provider-linode/src/manifest.toml
+ create mode 100644 crates/crow-provider-upcloud/Cargo.toml
+ create mode 100644 crates/crow-provider-upcloud/src/lib.rs
+ create mode 100644 crates/crow-provider-upcloud/src/manifest.toml
+ create mode 100644 src/providers.rs
+
+diff --git a/Cargo.lock b/Cargo.lock
+index 051da55..b33d4cb 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -1401,6 +1401,34 @@ dependencies = [
+  "toml 0.8.23",
+ ]
+ 
++[[package]]
++name = "crow-provider-core"
++version = "0.1.0"
++dependencies = [
++ "crow-config-core",
++ "serde",
++ "serde_json",
++ "thiserror 2.0.20",
++]
++
++[[package]]
++name = "crow-provider-linode"
++version = "0.1.0"
++dependencies = [
++ "crow-provider-core",
++ "serde",
++ "serde_json",
++]
++
++[[package]]
++name = "crow-provider-upcloud"
++version = "0.1.0"
++dependencies = [
++ "crow-provider-core",
++ "serde",
++ "serde_json",
++]
++
+ [[package]]
+ name = "crow-rs"
+ version = "0.1.0"
+@@ -1410,6 +1438,9 @@ dependencies = [
+  "chrono",
+  "crow-config-core",
+  "crow-config-schemas",
++ "crow-provider-core",
++ "crow-provider-linode",
++ "crow-provider-upcloud",
+  "dirs 7.0.0",
+  "gpui-kit",
+  "image",
+diff --git a/Cargo.toml b/Cargo.toml
+index 99eb0dd..f6c04a8 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -12,11 +12,23 @@ repository = "https://github.com/errorware/crow"
+ keywords = ["ssh", "sysadmin", "fleet", "gui", "linux"]
+ categories = ["command-line-utilities", "gui"]
+ 
++[workspace]
++members = [".", "crates/*"]
++
+ [[bin]]
+ name = "crow"
+ path = "src/main.rs"
+ 
++[features]
++default = ["provider-linode", "provider-upcloud"]
++# Provider plugins are compiled in; each one is a feature.
++provider-linode = ["dep:crow-provider-linode"]
++provider-upcloud = ["dep:crow-provider-upcloud"]
++
+ [dependencies]
++crow-provider-core = { path = "crates/crow-provider-core", version = "0.1.0" }
++crow-provider-linode = { path = "crates/crow-provider-linode", version = "0.1.0", optional = true }
++crow-provider-upcloud = { path = "crates/crow-provider-upcloud", version = "0.1.0", optional = true }
+ gpui-kit = "0.6.1"
+ crow-config-core = { path = "../crow-config-core/crow-config-core", version = "0.1.0" }
+ crow-config-schemas = { path = "../crow-config-core/crow-config-schemas", version = "0.1.0" }
+diff --git a/crates/crow-provider-core/Cargo.toml b/crates/crow-provider-core/Cargo.toml
+new file mode 100644
+index 0000000..543d7d3
+--- /dev/null
++++ b/crates/crow-provider-core/Cargo.toml
+@@ -0,0 +1,19 @@
++[package]
++name = "crow-provider-core"
++version = "0.1.0"
++edition = "2021"
++license-file = "../../LICENSE"
++authors = ["Nelson <nelson@errorware.net>"]
++description = "Contracts for Crow's provider plugins: cloud hosts today, DNS next"
++homepage = "https://crow.rs"
++repository = "https://github.com/errorware/crow"
++
++[features]
++# A recorded-response HTTP fake for provider crates' tests.
++testing = []
++
++[dependencies]
++crow-config-core = { path = "../../../crow-config-core/crow-config-core", version = "0.1.0" }
++serde = { version = "1.0", features = ["derive"] }
++serde_json = "1.0"
++thiserror = "2.0"
+diff --git a/crates/crow-provider-core/src/curl.rs b/crates/crow-provider-core/src/curl.rs
+new file mode 100644
+index 0000000..be9c8e5
+--- /dev/null
++++ b/crates/crow-provider-core/src/curl.rs
+@@ -0,0 +1,159 @@
++//! [`Http`] over the system `curl`, with the whole request (URL, headers,
++//! credentials, body) written to its stdin as a config file, so nothing
++//! secret appears in argv where `ps` shows it to other local users.
++
++use std::io::Write;
++use std::process::{Command, Stdio};
++use std::time::Duration;
++
++use crate::http::{Http, HttpRequest, HttpResponse};
++use crate::ProviderError;
++
++pub struct CurlHttp {
++    pub timeout: Duration,
++}
++
++impl Default for CurlHttp {
++    fn default() -> Self {
++        Self { timeout: Duration::from_secs(30) }
++    }
++}
++
++/// A value in curl's config syntax: double-quoted, with `\`, `"` and line
++/// breaks escaped.
++pub fn quote(s: &str) -> String {
++    let mut out = String::with_capacity(s.len() + 2);
++    out.push('"');
++    for c in s.chars() {
++        match c {
++            '\\' => out.push_str("\\\\"),
++            '"' => out.push_str("\\\""),
++            '\n' => out.push_str("\\n"),
++            '\r' => out.push_str("\\r"),
++            '\t' => out.push_str("\\t"),
++            c => out.push(c),
++        }
++    }
++    out.push('"');
++    out
++}
++
++/// The curl config for `request`. Response headers are included in the
++/// output (`include`) so `Retry-After` can be read.
++pub fn config(request: &HttpRequest, timeout: Duration) -> String {
++    let mut cfg = format!("url = {}\nrequest = {}\n", quote(&request.url), request.method.as_str());
++    for (name, value) in &request.headers {
++        cfg.push_str(&format!("header = {}\n", quote(&format!("{name}: {}", value.expose()))));
++    }
++    if let Some(body) = &request.body {
++        cfg.push_str(&format!("header = {}\n", quote("Content-Type: application/json")));
++        cfg.push_str(&format!("data = {}\n", quote(&body.to_string())));
++    }
++    cfg.push_str(&format!("silent\nshow-error\ninclude\nmax-time = {}\n", timeout.as_secs().max(1)));
++    cfg
++}
++
++/// Splits curl's `include` output into a response: skips interim (1xx)
++/// header blocks, reads the status and `Retry-After`, keeps the body.
++pub fn parse_output(out: &str) -> Result<HttpResponse, ProviderError> {
++    let mut rest = out;
++    loop {
++        let (head, body) = rest.split_once("\r\n\r\n").or_else(|| rest.split_once("\n\n")).unwrap_or((rest, ""));
++        let mut lines = head.lines();
++        let status: u16 = lines
++            .next()
++            .and_then(|l| l.split_whitespace().nth(1))
++            .and_then(|s| s.parse().ok())
++            .ok_or_else(|| ProviderError::Unexpected(format!("no HTTP status in curl's output: {}", out.chars().take(120).collect::<String>())))?;
++        if (100..200).contains(&status) {
++            rest = body;
++            continue;
++        }
++        let retry_after = lines.find_map(|l| {
++            let (k, v) = l.split_once(':')?;
++            k.trim().eq_ignore_ascii_case("retry-after").then(|| v.trim().parse().ok()).flatten()
++        });
++        return Ok(HttpResponse { status, body: body.to_string(), retry_after });
++    }
++}
++
++impl Http for CurlHttp {
++    fn send(&self, request: &HttpRequest) -> Result<HttpResponse, ProviderError> {
++        let mut child = Command::new("curl")
++            .args(["--config", "-"])
++            .stdin(Stdio::piped())
++            .stdout(Stdio::piped())
++            .stderr(Stdio::piped())
++            .spawn()
++            .map_err(|e| ProviderError::Network(format!("can't run curl: {e}")))?;
++        child
++            .stdin
++            .take()
++            .expect("piped stdin")
++            .write_all(config(request, self.timeout).as_bytes())
++            .map_err(|e| ProviderError::Network(format!("can't talk to curl: {e}")))?;
++        let out = child.wait_with_output().map_err(|e| ProviderError::Network(e.to_string()))?;
++        if !out.status.success() {
++            let err = String::from_utf8_lossy(&out.stderr);
++            return Err(ProviderError::Network(err.trim().trim_start_matches("curl: ").to_string()));
++        }
++        parse_output(&String::from_utf8_lossy(&out.stdout))
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use crate::SecretValue;
++    use serde_json::json;
++
++    #[test]
++    fn config_carries_method_headers_and_body() {
++        let req = HttpRequest::post("https://api.example.com/x?a=1", json!({"label": "a \"b\""})).bearer(&SecretValue::new("tok"));
++        let cfg = config(&req, Duration::from_secs(30));
++        assert!(cfg.starts_with("url = \"https://api.example.com/x?a=1\"\nrequest = POST\n"), "{cfg}");
++        assert!(cfg.contains("header = \"Authorization: Bearer tok\""));
++        assert!(cfg.contains(r#"data = "{\"label\":\"a \\\"b\\\"\"}""#), "{cfg}");
++    }
++
++    #[test]
++    fn parses_status_retry_after_and_body_past_interim_responses() {
++        let out = "HTTP/1.1 100 Continue\r\n\r\nHTTP/2 429 \r\ncontent-type: application/json\r\nRetry-After: 12\r\n\r\n{\"errors\":[]}";
++        let r = parse_output(out).unwrap();
++        assert_eq!((r.status, r.retry_after, r.body.as_str()), (429, Some(12), "{\"errors\":[]}"));
++    }
++
++    /// curl really sends what the config says: a tiny local server checks it.
++    #[test]
++    fn round_trips_through_a_local_server() {
++        use std::io::Read;
++        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
++        let port = listener.local_addr().unwrap().port();
++        let server = std::thread::spawn(move || {
++            let (mut s, _) = listener.accept().unwrap();
++            let mut buf = Vec::new();
++            let mut chunk = [0u8; 4096];
++            loop {
++                let n = s.read(&mut chunk).unwrap();
++                buf.extend_from_slice(&chunk[..n]);
++                let text = String::from_utf8_lossy(&buf);
++                if let Some(i) = text.find("\r\n\r\n") {
++                    let len: usize = text.lines().find_map(|l| l.to_lowercase().strip_prefix("content-length: ").map(|v| v.trim().parse().unwrap())).unwrap_or(0);
++                    if buf.len() >= i + 4 + len {
++                        break;
++                    }
++                }
++            }
++            let reply = r#"{"ok":true}"#;
++            write!(s, "HTTP/1.1 201 Created\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}", reply.len(), reply).unwrap();
++            String::from_utf8_lossy(&buf).to_string()
++        });
++        let req = HttpRequest::post(format!("http://127.0.0.1:{port}/v4/things"), json!({"label": "x"})).bearer(&SecretValue::new("tok-123"));
++        let response = CurlHttp::default().send(&req).unwrap();
++        assert_eq!((response.status, response.body.as_str()), (201, r#"{"ok":true}"#));
++        let seen = server.join().unwrap();
++        assert!(seen.starts_with("POST /v4/things HTTP/1.1"), "{seen}");
++        assert!(seen.contains("Authorization: Bearer tok-123"));
++        assert!(seen.ends_with(r#"{"label":"x"}"#));
++    }
++}
+diff --git a/crates/crow-provider-core/src/error.rs b/crates/crow-provider-core/src/error.rs
+new file mode 100644
+index 0000000..eea7ce9
+--- /dev/null
++++ b/crates/crow-provider-core/src/error.rs
+@@ -0,0 +1,22 @@
++//! What can go wrong talking to a provider, in words an operator can act on.
++
++/// A provider call's failure. Messages never contain credentials.
++#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
++pub enum ProviderError {
++    #[error("not set up yet: {0} is missing")]
++    NotConfigured(String),
++    #[error("the provider rejected the credentials: {0}")]
++    Auth(String),
++    #[error("rate limited by the provider{}", .retry_after.map(|s| format!("; try again in {s}s")).unwrap_or_default())]
++    RateLimited { retry_after: Option<u64> },
++    #[error("not found: {0}")]
++    NotFound(String),
++    #[error("couldn't reach the provider: {0}")]
++    Network(String),
++    #[error("the provider said ({status}): {message}")]
++    Provider { status: u16, message: String },
++    #[error("the provider answered with something unexpected: {0}")]
++    Unexpected(String),
++    #[error("{0}")]
++    Unsupported(String),
++}
+diff --git a/crates/crow-provider-core/src/hosts.rs b/crates/crow-provider-core/src/hosts.rs
+new file mode 100644
+index 0000000..b7f8c81
+--- /dev/null
++++ b/crates/crow-provider-core/src/hosts.rs
+@@ -0,0 +1,110 @@
++//! The `provider.hosts` contract: where servers come from.
++//!
++//! | capability        | trait            |
++//! |-------------------|------------------|
++//! | `instances.list`  | [`ListInstances`] |
++//! | `instances.power` | [`PowerControl`]  |
++//! | `snapshots`       | [`Snapshots`]     |
++
++use std::collections::BTreeMap;
++use std::net::IpAddr;
++
++use serde::{Deserialize, Serialize};
++use serde_json::Value;
++
++use crate::ProviderError;
++
++/// The provider's id for an instance.
++#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
++#[serde(transparent)]
++pub struct InstanceId(pub String);
++
++impl std::fmt::Display for InstanceId {
++    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
++        f.write_str(&self.0)
++    }
++}
++
++#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
++#[serde(rename_all = "snake_case")]
++pub enum InstanceStatus {
++    Running,
++    Stopped,
++    Starting,
++    Stopping,
++    Rebooting,
++    Provisioning,
++    /// Anything else, in the provider's own words.
++    Other(String),
++}
++
++impl InstanceStatus {
++    /// Whether a power action makes sense right now.
++    pub fn is_settled(&self) -> bool {
++        matches!(self, Self::Running | Self::Stopped)
++    }
++}
++
++/// A server as the provider sees it.
++#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
++pub struct Instance {
++    pub id: InstanceId,
++    pub label: String,
++    pub status: InstanceStatus,
++    /// Public addresses first.
++    pub ipv4: Vec<IpAddr>,
++    pub ipv6: Vec<IpAddr>,
++    /// The provider's region code (e.g. `de-fra-2`, `de-fra1`). Crow maps it
++    /// to a country and city with its region tables.
++    pub region: Option<String>,
++    /// Size or plan (e.g. `g6-standard-2`).
++    pub plan: Option<String>,
++    pub tags: Vec<String>,
++    /// Provider-specific details worth showing, kept out of the contract.
++    pub extra: BTreeMap<String, Value>,
++}
++
++impl Instance {
++    /// Whether `ip` is one of the instance's addresses.
++    pub fn has_ip(&self, ip: IpAddr) -> bool {
++        self.ipv4.contains(&ip) || self.ipv6.contains(&ip)
++    }
++}
++
++#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
++#[serde(transparent)]
++pub struct SnapshotId(pub String);
++
++#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
++pub struct Snapshot {
++    pub id: SnapshotId,
++    pub label: Option<String>,
++    /// e.g. "pending", "successful", in the provider's words.
++    pub status: String,
++    /// When it was taken, as the provider reports it (ISO 8601).
++    pub created: Option<String>,
++}
++
++/// `instances.list`
++pub trait ListInstances: Send + Sync {
++    fn instances(&self) -> Result<Vec<Instance>, ProviderError>;
++
++    fn instance(&self, id: &InstanceId) -> Result<Instance, ProviderError> {
++        self.instances()?.into_iter().find(|i| &i.id == id).ok_or_else(|| ProviderError::NotFound(format!("instance {id}")))
++    }
++}
++
++/// `instances.power`. Each call returns once the provider accepted the
++/// request; the instance's status shows progress.
++pub trait PowerControl: Send + Sync {
++    fn boot(&self, id: &InstanceId) -> Result<(), ProviderError>;
++    fn reboot(&self, id: &InstanceId) -> Result<(), ProviderError>;
++    fn shutdown(&self, id: &InstanceId) -> Result<(), ProviderError>;
++}
++
++/// `snapshots`: whole-server restore points taken by the provider.
++pub trait Snapshots: Send + Sync {
++    fn snapshots(&self, id: &InstanceId) -> Result<Vec<Snapshot>, ProviderError>;
++    /// Starts a snapshot and returns it (usually still pending).
++    fn snapshot(&self, id: &InstanceId, label: &str) -> Result<Snapshot, ProviderError>;
++}
+diff --git a/crates/crow-provider-core/src/http.rs b/crates/crow-provider-core/src/http.rs
+new file mode 100644
+index 0000000..4b6ad2b
+--- /dev/null
++++ b/crates/crow-provider-core/src/http.rs
+@@ -0,0 +1,192 @@
++//! The HTTP that providers speak, as plain data.
++//!
++//! Providers build [`HttpRequest`]s and send them through whichever [`Http`]
++//! they were given. Credentials go in [`HeaderValue::Secret`] headers, which
++//! print as `[secret]`.
++
++use serde::de::DeserializeOwned;
++use serde_json::Value;
++
++use crate::{ProviderError, SecretValue};
++
++#[derive(Debug, Clone, Copy, PartialEq, Eq)]
++pub enum Method {
++    Get,
++    Post,
++    Put,
++    Delete,
++}
++
++impl Method {
++    pub fn as_str(self) -> &'static str {
++        match self {
++            Self::Get => "GET",
++            Self::Post => "POST",
++            Self::Put => "PUT",
++            Self::Delete => "DELETE",
++        }
++    }
++}
++
++#[derive(Debug, Clone, PartialEq)]
++pub enum HeaderValue {
++    Plain(String),
++    Secret(SecretValue),
++}
++
++impl HeaderValue {
++    /// The value to put on the wire.
++    pub fn expose(&self) -> &str {
++        match self {
++            Self::Plain(s) => s,
++            Self::Secret(s) => s.expose(),
++        }
++    }
++}
++
++#[derive(Debug, Clone, PartialEq)]
++pub struct HttpRequest {
++    pub method: Method,
++    pub url: String,
++    pub headers: Vec<(String, HeaderValue)>,
++    /// A JSON body, sent with `Content-Type: application/json`.
++    pub body: Option<Value>,
++}
++
++impl HttpRequest {
++    pub fn new(method: Method, url: impl Into<String>) -> Self {
++        Self { method, url: url.into(), headers: vec![("Accept".into(), HeaderValue::Plain("application/json".into()))], body: None }
++    }
++
++    pub fn get(url: impl Into<String>) -> Self {
++        Self::new(Method::Get, url)
++    }
++
++    pub fn post(url: impl Into<String>, body: Value) -> Self {
++        Self::new(Method::Post, url).json(body)
++    }
++
++    pub fn json(mut self, body: Value) -> Self {
++        self.body = Some(body);
++        self
++    }
++
++    pub fn header(mut self, name: &str, value: impl Into<String>) -> Self {
++        self.headers.push((name.into(), HeaderValue::Plain(value.into())));
++        self
++    }
++
++    /// `Authorization: Bearer <token>`, kept secret.
++    pub fn bearer(mut self, token: &SecretValue) -> Self {
++        self.headers.push(("Authorization".into(), HeaderValue::Secret(SecretValue::new(format!("Bearer {}", token.expose())))));
++        self
++    }
++
++    /// `Authorization: Basic <base64(user:password)>`, kept secret.
++    pub fn basic_auth(mut self, user: &str, password: &SecretValue) -> Self {
++        let encoded = base64(format!("{user}:{}", password.expose()).as_bytes());
++        self.headers.push(("Authorization".into(), HeaderValue::Secret(SecretValue::new(format!("Basic {encoded}")))));
++        self
++    }
++}
++
++#[derive(Debug, Clone, PartialEq, Eq)]
++pub struct HttpResponse {
++    pub status: u16,
++    pub body: String,
++    /// `Retry-After` in seconds, when the server sent one.
++    pub retry_after: Option<u64>,
++}
++
++impl HttpResponse {
++    pub fn new(status: u16, body: impl Into<String>) -> Self {
++        Self { status, body: body.into(), retry_after: None }
++    }
++
++    pub fn is_success(&self) -> bool {
++        (200..300).contains(&self.status)
++    }
++}
++
++/// Sends requests. Crow's implementation shells out to `curl`; tests use
++/// [`crate::testing::RecordedHttp`].
++pub trait Http: Send + Sync {
++    fn send(&self, request: &HttpRequest) -> Result<HttpResponse, ProviderError>;
++}
++
++/// Turns a response into `T`, or into the matching [`ProviderError`].
++/// `message` pulls the provider's error text out of an error body.
++pub fn decode<T: DeserializeOwned>(response: HttpResponse, message: fn(&Value) -> Option<String>) -> Result<T, ProviderError> {
++    let response = check(response, message)?;
++    serde_json::from_str(&response.body).map_err(|e| ProviderError::Unexpected(format!("{e} in {}", snippet(&response.body))))
++}
++
++/// Passes a 2xx response through, or maps it to a [`ProviderError`].
++pub fn check(response: HttpResponse, message: fn(&Value) -> Option<String>) -> Result<HttpResponse, ProviderError> {
++    if response.is_success() {
++        return Ok(response);
++    }
++    let text = serde_json::from_str::<Value>(&response.body).ok().and_then(|v| message(&v)).unwrap_or_else(|| snippet(&response.body));
++    Err(match response.status {
++        401 | 403 => ProviderError::Auth(text),
++        404 => ProviderError::NotFound(text),
++        429 => ProviderError::RateLimited { retry_after: response.retry_after },
++        status => ProviderError::Provider { status, message: text },
++    })
++}
++
++fn snippet(body: &str) -> String {
++    let s: String = body.chars().take(200).collect();
++    if s.trim().is_empty() { "(empty body)".into() } else { s }
++}
++
++/// Standard base64 with padding.
++pub fn base64(bytes: &[u8]) -> String {
++    const ABC: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
++    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
++    for chunk in bytes.chunks(3) {
++        let n = chunk.iter().enumerate().fold(0u32, |n, (i, b)| n | (u32::from(*b) << (16 - 8 * i)));
++        for i in 0..4 {
++            if i <= chunk.len() {
++                out.push(ABC[(n >> (18 - 6 * i) & 63) as usize] as char);
++            } else {
++                out.push('=');
++            }
++        }
++    }
++    out
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn base64_matches_rfc_4648_vectors() {
++        for (input, expected) in [("", ""), ("f", "Zg=="), ("fo", "Zm8="), ("foo", "Zm9v"), ("foob", "Zm9vYg=="), ("fooba", "Zm9vYmE="), ("foobar", "Zm9vYmFy")] {
++            assert_eq!(base64(input.as_bytes()), expected);
++        }
++    }
++
++    #[test]
++    fn credentials_never_show_in_debug() {
++        let req = HttpRequest::get("https://api.example.com/v1/things").bearer(&SecretValue::new("tok-SECRET")).basic_auth("me", &SecretValue::new("pw-SECRET"));
++        let debug = format!("{req:?}");
++        assert!(!debug.contains("SECRET"), "{debug}");
++        assert_eq!(req.headers[1].1.expose(), "Bearer tok-SECRET");
++        assert_eq!(req.headers[2].1.expose(), format!("Basic {}", base64(b"me:pw-SECRET")));
++    }
++
++    #[test]
++    fn status_codes_map_to_errors() {
++        let msg = |v: &Value| v["errors"][0]["reason"].as_str().map(str::to_string);
++        let err = |status, body: &str| check(HttpResponse::new(status, body), msg).unwrap_err();
++        assert_eq!(err(401, r#"{"errors":[{"reason":"Invalid Token"}]}"#), ProviderError::Auth("Invalid Token".into()));
++        assert_eq!(err(404, "not json"), ProviderError::NotFound("not json".into()));
++        let limited = check(HttpResponse { status: 429, body: String::new(), retry_after: Some(30) }, msg).unwrap_err();
++        assert_eq!(limited.to_string(), "rate limited by the provider; try again in 30s");
++        assert_eq!(err(500, ""), ProviderError::Provider { status: 500, message: "(empty body)".into() });
++        let ok: Value = decode(HttpResponse::new(200, r#"{"a":1}"#), msg).unwrap();
++        assert_eq!(ok["a"], 1);
++    }
++}
+diff --git a/crates/crow-provider-core/src/lib.rs b/crates/crow-provider-core/src/lib.rs
+new file mode 100644
+index 0000000..cbd3297
+--- /dev/null
++++ b/crates/crow-provider-core/src/lib.rs
+@@ -0,0 +1,112 @@
++//! Contracts for Crow's provider plugins.
++//!
++//! A provider talks to an outside service on the user's behalf. Its
++//! manifest (a crow-config [`PluginManifest`]) names the **category** it
++//! implements and the **capabilities** it supports; this crate defines what
++//! those mean in code:
++//!
++//! - [`hosts`]: the `provider.hosts` contract (Linode, UpCloud, ...):
++//!   list instances, power them, snapshot them.
++//!
++//! Every provider implements [`Provider`], and hands out the category traits
++//! it supports through the `as_*` accessors. Crow offers an action only
++//! when the accessor returns `Some`, and [`check_declarations`] keeps the
++//! manifest and the code in agreement.
++//!
++//! # Design rules
++//!
++//! - **Sync.** Crow runs provider calls on its background executor, like
++//!   every other command. No async runtime.
++//! - **Data-shaped.** Plain structs in and out, serde-friendly, no lifetimes
++//!   or HTTP-library types, so providers could later run out of process
++//!   (WASM, JSON-RPC) behind the same traits.
++//! - **HTTP is injected.** Providers build [`http::HttpRequest`]s and send
++//!   them through the [`http::Http`] they're given. Crow's implementation
++//!   uses the system `curl` with the whole request, credentials included,
++//!   on stdin, so tokens never appear in argv, and no TLS stack is
++//!   compiled in. Tests use recorded responses instead.
++//! - **Secrets stay secret.** Credentials arrive as [`SecretValue`]s and go
++//!   into requests as secret headers; `Debug` of a request prints
++//!   `[secret]`, and no error message carries one.
++
++pub mod error;
++pub mod hosts;
++pub mod curl;
++pub mod http;
++pub mod settings;
++#[cfg(any(test, feature = "testing"))]
++pub mod testing;
++
++use std::sync::Arc;
++
++pub use crow_config_core::{PluginManifest, SecretValue};
++pub use error::ProviderError;
++pub use settings::ProviderSettings;
++
++use hosts::{ListInstances, PowerControl, Snapshots};
++
++/// Capability tags, as written in manifests.
++pub mod capabilities {
++    pub const INSTANCES_LIST: &str = "instances.list";
++    pub const INSTANCES_POWER: &str = "instances.power";
++    pub const SNAPSHOTS: &str = "snapshots";
++}
++
++/// A configured provider account.
++pub trait Provider: Send + Sync {
++    fn manifest(&self) -> &PluginManifest;
++
++    /// A cheap authenticated call, for "Test connection". Returns a short
++    /// human summary such as "3 instances".
++    fn check(&self) -> Result<String, ProviderError>;
++
++    fn as_list_instances(&self) -> Option<&dyn ListInstances> {
++        None
++    }
++    fn as_power_control(&self) -> Option<&dyn PowerControl> {
++        None
++    }
++    fn as_snapshots(&self) -> Option<&dyn Snapshots> {
++        None
++    }
++}
++
++/// The capabilities `provider` actually implements.
++pub fn implemented_capabilities(provider: &dyn Provider) -> Vec<&'static str> {
++    [
++        (provider.as_list_instances().is_some(), capabilities::INSTANCES_LIST),
++        (provider.as_power_control().is_some(), capabilities::INSTANCES_POWER),
++        (provider.as_snapshots().is_some(), capabilities::SNAPSHOTS),
++    ]
++    .into_iter()
++    .filter_map(|(has, cap)| has.then_some(cap))
++    .collect()
++}
++
++/// Checks that the manifest declares exactly the capabilities the code
++/// implements, so the UI never offers an action that isn't there, nor hides
++/// one that is. Every provider crate runs this in its tests.
++pub fn check_declarations(provider: &dyn Provider) -> Result<(), String> {
++    let manifest = provider.manifest();
++    manifest.validate().map_err(|e| e.iter().map(ToString::to_string).collect::<Vec<_>>().join("; "))?;
++    let implemented = implemented_capabilities(provider);
++    let declared: Vec<&str> = manifest.plugin.capabilities.iter().map(String::as_str).collect();
++    let undeclared: Vec<&str> = implemented.iter().copied().filter(|c| !declared.contains(c)).collect();
++    let unimplemented: Vec<&str> = declared.iter().copied().filter(|c| !implemented.contains(c)).collect();
++    if undeclared.is_empty() && unimplemented.is_empty() {
++        Ok(())
++    } else {
++        Err(format!("{}: implemented but not declared {undeclared:?}; declared but not implemented {unimplemented:?}", manifest.plugin.name))
++    }
++}
++
++/// Builds a provider account from its settings and the HTTP to use.
++pub type BuildProvider = fn(ProviderSettings, Arc<dyn http::Http>) -> Result<Box<dyn Provider>, ProviderError>;
++
++/// How Crow builds a provider: its manifest (for Settings and capability
++/// checks before any account exists) and a constructor.
++#[derive(Clone, Copy)]
++pub struct ProviderFactory {
++    pub manifest: fn() -> &'static PluginManifest,
++    pub build: BuildProvider,
++}
+diff --git a/crates/crow-provider-core/src/settings.rs b/crates/crow-provider-core/src/settings.rs
+new file mode 100644
+index 0000000..379f43f
+--- /dev/null
++++ b/crates/crow-provider-core/src/settings.rs
+@@ -0,0 +1,43 @@
++//! A provider account's settings, as handed to its constructor: plain values
++//! from Crow's settings store and secrets from the vault.
++
++use std::collections::BTreeMap;
++
++use serde_json::Value;
++
++use crate::{ProviderError, SecretValue};
++
++#[derive(Debug, Clone, Default)]
++pub struct ProviderSettings {
++    pub values: BTreeMap<String, Value>,
++    pub secrets: BTreeMap<String, SecretValue>,
++}
++
++impl ProviderSettings {
++    pub fn with_value(mut self, key: &str, value: impl Into<Value>) -> Self {
++        self.values.insert(key.into(), value.into());
++        self
++    }
++
++    pub fn with_secret(mut self, key: &str, value: impl Into<String>) -> Self {
++        self.secrets.insert(key.into(), SecretValue::new(value));
++        self
++    }
++
++    /// A text setting, if set and not blank.
++    pub fn string(&self, key: &str) -> Option<&str> {
++        self.values.get(key)?.as_str().map(str::trim).filter(|s| !s.is_empty())
++    }
++
++    pub fn required_string(&self, key: &str) -> Result<&str, ProviderError> {
++        self.string(key).ok_or_else(|| ProviderError::NotConfigured(key.into()))
++    }
++
++    pub fn secret(&self, key: &str) -> Option<&SecretValue> {
++        self.secrets.get(key).filter(|s| !s.is_empty())
++    }
++
++    pub fn required_secret(&self, key: &str) -> Result<&SecretValue, ProviderError> {
++        self.secret(key).ok_or_else(|| ProviderError::NotConfigured(key.into()))
++    }
++}
+diff --git a/crates/crow-provider-core/src/testing.rs b/crates/crow-provider-core/src/testing.rs
+new file mode 100644
+index 0000000..e84685c
+--- /dev/null
++++ b/crates/crow-provider-core/src/testing.rs
+@@ -0,0 +1,42 @@
++//! A recorded-response [`Http`] for provider tests: answers each request from
++//! a table of canned responses and keeps every request it saw.
++
++use std::sync::Mutex;
++
++use crate::http::{Http, HttpRequest, HttpResponse, Method};
++use crate::ProviderError;
++
++#[derive(Default)]
++pub struct RecordedHttp {
++    routes: Vec<(Method, String, HttpResponse)>,
++    seen: Mutex<Vec<HttpRequest>>,
++}
++
++impl RecordedHttp {
++    pub fn new() -> Self {
++        Self::default()
++    }
++
++    /// Answers `method url` (exact URL, query string included) with `status`
++    /// and `body`.
++    pub fn on(mut self, method: Method, url: &str, status: u16, body: &str) -> Self {
++        self.routes.push((method, url.into(), HttpResponse::new(status, body)));
++        self
++    }
++
++    /// The requests sent so far.
++    pub fn requests(&self) -> Vec<HttpRequest> {
++        self.seen.lock().unwrap().clone()
++    }
++}
++
++impl Http for RecordedHttp {
++    fn send(&self, request: &HttpRequest) -> Result<HttpResponse, ProviderError> {
++        self.seen.lock().unwrap().push(request.clone());
++        self.routes
++            .iter()
++            .find(|(m, u, _)| *m == request.method && *u == request.url)
++            .map(|(_, _, r)| r.clone())
++            .ok_or_else(|| ProviderError::Network(format!("no recorded response for {} {}", request.method.as_str(), request.url)))
++    }
++}
+diff --git a/crates/crow-provider-linode/Cargo.toml b/crates/crow-provider-linode/Cargo.toml
+new file mode 100644
+index 0000000..af8e34e
+--- /dev/null
++++ b/crates/crow-provider-linode/Cargo.toml
+@@ -0,0 +1,17 @@
++[package]
++name = "crow-provider-linode"
++version = "0.1.0"
++edition = "2021"
++license-file = "../../LICENSE"
++authors = ["Nelson <nelson@errorware.net>"]
++description = "Linode (Akamai) provider for Crow: instances, power and backup snapshots"
++homepage = "https://crow.rs"
++repository = "https://github.com/errorware/crow"
++
++[dependencies]
++crow-provider-core = { path = "../crow-provider-core", version = "0.1.0" }
++serde = { version = "1.0", features = ["derive"] }
++serde_json = "1.0"
++
++[dev-dependencies]
++crow-provider-core = { path = "../crow-provider-core", version = "0.1.0", features = ["testing"] }
+diff --git a/crates/crow-provider-linode/src/lib.rs b/crates/crow-provider-linode/src/lib.rs
+new file mode 100644
+index 0000000..c454682
+--- /dev/null
++++ b/crates/crow-provider-linode/src/lib.rs
+@@ -0,0 +1,326 @@
++//! Linode (Akamai Cloud) provider, API v4.
++//!
++//! - `instances.list`: `GET /linode/instances`, every page.
++//! - `instances.power`: boot, reboot, shutdown.
++//! - `snapshots`: Linode's manual backup snapshot. It needs the Backup
++//!   service enabled on the instance, and there is one manual snapshot slot:
++//!   a new one replaces the previous.
++
++use std::net::IpAddr;
++use std::sync::{Arc, LazyLock};
++
++use serde::Deserialize;
++use serde_json::{json, Value};
++
++use crow_provider_core::hosts::{Instance, InstanceId, InstanceStatus, ListInstances, PowerControl, Snapshot, SnapshotId, Snapshots};
++use crow_provider_core::http::{self, Http, HttpRequest};
++use crow_provider_core::{PluginManifest, Provider, ProviderError, ProviderFactory, ProviderSettings, SecretValue};
++
++pub const API: &str = "https://api.linode.com/v4";
++const PAGE_SIZE: u32 = 500;
++
++pub const MANIFEST_TOML: &str = include_str!("manifest.toml");
++pub static MANIFEST: LazyLock<PluginManifest> = LazyLock::new(|| PluginManifest::from_toml_str(MANIFEST_TOML).expect("linode manifest"));
++
++pub const FACTORY: ProviderFactory = ProviderFactory { manifest: || &MANIFEST, build: |settings, http| Ok(Box::new(Linode::new(&settings, http)?)) };
++
++pub struct Linode {
++    token: SecretValue,
++    http: Arc<dyn Http>,
++}
++
++impl Linode {
++    pub fn new(settings: &ProviderSettings, http: Arc<dyn Http>) -> Result<Self, ProviderError> {
++        Ok(Self { token: settings.required_secret("api_token")?.clone(), http })
++    }
++
++    fn send(&self, request: HttpRequest) -> Result<http::HttpResponse, ProviderError> {
++        http::check(self.http.send(&request.bearer(&self.token))?, error_message)
++    }
++
++    fn get<T: serde::de::DeserializeOwned>(&self, path: &str) -> Result<T, ProviderError> {
++        http::decode(self.http.send(&HttpRequest::get(format!("{API}{path}")).bearer(&self.token))?, error_message)
++    }
++
++    fn post(&self, path: &str, body: Value) -> Result<http::HttpResponse, ProviderError> {
++        self.send(HttpRequest::post(format!("{API}{path}"), body))
++    }
++
++    fn page(&self, page: u32, size: u32) -> Result<Page<LinodeInstance>, ProviderError> {
++        self.get(&format!("/linode/instances?page={page}&page_size={size}"))
++    }
++}
++
++/// Linode's error body: `{"errors": [{"reason": "...", "field": "..."}]}`.
++fn error_message(v: &Value) -> Option<String> {
++    let reasons: Vec<&str> = v["errors"].as_array()?.iter().filter_map(|e| e["reason"].as_str()).collect();
++    (!reasons.is_empty()).then(|| reasons.join("; "))
++}
++
++#[derive(Deserialize)]
++struct Page<T> {
++    data: Vec<T>,
++    page: u32,
++    pages: u32,
++    results: u32,
++}
++
++#[derive(Deserialize)]
++struct LinodeInstance {
++    id: u64,
++    label: String,
++    status: String,
++    #[serde(default)]
++    ipv4: Vec<String>,
++    ipv6: Option<String>,
++    region: Option<String>,
++    #[serde(rename = "type")]
++    plan: Option<String>,
++    #[serde(default)]
++    tags: Vec<String>,
++    image: Option<String>,
++    created: Option<String>,
++}
++
++fn status(s: &str) -> InstanceStatus {
++    match s {
++        "running" => InstanceStatus::Running,
++        "offline" | "stopped" => InstanceStatus::Stopped,
++        "booting" => InstanceStatus::Starting,
++        "shutting_down" => InstanceStatus::Stopping,
++        "rebooting" => InstanceStatus::Rebooting,
++        "provisioning" => InstanceStatus::Provisioning,
++        other => InstanceStatus::Other(other.replace('_', " ")),
++    }
++}
++
++impl From<LinodeInstance> for Instance {
++    fn from(l: LinodeInstance) -> Self {
++        // Public addresses first; Linode lists private (192.168.128.0/17) ones alongside.
++        let mut ipv4: Vec<IpAddr> = l.ipv4.iter().filter_map(|s| s.parse().ok()).collect();
++        ipv4.sort_by_key(|ip| matches!(ip, IpAddr::V4(v4) if v4.is_private()));
++        let ipv6 = l.ipv6.as_deref().and_then(|s| s.split('/').next()?.parse().ok()).into_iter().collect();
++        let extra = [("image", l.image), ("created", l.created)].into_iter().filter_map(|(k, v)| Some((k.to_string(), Value::String(v?)))).collect();
++        Instance { id: InstanceId(l.id.to_string()), label: l.label, status: status(&l.status), ipv4, ipv6, region: l.region, plan: l.plan, tags: l.tags, extra }
++    }
++}
++
++#[derive(Deserialize)]
++struct Backup {
++    id: u64,
++    label: Option<String>,
++    status: String,
++    created: Option<String>,
++}
++
++impl From<Backup> for Snapshot {
++    fn from(b: Backup) -> Self {
++        Snapshot { id: SnapshotId(b.id.to_string()), label: b.label, status: b.status.replace('_', " "), created: b.created }
++    }
++}
++
++#[derive(Deserialize)]
++struct Backups {
++    #[serde(default)]
++    automatic: Vec<Backup>,
++    snapshot: Option<SnapshotSlots>,
++}
++
++#[derive(Deserialize)]
++struct SnapshotSlots {
++    current: Option<Backup>,
++    in_progress: Option<Backup>,
++}
++
++impl Provider for Linode {
++    fn manifest(&self) -> &PluginManifest {
++        &MANIFEST
++    }
++
++    fn check(&self) -> Result<String, ProviderError> {
++        let n = self.page(1, 25)?.results;
++        Ok(format!("{n} instance{}", if n == 1 { "" } else { "s" }))
++    }
++
++    fn as_list_instances(&self) -> Option<&dyn ListInstances> {
++        Some(self)
++    }
++    fn as_power_control(&self) -> Option<&dyn PowerControl> {
++        Some(self)
++    }
++    fn as_snapshots(&self) -> Option<&dyn Snapshots> {
++        Some(self)
++    }
++}
++
++impl ListInstances for Linode {
++    fn instances(&self) -> Result<Vec<Instance>, ProviderError> {
++        let mut out = Vec::new();
++        let mut page = 1;
++        loop {
++            let p = self.page(page, PAGE_SIZE)?;
++            out.extend(p.data.into_iter().map(Instance::from));
++            if p.page >= p.pages {
++                return Ok(out);
++            }
++            page = p.page + 1;
++        }
++    }
++
++    fn instance(&self, id: &InstanceId) -> Result<Instance, ProviderError> {
++        self.get::<LinodeInstance>(&format!("/linode/instances/{id}")).map(Instance::from)
++    }
++}
++
++impl PowerControl for Linode {
++    fn boot(&self, id: &InstanceId) -> Result<(), ProviderError> {
++        self.post(&format!("/linode/instances/{id}/boot"), json!({})).map(drop)
++    }
++    fn reboot(&self, id: &InstanceId) -> Result<(), ProviderError> {
++        self.post(&format!("/linode/instances/{id}/reboot"), json!({})).map(drop)
++    }
++    fn shutdown(&self, id: &InstanceId) -> Result<(), ProviderError> {
++        self.post(&format!("/linode/instances/{id}/shutdown"), json!({})).map(drop)
++    }
++}
++
++/// Linode's answer when the Backup service is off, made actionable.
++fn backups_hint(e: ProviderError) -> ProviderError {
++    match e {
++        ProviderError::Provider { status: 400, message } if message.to_lowercase().contains("backups are not enabled") || message.to_lowercase().contains("backup service") => {
++            ProviderError::Unsupported("Backups aren't enabled for this Linode. Turn on the Backup service for it in Linode's Cloud Manager (a paid add-on), then take snapshots from Crow.".into())
++        }
++        e => e,
++    }
++}
++
++impl Snapshots for Linode {
++    fn snapshots(&self, id: &InstanceId) -> Result<Vec<Snapshot>, ProviderError> {
++        let b: Backups = self.get(&format!("/linode/instances/{id}/backups")).map_err(backups_hint)?;
++        let manual = b.snapshot.into_iter().flat_map(|s| [s.in_progress, s.current]).flatten();
++        Ok(manual.chain(b.automatic).map(Snapshot::from).collect())
++    }
++
++    fn snapshot(&self, id: &InstanceId, label: &str) -> Result<Snapshot, ProviderError> {
++        let response = self.post(&format!("/linode/instances/{id}/backups"), json!({ "label": label })).map_err(backups_hint)?;
++        serde_json::from_str::<Backup>(&response.body).map(Snapshot::from).map_err(|e| ProviderError::Unexpected(e.to_string()))
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use crow_provider_core::http::Method;
++    use crow_provider_core::testing::RecordedHttp;
++
++    const INSTANCE: &str = r#"{"id": 123, "label": "assassin-01", "status": "running", "ipv4": ["192.168.139.4", "104.105.13.91"], "ipv6": "2a01:7e01::f03c:94ff:fe12:3456/128", "region": "de-fra-2", "type": "g6-nanode-1", "tags": ["prod"], "image": "linode/ubuntu24.04", "created": "2026-09-01T10:00:00"}"#;
++
++    fn linode(http: RecordedHttp) -> (Linode, Arc<RecordedHttp>) {
++        let http = Arc::new(http);
++        let settings = ProviderSettings::default().with_secret("api_token", "lin-SECRET-token");
++        (Linode::new(&settings, http.clone()).unwrap(), http)
++    }
++
++    fn page(page: u32, pages: u32, items: &[&str]) -> String {
++        format!(r#"{{"data": [{}], "page": {page}, "pages": {pages}, "results": {}}}"#, items.join(","), items.len())
++    }
++
++    #[test]
++    fn declares_what_it_implements() {
++        let (l, _) = linode(RecordedHttp::new());
++        crow_provider_core::check_declarations(&l).unwrap();
++        assert_eq!(MANIFEST.unknown_capabilities(), Vec::<&str>::new());
++    }
++
++    #[test]
++    fn needs_a_token() {
++        let err = Linode::new(&ProviderSettings::default(), Arc::new(RecordedHttp::new())).err().unwrap();
++        assert_eq!(err, ProviderError::NotConfigured("api_token".into()));
++    }
++
++    #[test]
++    fn lists_every_page_and_maps_instances() {
++        let other = INSTANCE.replace("123", "456").replace("assassin-01", "worker-05").replace("running", "offline");
++        let (l, http) = linode(
++            RecordedHttp::new()
++                .on(Method::Get, &format!("{API}/linode/instances?page=1&page_size=500"), 200, &page(1, 2, &[INSTANCE]))
++                .on(Method::Get, &format!("{API}/linode/instances?page=2&page_size=500"), 200, &page(2, 2, &[&other])),
++        );
++        let all = l.instances().unwrap();
++        assert_eq!(all.len(), 2);
++        let a = &all[0];
++        assert_eq!((a.id.0.as_str(), a.label.as_str(), &a.status), ("123", "assassin-01", &InstanceStatus::Running));
++        assert_eq!(a.ipv4[0].to_string(), "104.105.13.91", "public address first");
++        assert_eq!(a.ipv6[0].to_string(), "2a01:7e01::f03c:94ff:fe12:3456");
++        assert_eq!((a.region.as_deref(), a.plan.as_deref()), (Some("de-fra-2"), Some("g6-nanode-1")));
++        assert_eq!(all[1].status, InstanceStatus::Stopped);
++
++        let requests = http.requests();
++        assert!(requests.iter().all(|r| r.headers.iter().any(|(k, v)| k == "Authorization" && v.expose() == "Bearer lin-SECRET-token")));
++        assert!(!format!("{requests:?}").contains("SECRET"), "the token never shows in Debug");
++    }
++
++    #[test]
++    fn check_reports_the_instance_count() {
++        let (l, _) = linode(RecordedHttp::new().on(Method::Get, &format!("{API}/linode/instances?page=1&page_size=25"), 200, &page(1, 1, &[INSTANCE])));
++        assert_eq!(l.check().unwrap(), "1 instance");
++    }
++
++    #[test]
++    fn a_bad_token_is_an_auth_error_with_linodes_reason() {
++        let (l, _) = linode(RecordedHttp::new().on(Method::Get, &format!("{API}/linode/instances?page=1&page_size=25"), 401, r#"{"errors": [{"reason": "Invalid Token"}]}"#));
++        assert_eq!(l.check().unwrap_err(), ProviderError::Auth("Invalid Token".into()));
++    }
++
++    #[test]
++    fn power_actions_post_to_the_instance() {
++        let (l, http) = linode(
++            RecordedHttp::new()
++                .on(Method::Post, &format!("{API}/linode/instances/123/boot"), 200, "{}")
++                .on(Method::Post, &format!("{API}/linode/instances/123/reboot"), 200, "{}")
++                .on(Method::Post, &format!("{API}/linode/instances/123/shutdown"), 200, "{}"),
++        );
++        let id = InstanceId("123".into());
++        l.boot(&id).unwrap();
++        l.reboot(&id).unwrap();
++        l.shutdown(&id).unwrap();
++        assert_eq!(http.requests().len(), 3);
++    }
++
++    #[test]
++    fn snapshots_list_manual_first_and_take_new_ones() {
++        let backups = r#"{"automatic": [{"id": 1, "label": null, "status": "successful", "type": "auto", "created": "2026-09-24T02:00:00"}],
++                          "snapshot": {"current": {"id": 2, "label": "before-sshd", "status": "successful", "type": "snapshot", "created": "2026-09-20T12:00:00"}, "in_progress": null}}"#;
++        let (l, http) = linode(
++            RecordedHttp::new()
++                .on(Method::Get, &format!("{API}/linode/instances/123/backups"), 200, backups)
++                .on(Method::Post, &format!("{API}/linode/instances/123/backups"), 200, r#"{"id": 3, "label": "crow-apply", "status": "pending", "type": "snapshot", "created": null}"#),
++        );
++        let id = InstanceId("123".into());
++        let list = l.snapshots(&id).unwrap();
++        assert_eq!(list.iter().map(|s| s.id.0.as_str()).collect::<Vec<_>>(), ["2", "1"]);
++        let taken = l.snapshot(&id, "crow-apply").unwrap();
++        assert_eq!((taken.id.0.as_str(), taken.status.as_str()), ("3", "pending"));
++        assert_eq!(http.requests()[1].body, Some(json!({"label": "crow-apply"})));
++    }
++
++    #[test]
++    fn backups_disabled_says_what_to_do() {
++        let (l, _) = linode(RecordedHttp::new().on(Method::Post, &format!("{API}/linode/instances/123/backups"), 400, r#"{"errors": [{"reason": "Backups are not enabled for this Linode."}]}"#));
++        let err = l.snapshot(&InstanceId("123".into()), "x").unwrap_err();
++        assert!(matches!(&err, ProviderError::Unsupported(m) if m.contains("Backup service")), "{err}");
++    }
++
++    /// Against the real API: `CROW_LINODE_TOKEN=... cargo test -p crow-provider-linode -- --ignored`.
++    /// Read-only: lists instances and snapshots, changes nothing.
++    #[test]
++    #[ignore]
++    fn live_read_only() {
++        let Ok(token) = std::env::var("CROW_LINODE_TOKEN") else { return };
++        let l = Linode::new(&ProviderSettings::default().with_secret("api_token", token), Arc::new(crow_provider_core::curl::CurlHttp::default())).unwrap();
++        println!("check: {}", l.check().unwrap());
++        for i in l.instances().unwrap() {
++            println!("{} {} {:?} {:?} {:?}", i.id, i.label, i.status, i.region, i.ipv4);
++        }
++    }
++}
+diff --git a/crates/crow-provider-linode/src/manifest.toml b/crates/crow-provider-linode/src/manifest.toml
+new file mode 100644
+index 0000000..b4a1129
+--- /dev/null
++++ b/crates/crow-provider-linode/src/manifest.toml
+@@ -0,0 +1,13 @@
++[plugin]
++name = "linode"
++kind = "provider"
++category = "provider.hosts"
++capabilities = ["instances.list", "instances.power", "snapshots"]
++
++[[settings]]
++key = "api_token"
++label = "API token"
++type = "secret"
++required = true
++help = "A Linode personal access token. Linodes: read only is enough to list servers; read/write also allows power and snapshots."
++docs_source = "https://techdocs.akamai.com/linode-api/reference/get-started#personal-access-tokens"
+diff --git a/crates/crow-provider-upcloud/Cargo.toml b/crates/crow-provider-upcloud/Cargo.toml
+new file mode 100644
+index 0000000..a41e470
+--- /dev/null
++++ b/crates/crow-provider-upcloud/Cargo.toml
+@@ -0,0 +1,17 @@
++[package]
++name = "crow-provider-upcloud"
++version = "0.1.0"
++edition = "2021"
++license-file = "../../LICENSE"
++authors = ["Nelson <nelson@errorware.net>"]
++description = "UpCloud provider for Crow: servers and power"
++homepage = "https://crow.rs"
++repository = "https://github.com/errorware/crow"
++
++[dependencies]
++crow-provider-core = { path = "../crow-provider-core", version = "0.1.0" }
++serde = { version = "1.0", features = ["derive"] }
++serde_json = "1.0"
++
++[dev-dependencies]
++crow-provider-core = { path = "../crow-provider-core", version = "0.1.0", features = ["testing"] }
+diff --git a/crates/crow-provider-upcloud/src/lib.rs b/crates/crow-provider-upcloud/src/lib.rs
+new file mode 100644
+index 0000000..333a00b
+--- /dev/null
++++ b/crates/crow-provider-upcloud/src/lib.rs
+@@ -0,0 +1,286 @@
++//! UpCloud provider, API 1.3.
++//!
++//! - `instances.list`: `GET /server` for the servers and `GET /ip_address`
++//!   for every address in the account (two calls, however many servers).
++//! - `instances.power`: start, soft stop, soft restart.
++//!
++//! No snapshots: UpCloud backs up storage devices, not servers, so it
++//! doesn't fit the `snapshots` contract yet. The manifest doesn't declare
++//! it, and Crow doesn't offer it.
++
++use std::collections::HashMap;
++use std::net::IpAddr;
++use std::sync::{Arc, LazyLock};
++
++use serde::Deserialize;
++use serde_json::{json, Value};
++
++use crow_provider_core::hosts::{Instance, InstanceId, InstanceStatus, ListInstances, PowerControl};
++use crow_provider_core::http::{self, Http, HttpRequest};
++use crow_provider_core::{PluginManifest, Provider, ProviderError, ProviderFactory, ProviderSettings, SecretValue};
++
++pub const API: &str = "https://api.upcloud.com/1.3";
++/// Seconds a soft stop may take before UpCloud gives up (the server keeps running).
++const SOFT_STOP_TIMEOUT: &str = "60";
++
++pub const MANIFEST_TOML: &str = include_str!("manifest.toml");
++pub static MANIFEST: LazyLock<PluginManifest> = LazyLock::new(|| PluginManifest::from_toml_str(MANIFEST_TOML).expect("upcloud manifest"));
++
++pub const FACTORY: ProviderFactory = ProviderFactory { manifest: || &MANIFEST, build: |settings, http| Ok(Box::new(UpCloud::new(&settings, http)?)) };
++
++enum Auth {
++    Token(SecretValue),
++    Basic(String, SecretValue),
++}
++
++pub struct UpCloud {
++    auth: Auth,
++    http: Arc<dyn Http>,
++}
++
++impl UpCloud {
++    /// Uses the API token when set, else username and password.
++    pub fn new(settings: &ProviderSettings, http: Arc<dyn Http>) -> Result<Self, ProviderError> {
++        let auth = match settings.secret("api_token") {
++            Some(token) => Auth::Token(token.clone()),
++            None => match (settings.string("username"), settings.secret("password")) {
++                (Some(user), Some(password)) => Auth::Basic(user.to_string(), password.clone()),
++                (Some(_), None) => return Err(ProviderError::NotConfigured("password".into())),
++                _ => return Err(ProviderError::NotConfigured("api_token (or username and password)".into())),
++            },
++        };
++        Ok(Self { auth, http })
++    }
++
++    fn authed(&self, request: HttpRequest) -> HttpRequest {
++        match &self.auth {
++            Auth::Token(t) => request.bearer(t),
++            Auth::Basic(user, password) => request.basic_auth(user, password),
++        }
++    }
++
++    fn get<T: serde::de::DeserializeOwned>(&self, path: &str) -> Result<T, ProviderError> {
++        http::decode(self.http.send(&self.authed(HttpRequest::get(format!("{API}{path}"))))?, error_message)
++    }
++
++    fn post(&self, path: &str, body: Value) -> Result<(), ProviderError> {
++        http::check(self.http.send(&self.authed(HttpRequest::post(format!("{API}{path}"), body)))?, error_message).map(drop)
++    }
++
++    fn servers(&self) -> Result<Vec<UpServer>, ProviderError> {
++        Ok(self.get::<ServerList>("/server")?.servers.server)
++    }
++}
++
++/// UpCloud's error body: `{"error": {"error_code": "...", "error_message": "..."}}`.
++fn error_message(v: &Value) -> Option<String> {
++    v["error"]["error_message"].as_str().map(str::to_string)
++}
++
++#[derive(Deserialize)]
++struct ServerList {
++    servers: Servers,
++}
++#[derive(Deserialize)]
++struct Servers {
++    #[serde(default)]
++    server: Vec<UpServer>,
++}
++
++#[derive(Deserialize)]
++struct UpServer {
++    uuid: String,
++    title: Option<String>,
++    hostname: Option<String>,
++    state: String,
++    zone: Option<String>,
++    plan: Option<String>,
++    #[serde(default)]
++    tags: Tags,
++}
++
++#[derive(Deserialize, Default)]
++struct Tags {
++    #[serde(default)]
++    tag: Vec<String>,
++}
++
++#[derive(Deserialize)]
++struct IpList {
++    ip_addresses: IpAddresses,
++}
++#[derive(Deserialize)]
++struct IpAddresses {
++    #[serde(default)]
++    ip_address: Vec<UpIp>,
++}
++
++#[derive(Deserialize)]
++struct UpIp {
++    access: String,
++    address: String,
++    server: Option<String>,
++}
++
++fn status(s: &str) -> InstanceStatus {
++    match s {
++        "started" => InstanceStatus::Running,
++        "stopped" => InstanceStatus::Stopped,
++        other => InstanceStatus::Other(other.to_string()),
++    }
++}
++
++fn instance(s: UpServer, ips: &HashMap<String, Vec<&UpIp>>) -> Instance {
++    let mut addrs: Vec<(bool, IpAddr)> = ips
++        .get(&s.uuid)
++        .into_iter()
++        .flatten()
++        .filter(|ip| ip.access != "utility")
++        .filter_map(|ip| Some((ip.access != "public", ip.address.parse().ok()?)))
++        .collect();
++    addrs.sort_by_key(|(private, _)| *private);
++    let (ipv4, ipv6) = addrs.into_iter().map(|(_, ip)| ip).partition(IpAddr::is_ipv4);
++    let label = s.title.filter(|t| !t.is_empty()).or(s.hostname.clone()).unwrap_or_else(|| s.uuid.clone());
++    let extra = s.hostname.map(|h| [("hostname".to_string(), Value::String(h))].into()).unwrap_or_default();
++    Instance { id: InstanceId(s.uuid), label, status: status(&s.state), ipv4, ipv6, region: s.zone, plan: s.plan, tags: s.tags.tag, extra }
++}
++
++impl Provider for UpCloud {
++    fn manifest(&self) -> &PluginManifest {
++        &MANIFEST
++    }
++
++    fn check(&self) -> Result<String, ProviderError> {
++        let n = self.servers()?.len();
++        Ok(format!("{n} server{}", if n == 1 { "" } else { "s" }))
++    }
++
++    fn as_list_instances(&self) -> Option<&dyn ListInstances> {
++        Some(self)
++    }
++    fn as_power_control(&self) -> Option<&dyn PowerControl> {
++        Some(self)
++    }
++}
++
++impl ListInstances for UpCloud {
++    fn instances(&self) -> Result<Vec<Instance>, ProviderError> {
++        let servers = self.servers()?;
++        let ips = self.get::<IpList>("/ip_address")?.ip_addresses.ip_address;
++        let mut by_server: HashMap<String, Vec<&UpIp>> = HashMap::new();
++        for ip in &ips {
++            if let Some(server) = &ip.server {
++                by_server.entry(server.clone()).or_default().push(ip);
++            }
++        }
++        Ok(servers.into_iter().map(|s| instance(s, &by_server)).collect())
++    }
++}
++
++impl PowerControl for UpCloud {
++    fn boot(&self, id: &InstanceId) -> Result<(), ProviderError> {
++        self.post(&format!("/server/{id}/start"), json!({}))
++    }
++    fn reboot(&self, id: &InstanceId) -> Result<(), ProviderError> {
++        self.post(&format!("/server/{id}/restart"), json!({"restart_server": {"stop_type": "soft", "timeout": SOFT_STOP_TIMEOUT, "timeout_action": "ignore"}}))
++    }
++    fn shutdown(&self, id: &InstanceId) -> Result<(), ProviderError> {
++        self.post(&format!("/server/{id}/stop"), json!({"stop_server": {"stop_type": "soft", "timeout": SOFT_STOP_TIMEOUT}}))
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use crow_provider_core::http::Method;
++    use crow_provider_core::testing::RecordedHttp;
++
++    const SERVERS: &str = r#"{"servers": {"server": [
++        {"uuid": "00798b85-efdc-41ca-8021-f6ef457b8531", "title": "web-01", "hostname": "web-01.example.com", "state": "started", "zone": "de-fra1", "plan": "1xCPU-1GB", "tags": {"tag": ["prod"]}},
++        {"uuid": "009d64ef-31d1-4684-a26b-c86c955cbf46", "title": "", "hostname": "batch.example.com", "state": "maintenance", "zone": "fi-hel1", "plan": "2xCPU-4GB", "tags": {"tag": []}}
++    ]}}"#;
++    const IPS: &str = r#"{"ip_addresses": {"ip_address": [
++        {"access": "private", "address": "10.1.2.3", "family": "IPv4", "server": "00798b85-efdc-41ca-8021-f6ef457b8531"},
++        {"access": "public", "address": "94.237.1.2", "family": "IPv4", "server": "00798b85-efdc-41ca-8021-f6ef457b8531"},
++        {"access": "public", "address": "2a04:3540:1000:310::1", "family": "IPv6", "server": "00798b85-efdc-41ca-8021-f6ef457b8531"},
++        {"access": "utility", "address": "10.5.0.9", "family": "IPv4", "server": "00798b85-efdc-41ca-8021-f6ef457b8531"},
++        {"access": "public", "address": "94.237.9.9", "family": "IPv4", "server": "009d64ef-31d1-4684-a26b-c86c955cbf46"},
++        {"access": "public", "address": "94.237.7.7", "family": "IPv4"}
++    ]}}"#;
++
++    fn recorded() -> RecordedHttp {
++        RecordedHttp::new().on(Method::Get, &format!("{API}/server"), 200, SERVERS).on(Method::Get, &format!("{API}/ip_address"), 200, IPS)
++    }
++
++    fn with_token(http: RecordedHttp) -> (UpCloud, Arc<RecordedHttp>) {
++        let http = Arc::new(http);
++        (UpCloud::new(&ProviderSettings::default().with_secret("api_token", "ucat_SECRET"), http.clone()).unwrap(), http)
++    }
++
++    #[test]
++    fn declares_what_it_implements_and_no_snapshots() {
++        let (u, _) = with_token(RecordedHttp::new());
++        crow_provider_core::check_declarations(&u).unwrap();
++        assert!(u.as_snapshots().is_none(), "the UI must not offer snapshots for UpCloud");
++    }
++
++    #[test]
++    fn lists_servers_with_their_addresses() {
++        let (u, http) = with_token(recorded());
++        let all = u.instances().unwrap();
++        assert_eq!(all.len(), 2);
++        let web = &all[0];
++        assert_eq!((web.label.as_str(), &web.status, web.region.as_deref()), ("web-01", &InstanceStatus::Running, Some("de-fra1")));
++        assert_eq!(web.ipv4.iter().map(ToString::to_string).collect::<Vec<_>>(), ["94.237.1.2", "10.1.2.3"], "public first, utility dropped");
++        assert_eq!(web.ipv6[0].to_string(), "2a04:3540:1000:310::1");
++        assert_eq!(web.tags, ["prod"]);
++        assert_eq!(all[1].label, "batch.example.com", "empty title falls back to the hostname");
++        assert_eq!(all[1].status, InstanceStatus::Other("maintenance".into()));
++        assert_eq!(http.requests().len(), 2, "two calls however many servers");
++        assert_eq!(http.requests()[0].headers[1].1.expose(), "Bearer ucat_SECRET");
++    }
++
++    #[test]
++    fn falls_back_to_username_and_password() {
++        let http = Arc::new(recorded());
++        let settings = ProviderSettings::default().with_value("username", "crow-api").with_secret("password", "pw-SECRET");
++        let u = UpCloud::new(&settings, http.clone()).unwrap();
++        assert_eq!(u.check().unwrap(), "2 servers");
++        let auth = http.requests()[0].headers[1].1.expose().to_string();
++        assert_eq!(auth, format!("Basic {}", http::base64(b"crow-api:pw-SECRET")));
++        assert!(!format!("{:?}", http.requests()).contains("SECRET"));
++    }
++
++    #[test]
++    fn says_which_credentials_are_missing() {
++        let http: Arc<dyn Http> = Arc::new(RecordedHttp::new());
++        let err = |s: ProviderSettings| UpCloud::new(&s, http.clone()).err().unwrap();
++        assert_eq!(err(ProviderSettings::default()), ProviderError::NotConfigured("api_token (or username and password)".into()));
++        assert_eq!(err(ProviderSettings::default().with_value("username", "me")), ProviderError::NotConfigured("password".into()));
++    }
++
++    #[test]
++    fn power_actions_are_soft_and_never_force() {
++        let id = "00798b85-efdc-41ca-8021-f6ef457b8531";
++        let (u, http) = with_token(
++            RecordedHttp::new()
++                .on(Method::Post, &format!("{API}/server/{id}/start"), 200, "{}")
++                .on(Method::Post, &format!("{API}/server/{id}/restart"), 200, "{}")
++                .on(Method::Post, &format!("{API}/server/{id}/stop"), 200, "{}"),
++        );
++        let id = InstanceId(id.into());
++        u.boot(&id).unwrap();
++        u.reboot(&id).unwrap();
++        u.shutdown(&id).unwrap();
++        let bodies: Vec<Value> = http.requests().into_iter().filter_map(|r| r.body).collect();
++        assert_eq!(bodies[1]["restart_server"]["stop_type"], "soft");
++        assert_eq!(bodies[1]["restart_server"]["timeout_action"], "ignore");
++        assert_eq!(bodies[2]["stop_server"]["stop_type"], "soft");
++    }
++
++    #[test]
++    fn errors_carry_upclouds_message() {
++        let (u, _) = with_token(RecordedHttp::new().on(Method::Get, &format!("{API}/server"), 401, r#"{"error": {"error_code": "AUTHENTICATION_FAILED", "error_message": "Authentication failed using the given username and password."}}"#));
++        assert_eq!(u.check().unwrap_err(), ProviderError::Auth("Authentication failed using the given username and password.".into()));
++    }
++}
+diff --git a/crates/crow-provider-upcloud/src/manifest.toml b/crates/crow-provider-upcloud/src/manifest.toml
+new file mode 100644
+index 0000000..0374391
+--- /dev/null
++++ b/crates/crow-provider-upcloud/src/manifest.toml
+@@ -0,0 +1,24 @@
++[plugin]
++name = "upcloud"
++kind = "provider"
++category = "provider.hosts"
++capabilities = ["instances.list", "instances.power"]
++
++[[settings]]
++key = "api_token"
++label = "API token"
++type = "secret"
++help = "An UpCloud API token (ucat_...). Leave empty to sign in with an API sub-account's username and password instead."
++docs_source = "https://developers.upcloud.com/1.3/3-accounts/"
++
++[[settings]]
++key = "username"
++label = "API username"
++type = "string"
++help = "An UpCloud sub-account with API access. Only used when there's no API token."
++
++[[settings]]
++key = "password"
++label = "API password"
++type = "secret"
++help = "That sub-account's password."
+diff --git a/src/config/manifest.toml b/src/config/manifest.toml
+index 3d4ba95..59b7052 100644
+--- a/src/config/manifest.toml
++++ b/src/config/manifest.toml
+@@ -1,6 +1,7 @@
+ [plugin]
+ name = "crow_config"
+ grammar = "toml"
++category = "config.format"
+ 
+ [shape]
+ kind = "key_value_list"
+diff --git a/src/main.rs b/src/main.rs
+index a2ba98f..1ed9ce0 100644
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -13,6 +13,7 @@ pub mod keys;
+ pub mod lab;
+ pub mod metrics;
+ pub mod os_detect;
++pub mod providers;
+ pub mod region;
+ pub mod security;
+ pub mod vault;
+diff --git a/src/providers.rs b/src/providers.rs
+new file mode 100644
+index 0000000..be12f72
+--- /dev/null
++++ b/src/providers.rs
+@@ -0,0 +1,68 @@
++//! The provider plugins compiled into this build (cargo features
++//! `provider-*`), and how their data meets the rest of Crow.
++
++use crow_provider_core::ProviderFactory;
++
++/// Every compiled-in provider.
++pub fn factories() -> Vec<ProviderFactory> {
++    #[allow(unused_mut)]
++    let mut out = Vec::new();
++    #[cfg(feature = "provider-linode")]
++    out.push(crow_provider_linode::FACTORY);
++    #[cfg(feature = "provider-upcloud")]
++    out.push(crow_provider_upcloud::FACTORY);
++    out
++}
++
++/// The factory for plugin `name` (e.g. "linode"), if compiled in.
++pub fn factory(name: &str) -> Option<ProviderFactory> {
++    factories().into_iter().find(|f| (f.manifest)().plugin.name == name)
++}
++
++/// The provider name the region tables use for plugin `name`, so an
++/// instance's region code becomes a country and city.
++pub fn region_provider(name: &str) -> Option<&'static str> {
++    match name {
++        "linode" => Some("Linode"),
++        "upcloud" => Some("UpCloud"),
++        _ => None,
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use crow_config_core::{categories, PluginKind, SettingsDocument};
++
++    #[test]
++    fn compiled_in_providers_are_valid_host_providers() {
++        let all = factories();
++        assert!(!all.is_empty(), "default features compile providers in");
++        for f in all {
++            let m = (f.manifest)();
++            assert_eq!(m.validate(), Ok(()), "{}", m.plugin.name);
++            assert_eq!(m.plugin.kind, PluginKind::Provider);
++            assert_eq!(m.plugin.category.as_deref(), Some(categories::PROVIDER_HOSTS));
++            assert!(m.unknown_capabilities().is_empty(), "{}: {:?}", m.plugin.name, m.unknown_capabilities());
++            assert!(region_provider(&m.plugin.name).is_some(), "{} has region tables", m.plugin.name);
++        }
++    }
++
++    /// A provider's settings render through crow-config like any config
++    /// file, with the token as set/not set, never its value.
++    #[test]
++    fn provider_settings_render_through_crow_config() {
++        let linode = factory("linode").unwrap();
++        let doc = SettingsDocument::new((linode.manifest)(), [], ["api_token".to_string()]);
++        let ir = doc.to_ir();
++        assert_eq!(ir.rows[0].row_id, "api_token");
++        assert_eq!(ir.rows[0].fields[0].value, serde_json::json!({"set": true}));
++        assert!(doc.missing_required().is_empty());
++    }
++
++    #[test]
++    fn provider_regions_map_to_flags() {
++        assert_eq!(crate::region::locate(region_provider("linode").unwrap(), "de-fra-2"), Some(("DE", "Frankfurt")));
++        assert_eq!(crate::region::locate(region_provider("upcloud").unwrap(), "fi-hel1"), Some(("FI", "Helsinki")));
++    }
++}
+diff --git a/src/region.rs b/src/region.rs
+index 36d2650..b4c5170 100644
+--- a/src/region.rs
++++ b/src/region.rs
+@@ -73,6 +73,8 @@ pub fn locate(provider: &str, code: &str) -> Option<(&'static str, &'static str)
+         // GCP reports the zone ("europe-west3-b").
+         "GCP" => prefix(GCP),
+         "Azure" => exact(AZURE),
++        // UpCloud zones ("de-fra1") start with the country, like Linode's.
++        "UpCloud" => prefix(UPCLOUD).or_else(|| country_from_prefix(&code)),
+         _ => None,
+     }
+ }
+@@ -142,6 +144,23 @@ const HETZNER: &[(&str, &str, &str)] = &[
+     ("sin", "SG", "Singapore"),
+ ];
+ 
++const UPCLOUD: &[(&str, &str, &str)] = &[
++    ("au-syd", "AU", "Sydney"),
++    ("de-fra", "DE", "Frankfurt"),
++    ("dk-cph", "DK", "Copenhagen"),
++    ("es-mad", "ES", "Madrid"),
++    ("fi-hel", "FI", "Helsinki"),
++    ("nl-ams", "NL", "Amsterdam"),
++    ("no-svg", "NO", "Stavanger"),
++    ("pl-waw", "PL", "Warsaw"),
++    ("se-sto", "SE", "Stockholm"),
++    ("sg-sin", "SG", "Singapore"),
++    ("uk-lon", "GB", "London"),
++    ("us-chi", "US", "Chicago"),
++    ("us-nyc", "US", "New York"),
++    ("us-sjo", "US", "San Jose"),
++];
++
+ const AWS: &[(&str, &str, &str)] = &[
+     ("us-east-1", "US", "N. Virginia"),
+     ("us-east-2", "US", "Ohio"),
+@@ -311,6 +330,8 @@ mod tests {
+         assert_eq!(locate("GCP", "europe-west3-b"), Some(("DE", "Frankfurt")));
+         assert_eq!(locate("GCP", "europe-west1-c"), Some(("BE", "Belgium")), "europe-west1 isn't europe-west10/12");
+         assert_eq!(locate("Azure", "westeurope"), Some(("NL", "Netherlands")));
++        assert_eq!(locate("UpCloud", "de-fra1"), Some(("DE", "Frankfurt")));
++        assert_eq!(locate("UpCloud", "uk-lon1"), Some(("GB", "London")), "UpCloud says uk, the flag is GB");
+         assert_eq!(locate("Linode", ""), None);
+     }
+ 

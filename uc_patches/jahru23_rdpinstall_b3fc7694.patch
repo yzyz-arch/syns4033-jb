@@ -1,0 +1,873 @@
+From b3fc7694f68c5e2b08075fc353bb51ab2993e61c Mon Sep 17 00:00:00 2001
+From: jahru23 <jahru23@users.noreply.github.com>
+Date: Sun, 18 Oct 2026 09:19:05 +0700
+Subject: [PATCH] =?UTF-8?q?F2:=20akun=20cloud=20UpCloud=20=E2=80=94=20uji?=
+ =?UTF-8?q?=20token=20ke=20GET=20/1.3/account,=20simpan=20terenkripsi,=20d?=
+ =?UTF-8?q?aftar/uji/hapus?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+- upcloud.rs: klien 1.3 (account, zone publik, plan, template publik), error Indonesia, 7 tes dengan contoh respons dari dokumentasi resmi
+- routes/cloud.rs: tambah (uji dulu, gagal tidak disimpan), uji ulang, hapus, audit log
+- halaman /cloud + badge status + kredit; dashboard menautkannya
+---
+ src/main.rs              |   1 +
+ src/models.rs            |  10 +
+ src/routes/cloud.rs      | 248 +++++++++++++++++++++++++
+ src/routes/mod.rs        |   4 +
+ src/upcloud.rs           | 388 +++++++++++++++++++++++++++++++++++++++
+ src/views.rs             |  16 ++
+ static/style.css         |  11 ++
+ templates/cloud.html     |  70 +++++++
+ templates/dashboard.html |   4 +-
+ 9 files changed, 750 insertions(+), 2 deletions(-)
+ create mode 100644 src/routes/cloud.rs
+ create mode 100644 src/upcloud.rs
+ create mode 100644 templates/cloud.html
+
+diff --git a/src/main.rs b/src/main.rs
+index ac623c1..ee3ee89 100644
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -8,6 +8,7 @@ mod db;
+ mod error;
+ mod models;
+ mod routes;
++mod upcloud;
+ mod views;
+ 
+ use std::sync::Arc;
+diff --git a/src/models.rs b/src/models.rs
+index e9d8e22..7987653 100644
+--- a/src/models.rs
++++ b/src/models.rs
+@@ -93,6 +93,16 @@ pub struct CloudAccount {
+     pub created_at: i64,
+ }
+ 
++impl CloudAccount {
++    pub fn status_class(&self) -> &'static str {
++        match self.status.as_str() {
++            "ok" => "ok",
++            "invalid" => "bad",
++            _ => "unchecked",
++        }
++    }
++}
++
+ /// Payload Telegram Login Widget kirim sebagai query string.
+ #[derive(Debug, Clone, Deserialize)]
+ pub struct TelegramAuth {
+diff --git a/src/routes/cloud.rs b/src/routes/cloud.rs
+new file mode 100644
+index 0000000..fc59504
+--- /dev/null
++++ b/src/routes/cloud.rs
+@@ -0,0 +1,248 @@
++//! Akun cloud: user menempel API token miliknya sendiri, kita uji dulu ke
++//! UpCloud, lalu simpan terenkripsi. Token tidak pernah ditampilkan kembali.
++
++use axum::extract::{Form, Path, State};
++use axum::response::{IntoResponse, Redirect, Response};
++use serde::Deserialize;
++
++use crate::auth::CurrentUser;
++use crate::crypto;
++use crate::db::now;
++use crate::error::{AppError, AppResult};
++use crate::models::{CloudAccount, User};
++use crate::routes::pages::render;
++use crate::upcloud;
++use crate::views::CloudPage;
++use crate::SharedState;
++
++const MAX_ACCOUNTS_PER_USER: i64 = 5;
++
++#[derive(Debug, Deserialize)]
++pub struct AddForm {
++    #[serde(default)]
++    pub label: String,
++    #[serde(default)]
++    pub token: String,
++}
++
++pub async fn index(State(state): State<SharedState>, user: crate::auth::MaybeUser) -> Response {
++    let crate::auth::MaybeUser(Some(user)) = user else {
++        return Redirect::to("/login").into_response();
++    };
++    match build_page(&state, user, "", "").await {
++        Ok(r) => r,
++        Err(e) => e.into_response(),
++    }
++}
++
++pub async fn add(
++    State(state): State<SharedState>,
++    CurrentUser(user): CurrentUser,
++    Form(form): Form<AddForm>,
++) -> Response {
++    let token = form.token.trim().to_string();
++    let label = form.label.trim().to_string();
++
++    if !upcloud::looks_like_token(&token) {
++        return err_page(
++            &state,
++            user,
++            "Token UpCloud harus diawali `ucat_` (dibuat di Control Panel → Account → API Tokens).",
++        )
++        .await;
++    }
++
++    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM cloud_accounts WHERE user_id = ?")
++        .bind(user.id)
++        .fetch_one(&state.pool)
++        .await
++        .unwrap_or(0);
++    if count >= MAX_ACCOUNTS_PER_USER {
++        return err_page(
++            &state,
++            user,
++            "Batas akun cloud tercapai. Hapus salah satu dulu.",
++        )
++        .await;
++    }
++
++    // Uji token sebelum disimpan: sekaligus mengambil sisa kredit.
++    let client = match upcloud::Client::new(&token) {
++        Ok(c) => c,
++        Err(e) => return err_page(&state, user, &e.to_string()).await,
++    };
++    let account = match client.account().await {
++        Ok(a) => a,
++        Err(e) => return err_page(&state, user, &e.to_string()).await,
++    };
++
++    let sealed = match crypto::seal(&state.cfg.master_key, &token) {
++        Ok(s) => s,
++        Err(e) => return AppError::Any(e).into_response(),
++    };
++    let ts = now();
++    let ins = sqlx::query(
++        "INSERT INTO cloud_accounts(user_id, provider, label, token_enc, status, credit, last_checked, last_error, created_at)
++         VALUES(?, 'upcloud', ?, ?, 'ok', ?, ?, '', ?)",
++    )
++    .bind(user.id)
++    .bind(if label.is_empty() { "UpCloud".to_string() } else { label })
++    .bind(&sealed)
++    .bind(account.credits_label())
++    .bind(ts)
++    .bind(ts)
++    .execute(&state.pool)
++    .await;
++
++    match ins {
++        Ok(r) => {
++            audit(
++                &state,
++                user.id,
++                "cloud_add",
++                &format!("upcloud#{}", r.last_insert_rowid()),
++            )
++            .await;
++            tracing::info!(
++                "akun cloud ditambahkan user {} (kredit {:.2})",
++                user.id,
++                account.credits
++            );
++            let notice = format!("Token valid. Sisa kredit {:.2}.", account.credits);
++            match build_page(&state, user, "", &notice).await {
++                Ok(r) => r,
++                Err(e) => e.into_response(),
++            }
++        }
++        Err(e) => AppError::Db(e).into_response(),
++    }
++}
++
++pub async fn check(
++    State(state): State<SharedState>,
++    CurrentUser(user): CurrentUser,
++    Path(id): Path<i64>,
++) -> Response {
++    let row = sqlx::query_as::<_, (String, String)>(
++        "SELECT token_enc, label FROM cloud_accounts WHERE id = ? AND user_id = ?",
++    )
++    .bind(id)
++    .bind(user.id)
++    .fetch_optional(&state.pool)
++    .await;
++
++    let (token_enc, _label) = match row {
++        Ok(Some(r)) => r,
++        Ok(None) => return AppError::NotFound.into_response(),
++        Err(e) => return AppError::Db(e).into_response(),
++    };
++
++    let token = match crypto::open(&state.cfg.master_key, &token_enc) {
++        Ok(t) => t,
++        Err(e) => return AppError::Any(e).into_response(),
++    };
++
++    let (status, credit, err) = match upcloud::Client::new(&token) {
++        Ok(client) => match client.account().await {
++            Ok(a) => ("ok".to_string(), a.credits_label(), String::new()),
++            Err(e) => ("invalid".to_string(), String::new(), e.to_string()),
++        },
++        Err(e) => ("invalid".to_string(), String::new(), e.to_string()),
++    };
++
++    let _ = sqlx::query(
++        "UPDATE cloud_accounts SET status = ?, credit = ?, last_error = ?, last_checked = ? WHERE id = ? AND user_id = ?",
++    )
++    .bind(&status)
++    .bind(&credit)
++    .bind(&err)
++    .bind(now())
++    .bind(id)
++    .bind(user.id)
++    .execute(&state.pool)
++    .await;
++
++    audit(
++        &state,
++        user.id,
++        "cloud_check",
++        &format!("upcloud#{id} -> {status}"),
++    )
++    .await;
++
++    let notice = if status == "ok" {
++        format!("Akun #{id} masih valid ({credit}).")
++    } else {
++        format!("Akun #{id} gagal diuji: {err}")
++    };
++    match build_page(&state, user, "", &notice).await {
++        Ok(r) => r,
++        Err(e) => e.into_response(),
++    }
++}
++
++pub async fn delete(
++    State(state): State<SharedState>,
++    CurrentUser(user): CurrentUser,
++    Path(id): Path<i64>,
++) -> Response {
++    let res = sqlx::query("DELETE FROM cloud_accounts WHERE id = ? AND user_id = ?")
++        .bind(id)
++        .bind(user.id)
++        .execute(&state.pool)
++        .await;
++    match res {
++        Ok(_) => {
++            audit(&state, user.id, "cloud_delete", &format!("upcloud#{id}")).await;
++            Redirect::to("/cloud").into_response()
++        }
++        Err(e) => AppError::Db(e).into_response(),
++    }
++}
++
++async fn audit(state: &SharedState, user_id: i64, action: &str, detail: &str) {
++    let _ = sqlx::query(
++        "INSERT INTO audit_log(user_id, action, detail, ip, created_at) VALUES(?,?,?,'',?)",
++    )
++    .bind(user_id)
++    .bind(action)
++    .bind(detail)
++    .bind(now())
++    .execute(&state.pool)
++    .await;
++}
++
++async fn accounts(state: &SharedState, user_id: i64) -> AppResult<Vec<CloudAccount>> {
++    let rows = sqlx::query_as::<_, CloudAccount>(
++        "SELECT id, user_id, provider, label, status, credit, last_checked, last_error, created_at
++         FROM cloud_accounts WHERE user_id = ? ORDER BY id DESC",
++    )
++    .bind(user_id)
++    .fetch_all(&state.pool)
++    .await?;
++    Ok(rows)
++}
++
++async fn build_page(
++    state: &SharedState,
++    user: User,
++    error: &str,
++    notice: &str,
++) -> AppResult<Response> {
++    let accounts = accounts(state, user.id).await?;
++    let page = CloudPage {
++        user,
++        accounts,
++        error: error.to_string(),
++        notice: notice.to_string(),
++        max_accounts: MAX_ACCOUNTS_PER_USER,
++    };
++    Ok(render(&page))
++}
++
++async fn err_page(state: &SharedState, user: User, msg: &str) -> Response {
++    match build_page(state, user, msg, "").await {
++        Ok(r) => r,
++        Err(e) => e.into_response(),
++    }
++}
+diff --git a/src/routes/mod.rs b/src/routes/mod.rs
+index 8a092d7..468bbb7 100644
+--- a/src/routes/mod.rs
++++ b/src/routes/mod.rs
+@@ -1,4 +1,5 @@
+ pub mod assets;
++pub mod cloud;
+ pub mod pages;
+ pub mod telegram;
+ 
+@@ -14,6 +15,9 @@ pub fn router(state: SharedState) -> Router {
+         .route("/auth/telegram", get(telegram::callback))
+         .route("/auth/dev", post(telegram::dev_login))
+         .route("/logout", post(telegram::logout))
++        .route("/cloud", get(cloud::index).post(cloud::add))
++        .route("/cloud/{id}/check", post(cloud::check))
++        .route("/cloud/{id}/delete", post(cloud::delete))
+         .route("/healthz", get(|| async { "ok" }))
+         .route("/static/style.css", get(assets::css))
+         .route("/favicon.svg", get(assets::favicon))
+diff --git a/src/upcloud.rs b/src/upcloud.rs
+new file mode 100644
+index 0000000..30e6944
+--- /dev/null
++++ b/src/upcloud.rs
+@@ -0,0 +1,388 @@
++//! Klien tipis untuk UpCloud API 1.3.
++//!
++//! Hanya operasi yang dibutuhkan alur installer: verifikasi akun (sekaligus cek
++//! kredit), daftar zone/plan/template, dan pembuatan server dari template.
++//! Zone, plan, dan UUID template selalu diambil saat request — slug plan dan
++//! UUID template berubah, jadi menanamkannya di kode akan gagal diam-diam.
++
++use std::time::Duration;
++
++use serde::Deserialize;
++use serde_json::Value;
++
++pub const BASE: &str = "https://api.upcloud.com/1.3";
++const TOKEN_PREFIX: &str = "ucat_";
++
++#[derive(Debug)]
++pub enum Error {
++    /// Token tidak diterima (401/403) atau formatnya jelas salah.
++    Auth(String),
++    /// UpCloud menjawab, tapi dengan error lain.
++    Api { status: u16, message: String },
++    /// Tidak sampai ke UpCloud.
++    Transport(String),
++    /// Jawaban tidak sesuai bentuk yang diharapkan.
++    Decode(String),
++}
++
++impl std::fmt::Display for Error {
++    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
++        match self {
++            Error::Auth(m) => write!(f, "Token ditolak UpCloud: {m}"),
++            Error::Api { status, message } => write!(f, "UpCloud menjawab {status}: {message}"),
++            Error::Transport(m) => write!(f, "Tidak bisa menghubungi UpCloud: {m}"),
++            Error::Decode(m) => write!(f, "Jawaban UpCloud tidak terbaca: {m}"),
++        }
++    }
++}
++
++impl std::error::Error for Error {}
++
++pub fn looks_like_token(token: &str) -> bool {
++    let t = token.trim();
++    t.len() >= 20
++        && t.starts_with(TOKEN_PREFIX)
++        && t.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
++}
++
++#[derive(Debug, Clone)]
++pub struct Account {
++    pub username: String,
++    pub credits: f64,
++    pub raw: Value,
++}
++
++impl Account {
++    pub fn credits_label(&self) -> String {
++        format!("{:.2} credit", self.credits)
++    }
++}
++
++#[derive(Debug, Clone, Deserialize)]
++pub struct Zone {
++    pub id: String,
++    #[serde(default)]
++    pub description: String,
++    #[serde(default = "yes")]
++    pub public: String,
++}
++
++impl Zone {
++    pub fn is_public(&self) -> bool {
++        self.public.eq_ignore_ascii_case("yes")
++    }
++}
++
++#[derive(Debug, Clone, Deserialize)]
++pub struct Plan {
++    pub name: String,
++    #[serde(default)]
++    pub core_number: i64,
++    #[serde(default)]
++    pub memory_amount: i64,
++    #[serde(default)]
++    pub storage_size: i64,
++    #[serde(default)]
++    pub storage_tier: Option<String>,
++    #[serde(default)]
++    pub public_traffic_out: i64,
++    #[serde(default)]
++    pub gpu_amount: Option<i64>,
++    #[serde(default)]
++    pub gpu_model: Option<String>,
++}
++
++impl Plan {
++    pub fn ram_gb(&self) -> f64 {
++        self.memory_amount as f64 / 1024.0
++    }
++
++    pub fn label(&self) -> String {
++        if self.gpu_model.is_some() {
++            format!(
++                "{} · {} core · {} GB RAM (GPU)",
++                self.name,
++                self.core_number,
++                self.ram_gb()
++            )
++        } else {
++            format!(
++                "{} · {} core · {} GB RAM",
++                self.name,
++                self.core_number,
++                self.ram_gb()
++            )
++        }
++    }
++
++    /// Windows 11 / Server 2025 butuh 2 GB; plan kecil tetap ditawarkan untuk
++    /// edisi ringan, ini hanya penanda untuk UI.
++    pub fn fits_windows_11(&self) -> bool {
++        self.memory_amount >= 2048
++    }
++}
++
++#[derive(Debug, Clone, Deserialize)]
++pub struct Template {
++    pub uuid: String,
++    pub title: String,
++    #[serde(default)]
++    pub size: i64,
++    #[serde(default)]
++    pub license: f64,
++    #[serde(default)]
++    pub zone: String,
++    #[serde(default)]
++    pub access: String,
++    #[serde(default)]
++    pub template_type: String,
++}
++
++impl Template {
++    pub fn is_windows(&self) -> bool {
++        let t = self.title.to_lowercase();
++        t.contains("windows") || t.contains("server 20")
++    }
++}
++
++fn yes() -> String {
++    "yes".to_string()
++}
++
++pub struct Client {
++    http: reqwest::Client,
++    token: String,
++    base: String,
++}
++
++impl Client {
++    pub fn new(token: &str) -> Result<Self, Error> {
++        let token = token.trim().to_string();
++        if token.is_empty() {
++            return Err(Error::Auth("token kosong".into()));
++        }
++        let http = reqwest::Client::builder()
++            .connect_timeout(Duration::from_secs(10))
++            .timeout(Duration::from_secs(30))
++            .user_agent(concat!("rdpinstall/", env!("CARGO_PKG_VERSION")))
++            .build()
++            .map_err(|e| Error::Transport(e.to_string()))?;
++        Ok(Self {
++            http,
++            token,
++            base: BASE.to_string(),
++        })
++    }
++
++    /// Untuk pengujian: arahkan ke server tiruan.
++    pub fn with_base(token: &str, base: &str) -> Result<Self, Error> {
++        let mut c = Self::new(token)?;
++        c.base = base.trim_end_matches('/').to_string();
++        Ok(c)
++    }
++
++    async fn get(&self, path: &str) -> Result<Value, Error> {
++        let url = format!("{}{}", self.base, path);
++        let res = self
++            .http
++            .get(&url)
++            .header("Authorization", format!("Bearer {}", self.token))
++            .header("Accept", "application/json")
++            .send()
++            .await
++            .map_err(|e| Error::Transport(e.to_string()))?;
++
++        let status = res.status();
++        let body = res.text().await.unwrap_or_default();
++        if status.as_u16() == 401 || status.as_u16() == 403 {
++            return Err(Error::Auth(format!(
++                "HTTP {} — periksa kembali tokennya (harus diawali {})",
++                status.as_u16(),
++                TOKEN_PREFIX
++            )));
++        }
++        if !status.is_success() {
++            return Err(Error::Api {
++                status: status.as_u16(),
++                message: first_error_message(&body),
++            });
++        }
++        serde_json::from_str::<Value>(&body).map_err(|e| Error::Decode(e.to_string()))
++    }
++
++    /// Token valid + sisa kredit. Ini juga panggilan uji saat akun ditambahkan.
++    pub async fn account(&self) -> Result<Account, Error> {
++        let v = self.get("/account").await?;
++        let a = v
++            .get("account")
++            .ok_or_else(|| Error::Decode("tanpa objek account".into()))?;
++        let credits = a.get("credits").and_then(Value::as_f64).unwrap_or(0.0);
++        let username = a
++            .get("username")
++            .and_then(Value::as_str)
++            .unwrap_or("")
++            .to_string();
++        Ok(Account {
++            username,
++            credits,
++            raw: a.clone(),
++        })
++    }
++
++    pub async fn public_zones(&self) -> Result<Vec<Zone>, Error> {
++        let v = self.get("/zone").await?;
++        let list = v
++            .pointer("/zones/zone")
++            .and_then(Value::as_array)
++            .ok_or_else(|| Error::Decode("tanpa daftar zones.zone".into()))?;
++        let mut zones: Vec<Zone> = serde_json::from_value(Value::Array(list.clone()))
++            .map_err(|e| Error::Decode(e.to_string()))?;
++        zones.retain(Zone::is_public);
++        zones.sort_by(|a, b| a.id.cmp(&b.id));
++        Ok(zones)
++    }
++
++    pub async fn plans(&self) -> Result<Vec<Plan>, Error> {
++        let v = self.get("/plan").await?;
++        let list = v
++            .pointer("/plans/plan")
++            .and_then(Value::as_array)
++            .ok_or_else(|| Error::Decode("tanpa daftar plans.plan".into()))?;
++        let mut plans: Vec<Plan> = serde_json::from_value(Value::Array(list.clone()))
++            .map_err(|e| Error::Decode(e.to_string()))?;
++        // GPU di luar cakupan installer RDP biasa.
++        plans.retain(|p| p.gpu_model.is_none());
++        plans.sort_by_key(|p| (p.memory_amount, p.core_number, p.name.clone()));
++        Ok(plans)
++    }
++
++    /// Template publik. Windows difilter di sisi klien karena API hanya
++    /// menyediakan pemisahan per type, bukan per keluarga OS.
++    pub async fn public_templates(&self) -> Result<Vec<Template>, Error> {
++        let v = self.get("/storage/template").await?;
++        let list = v
++            .pointer("/storages/storage")
++            .and_then(Value::as_array)
++            .ok_or_else(|| Error::Decode("tanpa daftar storages.storage".into()))?;
++        let all: Vec<Template> = serde_json::from_value(Value::Array(list.clone()))
++            .map_err(|e| Error::Decode(e.to_string()))?;
++        let mut t: Vec<Template> = all
++            .into_iter()
++            .filter(|s| s.access.eq_ignore_ascii_case("public"))
++            .collect();
++        t.sort_by(|a, b| a.title.cmp(&b.title));
++        Ok(t)
++    }
++
++    pub async fn windows_templates(&self) -> Result<Vec<Template>, Error> {
++        Ok(self
++            .public_templates()
++            .await?
++            .into_iter()
++            .filter(Template::is_windows)
++            .collect())
++    }
++}
++
++/// UpCloud mengembalikan {"error":{"error_code":"...","error_message":"..."}}.
++pub fn first_error_message(body: &str) -> String {
++    match serde_json::from_str::<Value>(body) {
++        Ok(v) => v
++            .pointer("/error/error_message")
++            .and_then(Value::as_str)
++            .map(str::to_string)
++            .unwrap_or_else(|| body.chars().take(200).collect()),
++        Err(_) => body.chars().take(200).collect(),
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    // Contoh respons diambil apa adanya dari dokumentasi API UpCloud 1.3.
++    const ACCOUNT: &str =
++        r#"{"account":{"credits":9972.2324,"username":"upclouduser","vat_number":null}}"#;
++    const ZONES: &str = r#"{"zones":{"zone":[
++        {"description":"Frankfurt #1","id":"de-fra1","public":"yes"},
++        {"description":"Fake private cloud","id":"fi-fake-priv-cloud","parent_zone":"fi-hel1","public":"no"},
++        {"description":"Singapore #1","id":"sg-sin1","public":"yes"}]}}"#;
++    const PLANS: &str = r#"{"plans":{"plan":[
++        {"core_number":1,"memory_amount":2048,"name":"1xCPU-2GB","public_traffic_out":2048,"storage_size":50,"storage_tier":"maxiops"},
++        {"core_number":32,"memory_amount":393216,"name":"GPU-32xCPU-384GB-2xL40S","public_traffic_out":44,"gpu_amount":2,"storage_size":0,"storage_tier":null,"gpu_model":"NVIDIA L40S"}]}}"#;
++    const STORAGES: &str = r#"{"storages":{"storage":[
++        {"access":"public","encrypted":"no","labels":[],"license":0,"size":5,"state":"online","template_type":"cloud-init","title":"Ubuntu Server 22.04 LTS (Jammy Jellyfish)","type":"template","uuid":"01000000-0000-4000-8000-000030220200"},
++        {"access":"public","encrypted":"no","labels":[],"license":0.05,"size":30,"state":"online","title":"Windows Server 2022 (FI-Hel1)","type":"template","uuid":"01000000-0000-4000-8000-000030220400","zone":"fi-hel1"},
++        {"access":"private","encrypted":"no","labels":[],"license":0,"size":10,"state":"online","title":"Windows Server 2019 (punya saya)","type":"template","uuid":"01eff7ad-168e-413e-83b0-054f6a28fa23","zone":"uk-lon1"}]}}"#;
++
++    #[test]
++    fn token_shape() {
++        assert!(looks_like_token("ucat_01DQE3AJDEBFEKECFM558TGH2F"));
++        assert!(!looks_like_token(""));
++        assert!(!looks_like_token("passwordbiasa"));
++        assert!(!looks_like_token("ucat_pendek"));
++    }
++
++    #[test]
++    fn parses_account() {
++        let v: Value = serde_json::from_str(ACCOUNT).unwrap();
++        let a = v.pointer("/account").unwrap();
++        assert_eq!(a.get("credits").unwrap().as_f64().unwrap(), 9972.2324);
++        assert_eq!(a.get("username").unwrap().as_str().unwrap(), "upclouduser");
++    }
++
++    #[test]
++    fn zones_deserialize_and_filter_private() {
++        let v: Value = serde_json::from_str(ZONES).unwrap();
++        let list = v.pointer("/zones/zone").unwrap().as_array().unwrap();
++        let mut zones: Vec<Zone> = serde_json::from_value(Value::Array(list.clone())).unwrap();
++        zones.retain(Zone::is_public);
++        let ids: Vec<&str> = zones.iter().map(|z| z.id.as_str()).collect();
++        assert_eq!(ids, vec!["de-fra1", "sg-sin1"]);
++        assert_eq!(zones[0].description, "Frankfurt #1");
++    }
++
++    #[test]
++    fn plans_skip_gpu_and_sort_by_ram() {
++        let v: Value = serde_json::from_str(PLANS).unwrap();
++        let list = v.pointer("/plans/plan").unwrap().as_array().unwrap();
++        let mut plans: Vec<Plan> = serde_json::from_value(Value::Array(list.clone())).unwrap();
++        plans.retain(|p| p.gpu_model.is_none());
++        assert_eq!(plans.len(), 1);
++        assert_eq!(plans[0].name, "1xCPU-2GB");
++        assert_eq!(plans[0].ram_gb(), 2.0);
++        assert!(plans[0].fits_windows_11(), "2 GB cukup untuk Windows 11");
++    }
++
++    #[test]
++    fn templates_keep_public_only_and_flag_windows() {
++        let v: Value = serde_json::from_str(STORAGES).unwrap();
++        let list = v.pointer("/storages/storage").unwrap().as_array().unwrap();
++        let all: Vec<Template> = serde_json::from_value(Value::Array(list.clone())).unwrap();
++        let public: Vec<Template> = all
++            .into_iter()
++            .filter(|s| s.access.eq_ignore_ascii_case("public"))
++            .collect();
++        assert_eq!(public.len(), 2);
++        let win: Vec<&Template> = public.iter().filter(|s| s.is_windows()).collect();
++        assert_eq!(win.len(), 1);
++        assert_eq!(
++            win[0].license, 0.05,
++            "lisensi Windows harus terbaca, bukan 0"
++        );
++    }
++
++    #[test]
++    fn error_message_extraction() {
++        let body =
++            r#"{"error":{"error_code":"UNAUTHORIZED","error_message":"Authentication failed"}}"#;
++        assert_eq!(first_error_message(body), "Authentication failed");
++        assert_eq!(first_error_message("<html>502</html>"), "<html>502</html>");
++    }
++
++    #[test]
++    fn error_display_is_readable() {
++        let e = Error::Auth("HTTP 401".into());
++        assert!(e.to_string().starts_with("Token ditolak UpCloud"));
++    }
++}
+diff --git a/src/views.rs b/src/views.rs
+index 0de4e41..66e6aaa 100644
+--- a/src/views.rs
++++ b/src/views.rs
+@@ -42,6 +42,22 @@ impl DashboardPage {
+     }
+ }
+ 
++#[derive(Template)]
++#[template(path = "cloud.html")]
++pub struct CloudPage {
++    pub user: User,
++    pub accounts: Vec<CloudAccount>,
++    pub error: String,
++    pub notice: String,
++    pub max_accounts: i64,
++}
++
++impl CloudPage {
++    pub fn dt(&self, ts: &i64) -> String {
++        dt(*ts)
++    }
++}
++
+ pub fn rupiah(n: i64) -> String {
+     let s = n.abs().to_string();
+     let mut out = String::new();
+diff --git a/static/style.css b/static/style.css
+index 02b105b..e7ded69 100644
+--- a/static/style.css
++++ b/static/style.css
+@@ -124,6 +124,17 @@ input:focus, select:focus { outline: none; border-color: var(--accent-dim); }
+   color: #ffb3b5; border-radius: 7px; padding: 10px 12px; font-size: 13px; margin: 12px 0 0;
+ }
+ 
++.ok-alert {
++  background: rgba(62,207,142,.08); border: 1px solid rgba(62,207,142,.35);
++  color: #a8e9c8; border-radius: 7px; padding: 10px 12px; font-size: 13px; margin: 12px 0 0;
++}
++
++.form { display: flex; flex-direction: column; gap: 14px; max-width: 540px; }
++.form label { display: flex; flex-direction: column; gap: 6px; }
++.form .label { margin: 0; }
++
++a.btn { display: inline-block; text-decoration: none; }
++
+ .badge {
+   display: inline-block; font-family: var(--mono); font-size: 11px;
+   padding: 2px 7px; border-radius: 5px; border: 1px solid var(--line-2); color: var(--fg-dim);
+diff --git a/templates/cloud.html b/templates/cloud.html
+new file mode 100644
+index 0000000..c377876
+--- /dev/null
++++ b/templates/cloud.html
+@@ -0,0 +1,70 @@
++{% extends "base.html" %}
++{% block title %}Akun Cloud — RDP Installer{% endblock %}
++
++{% block topnav %}
++<div class="topnav">
++  <a class="btn ghost small" href="/">dashboard</a>
++  <span class="who">{{ user.display_name() }}</span>
++</div>
++{% endblock %}
++
++{% block content %}
++<section class="card">
++  <div class="cardhead">
++    <h2>Akun cloud</h2>
++    <span class="muted small">maks {{ max_accounts }}</span>
++  </div>
++  <p class="muted small">Tempel API token UpCloud milik Anda sendiri. Kami uji dulu ke
++  <span class="mono">GET /1.3/account</span>, lalu menyimpannya terenkripsi (AES-256-GCM).
++  Token tidak pernah ditampilkan lagi — hanya 4 karakter awal dan akhir.</p>
++
++  {% if !notice.is_empty() %}<p class="ok-alert">{{ notice }}</p>{% endif %}
++  {% if !error.is_empty() %}<p class="alert">{{ error }}</p>{% endif %}
++
++  {% if accounts.is_empty() %}
++  <p class="empty">Belum ada akun cloud. Tambahkan satu untuk mulai membuat server Windows.</p>
++  {% else %}
++  <div class="tablewrap">
++  <table>
++    <thead><tr><th>#</th><th>Provider</th><th>Label</th><th>Status</th><th>Kredit</th><th>Diuji</th><th></th></tr></thead>
++    <tbody>
++    {% for a in accounts %}
++      <tr>
++        <td class="mono">{{ a.id }}</td>
++        <td class="mono">{{ a.provider }}</td>
++        <td>{{ a.label }}</td>
++        <td><span class="badge {{ a.status_class() }}">{{ a.status }}</span>
++          {% if !a.last_error.is_empty() %}<div class="dim small">{{ a.last_error }}</div>{% endif %}</td>
++        <td class="dim">{{ a.credit }}</td>
++        <td class="dim">{{ dt(a.last_checked) }}</td>
++        <td>
++          <div class="row">
++            <form method="post" action="/cloud/{{ a.id }}/check"><button class="btn ghost small" type="submit">uji</button></form>
++            <form method="post" action="/cloud/{{ a.id }}/delete"><button class="btn ghost small" type="submit">hapus</button></form>
++          </div>
++        </td>
++      </tr>
++    {% endfor %}
++    </tbody>
++  </table>
++  </div>
++  {% endif %}
++</section>
++
++<section class="card">
++  <h2>Tambah akun</h2>
++  <form method="post" action="/cloud" class="form">
++    <label>
++      <span class="label">Label</span>
++      <input type="text" name="label" placeholder="UpCloud utama" maxlength="60" autocomplete="off">
++    </label>
++    <label>
++      <span class="label">API token</span>
++      <input type="password" name="token" placeholder="ucat_..." autocomplete="off" spellcheck="false" required>
++    </label>
++    <p class="muted small">Buat di UpCloud Control Panel → Account → API Tokens. Beri masa berlaku
++    sesingkat yang nyaman dan batasi IP bila bisa.</p>
++    <div class="row"><button class="btn" type="submit">uji &amp; simpan</button></div>
++  </form>
++</section>
++{% endblock %}
+diff --git a/templates/dashboard.html b/templates/dashboard.html
+index aa430e9..d665b3e 100644
+--- a/templates/dashboard.html
++++ b/templates/dashboard.html
+@@ -34,12 +34,12 @@
+     {% else %}
+     <ul class="list">
+       {% for a in cloud_accounts %}
+-      <li><span class="mono">{{ a.provider }}</span> <span class="badge {{ a.status }}">{{ a.status }}</span>
++      <li><span class="mono">{{ a.provider }}</span> <span class="badge {{ a.status_class() }}">{{ a.status }}</span>
+       {% if !a.credit.is_empty() %}<span class="dim">{{ a.credit }}</span>{% endif %}</li>
+       {% endfor %}
+     </ul>
+     {% endif %}
+-    <div class="row"><button class="btn ghost" disabled title="segera">tambah akun</button></div>
++    <div class="row"><a class="btn ghost" href="/cloud">kelola akun</a></div>
+   </div>
+ </div>
+ 

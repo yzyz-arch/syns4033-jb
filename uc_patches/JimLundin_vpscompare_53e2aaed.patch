@@ -1,0 +1,193 @@
+From 53e2aaedb148b2e6517d00478d6178a1bba25288 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Mon, 23 Feb 2026 23:46:08 +0000
+Subject: [PATCH] fix: use GitHub Actions secrets for all provider API keys
+
+- Remove .env.example; API keys come from GitHub repository secrets
+- Add missing secrets to all workflows (Vultr, UpCloud, Scaleway were
+  not being passed through)
+- Update check:providers script to reference env vars, not .env files
+
+Required GitHub secrets to configure:
+  DIGITALOCEAN_API_KEY, HETZNER_API_KEY, VULTR_API_KEY,
+  UPCLOUD_USERNAME, UPCLOUD_PASSWORD, SCALEWAY_API_KEY
+
+https://claude.ai/code/session_0156dpRadn5qty4vKdAZF6A7
+---
+ .env.example                          | 54 ---------------------------
+ .github/workflows/ci.yml              |  6 ++-
+ .github/workflows/deploy.yml          |  4 ++
+ .github/workflows/scheduled-tests.yml |  4 ++
+ scripts/check-providers.ts            | 38 ++++---------------
+ 5 files changed, 20 insertions(+), 86 deletions(-)
+ delete mode 100644 .env.example
+
+diff --git a/.env.example b/.env.example
+deleted file mode 100644
+index d98de10..0000000
+--- a/.env.example
++++ /dev/null
+@@ -1,54 +0,0 @@
+-# VPS Compare - Provider API Keys
+-#
+-# Copy this file to .env and fill in your API keys:
+-#   cp .env.example .env
+-#
+-# Then verify connectivity:
+-#   npm run check:providers
+-#
+-# Providers without valid keys will be silently skipped during build.
+-# Linode works without any API key.
+-
+-# ────────────────────────────────────────
+-# Linode (no API key required)
+-# Public endpoints, works out of the box.
+-# ────────────────────────────────────────
+-
+-# ────────────────────────────────────────
+-# DigitalOcean
+-# Get a read-only personal access token:
+-# https://cloud.digitalocean.com/account/api/tokens
+-# ────────────────────────────────────────
+-DIGITALOCEAN_API_KEY=
+-
+-# ────────────────────────────────────────
+-# Hetzner Cloud
+-# Create an API token (read-only) in any project:
+-# https://console.hetzner.cloud/ → Select project → Security → API Tokens
+-# ────────────────────────────────────────
+-HETZNER_API_KEY=
+-
+-# Include ARM-based servers (default: false)
+-HETZNER_INCLUDE_ARM=false
+-
+-# ────────────────────────────────────────
+-# Vultr
+-# Create an API key (enable only "subscriptions" scope for read-only):
+-# https://my.vultr.com/settings/#settingsapi
+-# ────────────────────────────────────────
+-VULTR_API_KEY=
+-
+-# ────────────────────────────────────────
+-# UpCloud
+-# Create a sub-account with API access:
+-# https://hub.upcloud.com/account → Sub-accounts
+-# ────────────────────────────────────────
+-UPCLOUD_USERNAME=
+-UPCLOUD_PASSWORD=
+-
+-# ────────────────────────────────────────
+-# Scaleway
+-# Generate an API key (secret key):
+-# https://console.scaleway.com/project/credentials
+-# ────────────────────────────────────────
+-SCALEWAY_API_KEY=
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+index d5846c7..e4b4da1 100644
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -53,10 +53,12 @@ jobs:
+       - name: Build site
+         run: npm run build
+         env:
+-          # Note: API keys are not required for build to succeed
+-          # Loaders will skip providers if keys are not set
+           DIGITALOCEAN_API_KEY: ${{ secrets.DIGITALOCEAN_API_KEY }}
+           HETZNER_API_KEY: ${{ secrets.HETZNER_API_KEY }}
++          VULTR_API_KEY: ${{ secrets.VULTR_API_KEY }}
++          UPCLOUD_USERNAME: ${{ secrets.UPCLOUD_USERNAME }}
++          UPCLOUD_PASSWORD: ${{ secrets.UPCLOUD_PASSWORD }}
++          SCALEWAY_API_KEY: ${{ secrets.SCALEWAY_API_KEY }}
+ 
+       - name: Check build output
+         run: |
+diff --git a/.github/workflows/deploy.yml b/.github/workflows/deploy.yml
+index 28b15fe..1644f8f 100644
+--- a/.github/workflows/deploy.yml
++++ b/.github/workflows/deploy.yml
+@@ -55,6 +55,10 @@ jobs:
+         env:
+           DIGITALOCEAN_API_KEY: ${{ secrets.DIGITALOCEAN_API_KEY }}
+           HETZNER_API_KEY: ${{ secrets.HETZNER_API_KEY }}
++          VULTR_API_KEY: ${{ secrets.VULTR_API_KEY }}
++          UPCLOUD_USERNAME: ${{ secrets.UPCLOUD_USERNAME }}
++          UPCLOUD_PASSWORD: ${{ secrets.UPCLOUD_PASSWORD }}
++          SCALEWAY_API_KEY: ${{ secrets.SCALEWAY_API_KEY }}
+       - name: Upload artifact
+         uses: actions/upload-pages-artifact@v3
+         with:
+diff --git a/.github/workflows/scheduled-tests.yml b/.github/workflows/scheduled-tests.yml
+index 6b987ae..f8de9cf 100644
+--- a/.github/workflows/scheduled-tests.yml
++++ b/.github/workflows/scheduled-tests.yml
+@@ -34,6 +34,10 @@ jobs:
+         env:
+           DIGITALOCEAN_API_KEY: ${{ secrets.DIGITALOCEAN_API_KEY }}
+           HETZNER_API_KEY: ${{ secrets.HETZNER_API_KEY }}
++          VULTR_API_KEY: ${{ secrets.VULTR_API_KEY }}
++          UPCLOUD_USERNAME: ${{ secrets.UPCLOUD_USERNAME }}
++          UPCLOUD_PASSWORD: ${{ secrets.UPCLOUD_PASSWORD }}
++          SCALEWAY_API_KEY: ${{ secrets.SCALEWAY_API_KEY }}
+ 
+       - name: Report build status
+         if: failure()
+diff --git a/scripts/check-providers.ts b/scripts/check-providers.ts
+index 7e18b0c..207f010 100644
+--- a/scripts/check-providers.ts
++++ b/scripts/check-providers.ts
+@@ -4,38 +4,16 @@
+  * Tests each VPS provider's API to verify credentials and connectivity.
+  *
+  * Usage:
+- *   npx tsx scripts/check-providers.ts
+  *   npm run check:providers
+  *
+- * Set API keys in .env (copy from .env.example) before running.
++ * API keys are read from environment variables.
++ * In CI, these come from GitHub Actions secrets.
++ *
++ * Required GitHub secrets:
++ *   DIGITALOCEAN_API_KEY, HETZNER_API_KEY, VULTR_API_KEY,
++ *   UPCLOUD_USERNAME, UPCLOUD_PASSWORD, SCALEWAY_API_KEY
+  */
+ 
+-import { readFileSync } from 'fs';
+-import { resolve } from 'path';
+-
+-// Load .env file manually (no extra deps needed)
+-function loadEnv() {
+-  try {
+-    const envPath = resolve(process.cwd(), '.env');
+-    const content = readFileSync(envPath, 'utf-8');
+-    for (const line of content.split('\n')) {
+-      const trimmed = line.trim();
+-      if (!trimmed || trimmed.startsWith('#')) continue;
+-      const eqIndex = trimmed.indexOf('=');
+-      if (eqIndex === -1) continue;
+-      const key = trimmed.slice(0, eqIndex).trim();
+-      const value = trimmed.slice(eqIndex + 1).trim();
+-      if (!process.env[key]) {
+-        process.env[key] = value;
+-      }
+-    }
+-  } catch {
+-    // .env file doesn't exist, rely on environment variables
+-  }
+-}
+-
+-loadEnv();
+-
+ interface ProviderCheck {
+   name: string;
+   check: () => Promise<{ ok: boolean; plans: number; message: string }>;
+@@ -172,8 +150,8 @@ async function main() {
+   if (allOk) {
+     console.log('All providers connected successfully!');
+   } else {
+-    console.log('Some providers failed. Check your .env file.');
+-    console.log('Copy .env.example to .env and fill in your API keys.');
++    console.log('Some providers failed. Ensure the required environment variables are set.');
++    console.log('In GitHub Actions, add them as repository secrets.');
+   }
+ 
+   process.exit(allOk ? 0 : 1);

@@ -1,0 +1,548 @@
+From e5ac76922a35fcf8868d3fcb0b38a23f519bf3f6 Mon Sep 17 00:00:00 2001
+From: "Nintu (agent)" <nintu@simple-host.local>
+Date: Sun, 27 Sep 2026 21:49:43 +0000
+Subject: [PATCH] Setup helper: UpCloud as the recommended place for a small
+ box; the agent prompt creates the server there; the installer comes from its
+ pinned release
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+"Where it runs" on the small box's Basics step: UpCloud (recommended, the
+default) or a server you already have. UpCloud shows why (the smallest server
+runs it; we test on it), a "Create your UpCloud account — $300 in credits"
+button to the referral link (new tab, rel=noopener) with the referral note
+under it, and the steps. The files step then leads with the agent block: a
+one-line command the person runs in their own terminal that reads the API
+user's name and password (unechoed) into UPCLOUD_USERNAME/UPCLOUD_PASSWORD,
+and a prompt that has their agent use upctl or the API from the environment
+only, create the smallest Ubuntu 24.04 server with their SSH key, add the DNS
+records (domain and wildcard), run the installer, check /healthz and HTTPS and
+report the admin page. The page never asks for UpCloud credentials. TARGETS
+now holds both small-box targets, so another platform is one more entry.
+
+The install command (page and prompt) fetches install.sh from the release it
+pins instead of main; a test keeps setup.js's INSTALLER_RELEASE equal to
+install.sh's VERSION. Pasted output also hides the password in curl -u /
+--user (page and server, shared case). The assistant knows the UpCloud path
+and its usual errors.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ internal/handler/askdata/setup-small-box.txt  |   2 +
+ .../askdata/setup-troubleshoot-small-box.txt  |   7 +
+ internal/handler/setuphelper_test.go          |  32 ++++
+ internal/handler/setupredact.go               |   3 +-
+ internal/handler/static/setup-helper.html     |   9 +
+ internal/handler/static/setup/assist.js       |   1 +
+ internal/handler/static/setup/setup.js        | 164 ++++++++++++++----
+ .../handler/testdata/setup-redact-cases.json  |   7 +-
+ scripts/e2e-setup-assist.js                   |  57 ++++--
+ 9 files changed, 239 insertions(+), 43 deletions(-)
+
+diff --git a/internal/handler/askdata/setup-small-box.txt b/internal/handler/askdata/setup-small-box.txt
+index 67963e61..ef446945 100644
+--- a/internal/handler/askdata/setup-small-box.txt
++++ b/internal/handler/askdata/setup-small-box.txt
+@@ -1,5 +1,7 @@
+ A small box is one server running Simple Host with Docker Compose: for self-hosting, a team, a class or a hackathon. It is meant for 1 CPU, 1 GB of RAM and about 25 GB of disk. The installer installs Docker, starts Simple Host with Caddy in front for certificates, prints the admin key once and keeps any settings added to its .env file when it is run again (which is also how you upgrade).
+ 
++Where to run it. Any fresh Ubuntu server with a public IPv4 address works. The page recommends UpCloud: its smallest server (1 CPU, 1 GB, about $5 a month) runs Simple Host comfortably and is what the project tests on. On the Basics step, "Where it runs" offers UpCloud (recommended) or a server you already have. For UpCloud the page has a "Create your UpCloud account — $300 in credits" button; it is a referral link, and the $300 credit is UpCloud's offer for new accounts through it, on their terms. The steps: create the account, create an API user in the UpCloud control panel (a sub-account with API access), answer the questions on the page, then on the files step run the one line the page gives in your own terminal (it asks for the API user's name and password and keeps them there as environment variables, UPCLOUD_USERNAME and its password) and give your AI agent the prompt. The agent creates the server with upctl or the UpCloud API, adds your SSH key, has you add the DNS records, runs the installer from its pinned release, checks health and HTTPS and reports the admin page. The page never asks for or accepts UpCloud credentials; never ask for them either.
++
+ Every default is what simple-host.app itself runs, except two the installer sets for a small disk: the largest site is 100 MB (MAX_ARCHIVE_MB, installer flag --max-site-mb) and one version is kept (KEEP_VERSIONS=1, flag --keep-versions), so there is no rollback unless you keep more.
+ 
+ Addresses. The box needs one domain it owns, like hack.example.com, and a second hostname for published sites, sites.<domain> by default, so a page someone publishes can never script the dashboard. Both point at the server with an A record each; ports 80 and 443 must be open. A small box has no per-person or per-site addresses (they need wildcard certificates): sites live at sites.<domain>/<handle>/<site>/.
+diff --git a/internal/handler/askdata/setup-troubleshoot-small-box.txt b/internal/handler/askdata/setup-troubleshoot-small-box.txt
+index 1c6ccbc2..b9ed86d8 100644
+--- a/internal/handler/askdata/setup-troubleshoot-small-box.txt
++++ b/internal/handler/askdata/setup-troubleshoot-small-box.txt
+@@ -11,6 +11,13 @@ The installer:
+ - "unknown argument": a flag the installer does not have; the flags are --host, --content, --email, --max-site-mb, --keep-versions.
+ - Docker could not be installed: the installer expects a fresh Ubuntu server with sudo.
+ 
++Creating the server at UpCloud:
++- "Authentication failed" or 401 from upctl or the API: UPCLOUD_USERNAME and UPCLOUD_PASSWORD are not set in the terminal the agent runs in, or name the main account instead of an API user, or the API user lacks API access (control panel: the sub-account's permissions, API connections allowed, and its IP allow-list if one is set). Set them again with the line the page gives, then restart the agent in that terminal.
++- TIER_INVALID when creating the server: the small plans take storage tier standard only; the message names the tier, but the fix is the tier, not the plan.
++- The disk is too small for the template: two templates are named Ubuntu Server 24.04 LTS, and the one with NVIDIA drivers and CUDA needs 20 GB. Take the plain one.
++- The plan is not found: plan names change; list the plans and take the smallest with 1 CPU and 1 GB of RAM.
++- SSH times out: use the server's public IPv4 address (access public, family IPv4), not the 10.x utility address, and wait until the server's state is started. If the server has UpCloud's firewall on, allow 22, 80 and 443.
++
+ Addresses and certificates:
+ - A browser shows a certificate error, or curl says "SSL certificate problem" or "tlsv1 alert internal error": Caddy has not got a certificate for that name. Causes: the name does not point at this server (dig +short <name> must print the server's public IPv4), ports 80 or 443 are closed (Let's Encrypt must reach the server on them; open both in the cloud firewall and on the server), or the name is not the box's own domain or sites hostname (certificates are only issued for names the app confirms). Read the caddy log for the name. After fixing DNS or the firewall, visit the name again; Caddy retries.
+ - Too many certificates requested: Let's Encrypt limits repeated requests for the same names; wait an hour before retrying, do not reinstall in a loop.
+diff --git a/internal/handler/setuphelper_test.go b/internal/handler/setuphelper_test.go
+index 6c812d3b..8e57675d 100644
+--- a/internal/handler/setuphelper_test.go
++++ b/internal/handler/setuphelper_test.go
+@@ -2,6 +2,8 @@ package handler
+ 
+ import (
+ 	"net/http"
++	"os"
++	"regexp"
+ 	"strings"
+ 	"testing"
+ 
+@@ -43,3 +45,33 @@ func TestSetupHelper(t *testing.T) {
+ 		}
+ 	}
+ }
++
++// The helper's install command fetches the installer from the release the
++// installer pins, so the two must name the same tag: bumping VERSION in
++// install.sh without setup.js would hand out an older installer.
++func TestSetupHelperInstallerRelease(t *testing.T) {
++	js, err := staticFiles.ReadFile("static/setup/setup.js")
++	if err != nil {
++		t.Fatal(err)
++	}
++	sh, err := os.ReadFile("../../deploy/install/install.sh")
++	if err != nil {
++		t.Fatal(err)
++	}
++	page := regexp.MustCompile(`var INSTALLER_RELEASE = '(v[0-9.]+)';`).FindSubmatch(js)
++	pinned := regexp.MustCompile(`(?m)^VERSION="(v[0-9.]+)"$`).FindSubmatch(sh)
++	if page == nil || pinned == nil {
++		t.Fatalf("release not found: setup.js %q, install.sh %q", page, pinned)
++	}
++	if string(page[1]) != string(pinned[1]) {
++		t.Errorf("setup.js INSTALLER_RELEASE = %s, install.sh pins %s", page[1], pinned[1])
++	}
++	if !strings.Contains(string(js), "'https://raw.githubusercontent.com/vineetu/simple-host/' + INSTALLER_RELEASE + '/deploy/install/install.sh'") {
++		t.Error("the install command must fetch install.sh from the pinned release, not a branch")
++	}
++	// The UpCloud button is the referral link, exactly, opened apart from
++	// this page.
++	if !strings.Contains(string(js), "var UPCLOUD_SIGNUP = 'https://signup.upcloud.com/?promo=JF2WCV';") {
++		t.Error("UPCLOUD_SIGNUP changed")
++	}
++}
+diff --git a/internal/handler/setupredact.go b/internal/handler/setupredact.go
+index 85cd77dd..8dca7e75 100644
+--- a/internal/handler/setupredact.go
++++ b/internal/handler/setupredact.go
+@@ -16,7 +16,7 @@ import (
+ // testdata/setup-redact-cases.json holds the cases both are tested against.
+ //
+ // What goes: private key and certificate blocks, passwords in URLs, bearer
+-// and basic credentials, the value of any assignment whose name ends in KEY,
++// and basic credentials, a password given to curl -u / --user, the value of any assignment whose name ends in KEY,
+ // SECRET, TOKEN, PASSWORD, DSN, SALT, HASH or CREDENTIAL(S) (env lines, YAML,
+ // JSON), the same NAME=value pairs inside a line (password=, token=,
+ // DB_PASSWORD=), JWTs, Simple Host keys and tokens
+@@ -34,6 +34,7 @@ var setupRedactRules = []setupRedactRule{
+ 	{re: regexp.MustCompile(`(?s)-----BEGIN ([A-Z0-9 ]+)-----.*?(?:-----END [A-Z0-9 ]+-----|$)`), with: "[redacted ${1}]"},
+ 	{re: regexp.MustCompile(`([A-Za-z][A-Za-z0-9+.-]*://)([^\t\n\f\r :/@]+):([^\t\n\f\r /@]+)@`), with: "${1}${2}:[redacted]@"},
+ 	{re: regexp.MustCompile(`(?i)\b(bearer|basic)([ \t]+)[A-Za-z0-9._~+/=-]{8,}`), with: "${1}${2}[redacted]"},
++	{re: regexp.MustCompile(`(?m)(^|[ \t])(-u|--user)([ \t]+|=)(?:(['"])([^\n:'"]+):[^\n'"]*|([^\t\n\f\r :'"]+):[^\t\n\f\r '"]+)`), with: "${1}${2}${3}${4}${5}${6}:[redacted]"},
+ 	{re: regexp.MustCompile(`(?im)^([ \t]*(?:export[ \t]+)?["']?[A-Za-z0-9_.-]*(?:key|secret|token|password|passwd|pwd|dsn|salt|hash|credentials?|key_id)["']?[ \t]*[:=][ \t]*)[^\t\n\f\r ].*$`), with: "${1}[redacted]"},
+ 	{re: regexp.MustCompile(`(?i)\b([A-Za-z0-9_.-]*(?:key|secret|token|password|passwd|pwd|dsn|salt|credentials?))=[^\t\n\f\r &;'",]+`), with: "${1}=[redacted]"},
+ 	{re: regexp.MustCompile(`\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}`), with: "[redacted token]"},
+diff --git a/internal/handler/static/setup-helper.html b/internal/handler/static/setup-helper.html
+index df16b179..da31aff6 100644
+--- a/internal/handler/static/setup-helper.html
++++ b/internal/handler/static/setup-helper.html
+@@ -81,6 +81,15 @@
+     .btn.solid { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+     .btn.solid:hover { background: var(--accent-hover); color: var(--on-accent); }
+     .btn.small { font-size: 13px; padding: 6px 12px; min-height: 34px; }
++    a.btn { display: inline-flex; align-items: center; text-decoration: none; }
++
++    /* Where it runs: the UpCloud recommendation */
++    .upcloud { border-top: 1px solid var(--border); padding-top: 16px; }
++    .btn.cta { font-size: 16px; padding: 12px 20px; min-height: 48px; box-shadow: 0 1px 2px rgba(15, 23, 42, .12); }
++    .btn.cta::after { content: "\2197"; content: "\2197" / ""; margin-left: 8px; font-weight: 400; }
++    .btn.cta:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
++    .fine { font-size: 12.5px; color: var(--text-secondary); line-height: 1.45; margin: 8px 0 14px; }
++    .fine-inline { font-size: 13px; color: var(--text-secondary); }
+ 
+     /* Output */
+     .out { margin: 0 0 22px; }
+diff --git a/internal/handler/static/setup/assist.js b/internal/handler/static/setup/assist.js
+index a2d24fb6..c5f612fe 100644
+--- a/internal/handler/static/setup/assist.js
++++ b/internal/handler/static/setup/assist.js
+@@ -36,6 +36,7 @@
+     [/-----BEGIN ([A-Z0-9 ]+)-----[\s\S]*?(?:-----END [A-Z0-9 ]+-----|$)/g, '[redacted $1]'],
+     [/([A-Za-z][A-Za-z0-9+.-]*:\/\/)([^\t\n\f\r :\/@]+):([^\t\n\f\r \/@]+)@/g, '$1$2:[redacted]@'],
+     [/\b(bearer|basic)([ \t]+)[A-Za-z0-9._~+\/=-]{8,}/gi, '$1$2[redacted]'],
++    [/(^|[ \t])(-u|--user)([ \t]+|=)(?:(['"])([^\n:'"]+):[^\n'"]*|([^\t\n\f\r :'"]+):[^\t\n\f\r '"]+)/gm, '$1$2$3$4$5$6:[redacted]'],
+     [/^([ \t]*(?:export[ \t]+)?["']?[A-Za-z0-9_.-]*(?:key|secret|token|password|passwd|pwd|dsn|salt|hash|credentials?|key_id)["']?[ \t]*[:=][ \t]*)[^\t\n\f\r ].*$/gim, '$1[redacted]'],
+     [/\b([A-Za-z0-9_.-]*(?:key|secret|token|password|passwd|pwd|dsn|salt|credentials?))=[^\t\n\f\r &;'",]+/gi, '$1=[redacted]'],
+     [/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g, '[redacted token]'],
+diff --git a/internal/handler/static/setup/setup.js b/internal/handler/static/setup/setup.js
+index 58c907d7..ab244186 100644
+--- a/internal/handler/static/setup/setup.js
++++ b/internal/handler/static/setup/setup.js
+@@ -12,7 +12,13 @@
+   'use strict';
+ 
+   var FILES = { small: '/setup/small-box-settings.json', ent: '/setup/enterprise-settings.json' };
+-  var INSTALL_URL = 'https://raw.githubusercontent.com/vineetu/simple-host/main/deploy/install/install.sh';
++  // The release the installer pins (VERSION in deploy/install/install.sh; a
++  // Go test keeps the two equal). The command fetches the installer from
++  // that tag, so what it installs is fixed, not whatever main holds that day.
++  var INSTALLER_RELEASE = 'v0.7.1';
++  var INSTALL_URL = 'https://raw.githubusercontent.com/vineetu/simple-host/' + INSTALLER_RELEASE + '/deploy/install/install.sh';
++  // Where a small box is recommended to run. A referral link: the page says so.
++  var UPCLOUD_SIGNUP = 'https://signup.upcloud.com/?promo=JF2WCV';
+   // What install.sh writes when its flag is not given (deploy/install/install.sh).
+   var INSTALLER_DEFAULTS = { KEEP_VERSIONS: '1', MAX_ARCHIVE_MB: '100' };
+ 
+@@ -48,7 +54,7 @@
+     values: { small: {}, ent: {} },      // NAME -> value, only where it differs from the default
+     secrets: { small: {}, ent: {} },     // NAME -> true: list it as a blank to fill in
+     basic: {
+-      small: { domain: '', content: '', email: '', codes: true, google: false, mailFrom: '', googleId: '' },
++      small: { where: 'upcloud', domain: '', content: '', email: '', codes: true, google: false, mailFrom: '', googleId: '' },
+       ent: { host: '', admins: '', idp: 'okta', issuer: IDPS[0].issuer, clientId: '', domains: '', certs: 'auto', issuerName: '',
+         smtp: false, smtpFrom: '', bucket: 'aws', endpoint: BUCKETS[0].endpoint, region: BUCKETS[0].region, bucketName: '',
+         creds: 'keys', dbHost: '', dbPort: '5432', dbName: 'simplehost', dbUser: 'simplehost' }
+@@ -281,10 +287,48 @@
+   var HOST = /^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{0,61}[a-z0-9]$/;
+   var EMAIL = /^[^\s@<>,"']+@[^\s@<>,"']+\.[^\s@<>,"']+$/;
+ 
++  // upcloudOffer is the recommendation: why, the sign-up button (a referral
++  // link, and the page says so) and what to do there.
++  function upcloudOffer() {
++    return el('div', { class: 'upcloud' }, [
++      el('p', { class: 'note', style: 'margin:0 0 12px', text: 'The smallest UpCloud server (1 CPU, 1 GB, about $5/month) runs Simple Host comfortably; we test on it.' }),
++      el('a', { class: 'btn solid cta', href: UPCLOUD_SIGNUP, target: '_blank', rel: 'noopener', text: 'Create your UpCloud account — $300 in credits' }),
++      el('p', { class: 'fine', text: 'Referral link. The $300 credit is UpCloud’s offer for new accounts through this link; their terms apply.' }),
++      el('ol', { class: 'steps' }, [
++        el('li', { text: 'Create your UpCloud account.' }),
++        el('li', { text: 'In the UpCloud control panel, create an API user: a sub-account with API access allowed. Its username and password stay with you; this page never asks for them.' }),
++        el('li', { text: 'Answer the questions on this page.' }),
++        el('li', { text: 'On the last step, set the API user in your terminal (the page gives the command) and copy the prompt into your AI agent. It creates the server, sets it up and checks it.' })
++      ])
++    ]);
++  }
++  function renderWhere(b) {
++    var more = el('div');
++    var draw = function () {
++      more.textContent = '';
++      more.appendChild(b.where === 'upcloud' ? upcloudOffer()
++        : el('p', { class: 'note', text: 'A fresh Ubuntu server (24.04 LTS) with 1 CPU, 1 GB of RAM and about 25 GB of disk, a public IPv4 address, ports 80 and 443 open, and SSH with sudo.' }));
++    };
++    draw();
++    return el('div', { class: 'card', id: 'where' }, [
++      el('h2', { text: 'Where it runs' }),
++      el('fieldset', null, [
++        el('legend', { class: 'note', text: 'Your own server, at a cloud provider or anywhere with a public address.' }),
++        el('div', { class: 'choices' }, [
++          choice('where', 'upcloud', b.where, 'UpCloud (recommended)', 'A new server there, created by your AI agent with your UpCloud API user.', function (v) { b.where = v; draw(); }),
++          choice('where', 'server', b.where, 'A server I already have', 'Any fresh Ubuntu server you can SSH into.', function (v) { b.where = v; draw(); })
++        ])
++      ]),
++      el('div', { style: 'height:14px' }),
++      more
++    ]);
++  }
++
+   function renderBasics() {
+     var box = el('div', { class: 'card' });
+     var b = S.basic[S.product];
+     if (S.product === 'small') {
++      app.appendChild(renderWhere(b));
+       box.appendChild(el('h2', { text: 'Your small box' }));
+       box.appendChild(el('p', { class: 'lede', text: 'Two names pointing at your server: one for Simple Host itself, one for the sites people publish. Keeping them apart means a published page can never reach the dashboard.' }));
+       box.appendChild(textField('domain', b, 'Domain', { name: 'SITE_DOMAIN · --host', placeholder: 'hack.example.com', help: byName('SITE_DOMAIN').description,
+@@ -535,7 +579,7 @@
+     if (p === 'small') {
+       var content = b.content || 'sites.' + b.domain;
+       var flags = ['--host', b.domain, '--content', content];
+-      chosen.push(['Domain', b.domain], ['Sites hostname', content]);
++      chosen.push(['Where it runs', targetOf('small').name], ['Domain', b.domain], ['Sites hostname', content]);
+       if (b.email) { flags.push('--email', b.email); chosen.push(['Certificate notices', b.email]); }
+       var env = [];
+       extra.forEach(function (n) {
+@@ -616,37 +660,76 @@
+   }
+ 
+   // ── Set it up with your AI agent ──
+-  // Where it runs. Each target is what the machine needs; the steps for its
+-  // product follow. Today each product has one; a "where do you want to run
+-  // it" step can add more (a VPS provider, Fly.io, Render, Railway, a
+-  // cloud's Kubernetes) here, each with its own needs and steps, and pick one.
++  // Where it runs. Each target is what the machine needs and, where the
++  // agent creates the machine, how. A small box offers UpCloud (the agent
++  // creates the server with the person's API user) or a server they already
++  // have; another platform is one more entry here and one more choice in
++  // renderWhere. Enterprise runs on the company's own cluster.
+   var TARGETS = {
+-    small: [{ id: 'server', needs: 'a fresh Ubuntu server with 1 CPU, 1 GB of RAM and about 25 GB of disk, a public IPv4 address, ports 80 and 443 open to the internet (in the cloud’s firewall too), and SSH with sudo' }],
+-    ent: [{ id: 'kubernetes', needs: 'the company’s Kubernetes cluster (1.30 or later) with an ingress controller and cert-manager, a managed Postgres with point-in-time recovery, and an S3-compatible bucket with versioning on' }]
++    small: [
++      { id: 'upcloud', name: 'UpCloud', needs: 'a new UpCloud server that you create in my UpCloud account: the smallest plan with 1 CPU and 1 GB of RAM, Ubuntu Server 24.04 LTS, a public IPv4 address' },
++      { id: 'server', name: 'Your own server', needs: 'a fresh Ubuntu server with 1 CPU, 1 GB of RAM and about 25 GB of disk, a public IPv4 address, ports 80 and 443 open to the internet (in the cloud’s firewall too), and SSH with sudo' }
++    ],
++    ent: [{ id: 'kubernetes', name: 'Kubernetes', needs: 'the company’s Kubernetes cluster (1.30 or later) with an ingress controller and cert-manager, a managed Postgres with point-in-time recovery, and an S3-compatible bucket with versioning on' }]
+   };
++  function targetOf(p) {
++    var list = TARGETS[p], want = p === 'small' ? S.basic.small.where : '';
++    for (var i = 0; i < list.length; i++) if (list[i].id === want) return list[i];
++    return list[0];
++  }
++  // UPCLOUD_CREDS is the line the person runs in their own terminal before
++  // starting their agent: it asks for the API user's name and password
++  // (the password without echo) and exports both, so they never pass through
++  // this page, the agent's chat or the shell history. bash and zsh alike.
++  var UPCLOUD_CREDS = "printf 'UpCloud API username: '; read -r UPCLOUD_USERNAME; printf 'UpCloud API password: '; stty -echo; read -r UPCLOUD_PASSWORD; stty echo; echo; export UPCLOUD_USERNAME UPCLOUD_PASSWORD";
++  // dnsNames are the A records the installer needs: the domain, and the
++  // sites hostname, which a wildcard covers when it sits under the domain.
++  function dnsRecords(domain, content) {
++    var recs = [domain, '*.' + domain];
++    if (content.slice(-(domain.length + 1)) !== '.' + domain) recs.push(content);
++    return recs;
++  }
+   var FENCE = '```';
+   // handoff is the whole block for the person's own AI agent: what the
+-  // machine needs, the steps with this page's files in them, how to check
+-  // the result, and where to get help. Secrets are blanks, as in the files.
++  // machine needs (and on UpCloud, how to create it), the steps with this
++  // page's files in them, how to check the result, and where to get help.
++  // Secrets are blanks, as in the files; UpCloud's credentials are only
++  // ever environment variables the person set in their own terminal.
+   function handoff(r, target) {
+-    var p = S.product, b = S.basic[p], t = target || TARGETS[p][0];
++    var p = S.product, b = S.basic[p], t = target || targetOf(p);
+     var origin = location.origin, product = p === 'small' ? 'small-box' : 'enterprise';
+-    var L = [];
+-    L.push(p === 'small' ? '# Set up Simple Host on a small box' : '# Set up Simple Host Enterprise on Kubernetes', '');
++    var L = [], n = 1;
++    L.push(p === 'small' ? (t.id === 'upcloud' ? '# Set up Simple Host on a small box at UpCloud' : '# Set up Simple Host on a small box') : '# Set up Simple Host Enterprise on Kubernetes', '');
+     L.push('These are instructions for you, my AI agent, from ' + origin + '/setup. Work through them in order. Stop at the first step that fails and show me its exact error. Never print, log or commit a secret: ask me for each secret value and put it straight into the file.', '');
+     L.push('Where it runs: ' + t.needs + '.', '');
+     if (p === 'small') {
+-      var content = b.content || 'sites.' + b.domain;
+-      L.push('1. DNS: ' + b.domain + ' and ' + content + ' each need an A record pointing at the server’s public IPv4 address. Check that `dig +short ' + b.domain + '` and `dig +short ' + content + '` both print it. Certificates are issued on the first visit, so both names must point here first.', '');
+-      L.push('2. Install: on the server, run this. It installs Docker, starts Simple Host and prints the admin key once: give the admin key to me and do not write it anywhere else.', '', FENCE + 'sh', r.cmd, FENCE, '');
+-      var n = 3;
++      var content = b.content || 'sites.' + b.domain, recs = dnsRecords(b.domain, content);
++      var ssh = '', host = 'the server';
++      if (t.id === 'upcloud') {
++        ssh = 'ssh -o StrictHostKeyChecking=accept-new -i ~/.ssh/simple-host root@<the server’s IPv4>';
++        L.push(n++ + '. UpCloud credentials: I created an API user in the UpCloud control panel (a sub-account with API access) and set its username and password in this terminal as UPCLOUD_USERNAME and UPCLOUD_PASSWORD before starting you. Use them only from the environment: never ask me to paste them into this chat, never print them, and never write them to a file, a log or a command line. Check with `test -n "$UPCLOUD_USERNAME" && test -n "$UPCLOUD_PASSWORD" && echo set`. If they are not set, stop and ask me to quit you, run this in the terminal, and start you again:', '', FENCE + 'sh', UPCLOUD_CREDS, FENCE, '');
++        L.push(n++ + '. Tools: use `upctl`, UpCloud’s command-line tool (https://github.com/UpCloudLtd/upcloud-cli; it reads those two variables), installing it if it is missing, or the API at https://api.upcloud.com/1.3 with `curl -u "$UPCLOUD_USERNAME:$UPCLOUD_PASSWORD"`. Confirm access with `upctl account show` (or `GET /1.3/account`). Check each command’s current flags with `--help` rather than guessing.', '');
++        L.push(n++ + '. SSH key: use ~/.ssh/simple-host if it exists; otherwise create it with `ssh-keygen -t ed25519 -N \'\' -f ~/.ssh/simple-host -C simple-host`. Never overwrite an existing key.', '');
++        L.push(n++ + '. Create the server:');
++        L.push('   - Plan: list the plans (`upctl server plans`, or `GET /1.3/plan`) and take the smallest with at least 1 CPU and 1 GB of RAM: STARTER-1xCPU-1GB today; if it is gone, its current equivalent. Tell me the plan and its monthly price before creating anything.');
++        L.push('   - Zone: list them (`upctl zone list`, or `GET /1.3/zone`) and ask me which one is nearest the people who will use it.');
++        L.push('   - Image: the plain Ubuntu Server 24.04 LTS template (`GET /1.3/storage/template`). Two templates carry that name; the one with NVIDIA drivers and CUDA needs a 20 GB disk, so take the other.');
++        L.push('   - Disk: the plan’s included storage size, tier `standard` (the small plans refuse any other tier with TIER_INVALID).');
++        L.push('   - Login user root with the public key ~/.ssh/simple-host.pub, metadata on, one public IPv4 interface, title and hostname simple-host.');
++        L.push('   - Create it once, then poll until its state is `started`. Its address is the one where access is `public` and family `IPv4` (never the 10.x utility address). Tell me the server’s UUID and address.');
++        L.push('   - UpCloud’s firewall is off for a new server. If it is on, allow ports 22, 80 and 443 in.', '');
++        host = 'the server (`' + ssh + '`)';
++      }
++      L.push(n++ + '. DNS: at my domain’s DNS provider these A records must point at the server’s public IPv4 address: ' + recs.join(', ') + (recs.length === 2 ? ' (the wildcard covers ' + content + ')' : '') + '. If you can manage that DNS provider from here, ask me before changing anything; otherwise tell me the exact records to add and wait for me. Check that `dig +short ' + b.domain + '` and `dig +short ' + content + '` both print the address. Certificates are issued on the first visit, so both names must point at the server first.', '');
++      L.push(n++ + '. Install: on ' + host + ', run this. It installs Docker, starts Simple Host from the release it pins (' + INSTALLER_RELEASE + ') and prints the admin key once: give the admin key to me and do not write it anywhere else.', '', FENCE + 'sh', r.cmd, FENCE, '');
+       if (r.env) {
+-        L.push(n++ + '. Settings: add these lines to the end of /opt/simple-host/.env (it needs sudo). Ask me for each blank value; do not invent one. Then run `cd /opt/simple-host && sudo docker compose up -d`.', '', FENCE, r.env.replace(/\n$/, ''), FENCE, '');
++        L.push(n++ + '. Settings: add these lines to the end of /opt/simple-host/.env on the server (it needs sudo). Ask me for each blank value; do not invent one. Then run `cd /opt/simple-host && sudo docker compose up -d`.', '', FENCE, r.env.replace(/\n$/, ''), FENCE, '');
+       }
+-      L.push(n + '. Check it works:');
++      L.push(n++ + '. Check it works:');
+       L.push('   - `curl -sS -o /dev/null -w \'%{http_code}\\n\' https://' + b.domain + '/healthz` prints 200.');
+-      L.push('   - `cd /opt/simple-host && sudo docker compose ps` shows every service running.');
++      L.push('   - `cd /opt/simple-host && sudo docker compose ps`, on the server, shows every service running.');
+       L.push('   - `curl -sS -o /dev/null -w \'%{http_code}\\n\' https://' + content + '/` prints a status code with no certificate error.', '');
++      L.push(n++ + '. Tell me: the admin page, https://' + b.domain + '/admin (it signs in with the admin key)' + (t.id === 'upcloud' ? ', the server’s UUID, address, plan and zone' : '') + '.', '');
+     } else {
+       L.push('1. Get the package: `git clone https://github.com/vineetu/simple-host-enterprise && cd simple-host-enterprise`. Its INSTALL.md is a runbook written for AI agents: follow it top to bottom, and use the two files below as the config.env and secrets.env it asks for. Name the kubectl context on every call.', '');
+       L.push('2. Save this as deploy/overlays/byo/config.env:', '', FENCE, r.config.replace(/\n$/, ''), FENCE, '');
+@@ -659,8 +742,8 @@
+       L.push('   - An admin signs in at https://' + b.host + '/auth/login.', '');
+     }
+     L.push(window.shSetupAssist
+-      ? 'If something fails and the output does not tell you how to fix it, tell me: I can paste the error at ' + origin + '/setup?product=' + product + '#help for help.'
+-      : 'If something fails and the output does not tell you how to fix it, tell me and show me the error.');
++      ? 'If anything fails and the output does not tell you how to fix it, tell me: I can paste the error at ' + origin + '/setup?product=' + product + '#help for help.'
++      : 'If anything fails and the output does not tell you how to fix it, tell me and show me the error.');
+     return L.join('\n') + '\n';
+   }
+ 
+@@ -789,11 +872,29 @@
+     else if (S.check.key !== key) { runCheck(pl, key); return; }
+     else if (S.check.state === 'running') { drawChecking(); return; }
+     else if (S.check.state === 'review') { renderReview(); return; }
+-    var r = build(), card = el('div', { class: 'card' });
++    var r = build(), card = el('div', { class: 'card', id: 'files' }), t = targetOf(S.product), agent = handoff(r);
+     if (S.check.note) app.appendChild(el('p', { class: 'check-note', role: 'status', text: S.check.note }));
++    // On UpCloud the agent does the work: its block comes first, with the
++    // command that sets the API user in the person's own terminal.
++    if (t.id === 'upcloud') {
++      app.appendChild(el('div', { class: 'card', id: 'agent' }, [
++        el('h2', { text: 'Set it up on UpCloud with your AI agent' }),
++        el('p', { class: 'note', style: 'margin:0 0 4px', text: 'Your agent creates the server in your UpCloud account, points your names at it, installs Simple Host with your choices and checks it. It asks you before spending anything and for every secret.' }),
++        el('ol', { class: 'steps' }, [
++          el('li', null, ['An UpCloud account with an API user (a sub-account with API access). No account yet? ',
++            el('a', { href: UPCLOUD_SIGNUP, target: '_blank', rel: 'noopener', text: 'Create your UpCloud account' }),
++            el('span', { class: 'fine-inline', text: ' (referral link: $300 in credits for new accounts; their terms apply)' }), '.']),
++          el('li', { text: 'In the terminal you use your agent in, run this. It asks for the API user’s name and password (the password is not shown) and keeps them in that terminal only: not on this page, not in your agent’s chat, not in your shell history.' })
++        ]),
++        block('In your terminal', UPCLOUD_CREDS),
++        el('ol', { class: 'steps', start: '3' }, [el('li', { text: 'Start your AI agent in that terminal and give it this.' })]),
++        block('For your AI agent', agent, 'simple-host-setup.md')
++      ]));
++    }
+     if (S.product === 'small') {
+-      card.appendChild(el('h2', { text: 'Your small box' }));
++      card.appendChild(el('h2', { text: t.id === 'upcloud' ? 'Or do it by hand' : 'Your small box' }));
+       card.appendChild(el('ol', { class: 'steps' }, [
++        t.id === 'upcloud' ? el('li', { text: 'In the UpCloud control panel, create the server: the smallest plan with 1 CPU and 1 GB of RAM, the plain Ubuntu Server 24.04 LTS image, your SSH key.' }) : null,
+         el('li', null, ['Point ', el('code', { text: S.basic.small.domain }), ' and ', el('code', { text: S.basic.small.content || 'sites.' + S.basic.small.domain }),
+           ' at your server (an A record each), on a fresh Ubuntu server with ports 80 and 443 open.']),
+         el('li', { text: 'On the server, run the install command below. It installs Docker, starts Simple Host and prints the admin key once: keep it.' }),
+@@ -820,12 +921,13 @@
+       card.appendChild(block('secrets.env (the Secret, blanks to fill in)', r.secrets, 'secrets.env'));
+     }
+     app.appendChild(card);
+-    var agent = handoff(r);
+-    app.appendChild(el('div', { class: 'card', id: 'agent' }, [
+-      el('h2', { text: 'Set it up with your AI agent' }),
+-      el('p', { class: 'note', style: 'margin:0 0 4px', text: 'Rather have your AI agent do it? Copy this into the agent you use in your terminal. It has what the machine needs, every step with your files in it, and how to check the result. Secrets stay blanks: the agent asks you for them.' }),
+-      block('For your AI agent', agent, 'simple-host-setup.md')
+-    ]));
++    if (t.id !== 'upcloud') {
++      app.appendChild(el('div', { class: 'card', id: 'agent' }, [
++        el('h2', { text: 'Set it up with your AI agent' }),
++        el('p', { class: 'note', style: 'margin:0 0 4px', text: 'Rather have your AI agent do it? Copy this into the agent you use in your terminal. It has what the machine needs, every step with your files in it, and how to check the result. Secrets stay blanks: the agent asks you for them.' }),
++        block('For your AI agent', agent, 'simple-host-setup.md')
++      ]));
++    }
+     app.appendChild(el('div', { class: 'card' }, [
+       el('h2', { text: 'What you chose' }),
+       el('ul', { class: 'summary' }, r.chosen.map(function (c) { return el('li', null, [el('span', { text: c[0] }), el('span', { text: c[1] })]); })),
+diff --git a/internal/handler/testdata/setup-redact-cases.json b/internal/handler/testdata/setup-redact-cases.json
+index 5a515bfb..5f904e96 100644
+--- a/internal/handler/testdata/setup-redact-cases.json
++++ b/internal/handler/testdata/setup-redact-cases.json
+@@ -128,5 +128,10 @@
+   "name": "control characters",
+   "in": "ok\u0007\u001b[31mred\u001b[0m\ttab",
+   "out": "ok[31mred[0m\ttab"
++ },
++ {
++  "name": "UpCloud API user in a curl command and the environment",
++  "in": "+ curl -fsS -u apiuser:Tr0ub4dor https://api.upcloud.com/1.3/account\ncurl --user='apiuser:pa ss' https://x\nUPCLOUD_USERNAME=apiuser\nUPCLOUD_PASSWORD=Tr0ub4dor\nerror: AUTHENTICATION_FAILED Authentication failed using the given username and password.\ncurl -u \"$UPCLOUD_USERNAME:$UPCLOUD_PASSWORD\" https://api.upcloud.com/1.3/server",
++  "out": "+ curl -fsS -u apiuser:[redacted] https://api.upcloud.com/1.3/account\ncurl --user='apiuser:[redacted]' https://x\nUPCLOUD_USERNAME=apiuser\nUPCLOUD_PASSWORD=[redacted]\nerror: AUTHENTICATION_FAILED Authentication failed using the given username and password.\ncurl -u \"$UPCLOUD_USERNAME:[redacted]\" https://api.upcloud.com/1.3/server"
+  }
+-]
+\ No newline at end of file
++]
+diff --git a/scripts/e2e-setup-assist.js b/scripts/e2e-setup-assist.js
+index 38a8cde6..3ce4618d 100644
+--- a/scripts/e2e-setup-assist.js
++++ b/scripts/e2e-setup-assist.js
+@@ -113,12 +113,13 @@ async function enterprise(browser, width) {
+   await page.fill('#f-issuer', 'https://login.microsoftonline.com/0000-tenant/v2.0');
+   if (width < 600) await closeWithEscape(page);
+   await page.getByRole('button', { name: 'Show my files' }).click();
+-  await page.waitForSelector('pre');
+-  let cfg = await page.locator('pre').first().innerText();
++  await page.waitForSelector('#files pre');
++  let cfg = await page.locator('#files pre').first().innerText();
+   for (const line of ['SESSION_TTL=4h', 'SESSION_IDLE=15m', 'API_KEY_MAX_DAYS=30', 'NETWORK_ACCESS_APPROVALS=2', 'OIDC_ISSUER=https://login.microsoftonline.com/0000-tenant/v2.0']) {
+     assert(cfg.includes(line), 'config.env has ' + line);
+   }
+-  const agent = await page.locator('#agent pre').innerText();
++  const agent = await page.locator('#agent pre').last().innerText();
++  assert(await page.locator('#where').count() === 0 && !/UpCloud/.test(agent), 'Enterprise has no UpCloud step');
+   assert(/deploy\/overlays\/byo\/config\.env/.test(agent) && agent.includes('SESSION_TTL=4h') && agent.includes('/setup?product=enterprise#help') && agent.includes('OIDC_CLIENT_SECRET='), 'the block for your AI agent has the steps, the files, blanks for secrets and the help link');
+   assert(!/Claude|Codex|Cursor|ChatGPT/.test(agent + await page.locator('#agent').innerText()), 'the agent block names no vendor');
+   await page.locator('#agent').screenshot({ path: `${shots}/${tag}-files-agent.png` });
+@@ -131,7 +132,7 @@ async function enterprise(browser, width) {
+   assert(sent[sent.length - 1].message === 'Clean up my choices' && sent[sent.length - 1].choices.SESSION_IDLE === '15m', 'clean-up sends the current choices');
+   assert(await turn.locator('.sh-assist-item').count() === 1 && /SESSION_IDLE to 30m/.test(await turn.innerText()), 'clean-up offers a reset to the default');
+   await turn.getByRole('button', { name: /^Apply:/ }).click();
+-  cfg = await page.locator('pre').first().innerText();
++  cfg = await page.locator('#files pre').first().innerText();
+   assert(!/SESSION_IDLE/.test(cfg) && cfg.includes('SESSION_TTL=4h'), 'the files follow at once: SESSION_IDLE back to its default');
+   assert((await page.locator('.check-note').innerText()) === 'Updated with the assistant.', 'the files say they were updated, with no second check');
+   await shot(page, `${tag}-4-cleanup`);
+@@ -155,12 +156,34 @@ async function enterprise(browser, width) {
+   await page.close();
+ }
+ 
++// The small box's "Where it runs": UpCloud recommended and chosen, its
++// sign-up button the referral link (new tab, noopener) with the note beside
++// it, the steps, and nowhere on the page a field for a credential.
++async function upcloud(page, tag) {
++  assert(await page.getByRole('radio', { name: /UpCloud \(recommended\)/ }).isChecked(), 'UpCloud is the recommended choice, picked by default');
++  const btn = page.getByRole('link', { name: 'Create your UpCloud account — $300 in credits' });
++  assert(await btn.count() === 1, 'the sign-up button says what it gives');
++  assert(await btn.getAttribute('href') === 'https://signup.upcloud.com/?promo=JF2WCV', 'the button is the referral link, exactly');
++  assert(await btn.getAttribute('target') === '_blank' && /\bnoopener\b/.test(await btn.getAttribute('rel')), 'it opens in a new tab with rel=noopener');
++  const where = await page.locator('#where').innerText();
++  assert(where.includes('Referral link. The $300 credit is UpCloud’s offer for new accounts through this link; their terms apply.'), 'the referral note sits under it');
++  assert(where.includes('The smallest UpCloud server (1 CPU, 1 GB, about $5/month) runs Simple Host comfortably; we test on it.'), 'with one line on why');
++  assert(/create an API user/.test(where) && /copy the prompt into your AI agent/.test(where), 'and the steps: account, API user, this page, the prompt');
++  const creds = await page.evaluate(() => [...document.querySelectorAll('input, textarea, select')].filter(i => i.type !== 'radio' && i.type !== 'checkbox').filter(i => i.type === 'password' || /upcloud|password|token|secret|credential/i.test(i.id + ' ' + i.name + ' ' + (i.labels && i.labels[0] ? i.labels[0].textContent : ''))).map(i => i.id || i.name));
++  assert(creds.length === 0, 'no field on the page takes a credential: ' + creds.join(', '));
++  await page.locator('#where').screenshot({ path: `${shots}/${tag}-0-upcloud.png` });
++  await page.locator('label.choice', { hasText: 'A server I already have' }).click();
++  assert(await btn.count() === 0 && /fresh Ubuntu server/.test(await page.locator('#where').innerText()), 'a server of your own says what it needs instead');
++  await page.locator('label.choice', { hasText: 'UpCloud (recommended)' }).click();
++}
++
+ async function smallBox(browser, width) {
+   const page = await browser.newPage({ viewport: { width, height: width < 600 ? 844 : 900 } });
+   const sent = watch(page);
+   const tag = `small-box-${width}`;
+   await page.goto(base + '/setup?product=small-box');
+   await page.getByRole('button', { name: 'Next' }).click();
++  await upcloud(page, tag);
+   await page.fill('#f-domain', 'hack.example.com');
+   await openPanel(page);
+   await a11y(page, tag);
+@@ -180,10 +203,20 @@ async function smallBox(browser, width) {
+   await shot(page, `${tag}-3-applied`);
+   if (width < 600) await closeWithEscape(page);
+   await page.getByRole('button', { name: 'Show my files' }).click();
+-  await page.waitForSelector('pre');
+-  let env = await page.locator('pre').nth(1).innerText();
++  await page.waitForSelector('#files pre');
++  let env = await page.locator('#files pre').nth(1).innerText();
+   for (const line of ['RATE_LIMIT_UPLOAD=120,2s', 'RATE_LIMIT_STATE=240,250ms', 'MAX_SITES_PER_ACCOUNT=20']) assert(env.includes(line), '.env has ' + line);
+-  const agent = await page.locator('#agent pre').innerText();
++  assert(await page.locator('#agent').evaluate(n => n === document.querySelector('#app .card')), 'on UpCloud the block for your agent comes first');
++  const creds = await page.locator('#agent pre').first().innerText();
++  assert(/read -r UPCLOUD_USERNAME/.test(creds) && /stty -echo; read -r UPCLOUD_PASSWORD; stty echo/.test(creds) && /export UPCLOUD_USERNAME UPCLOUD_PASSWORD$/.test(creds) && !creds.includes('\n'), 'the terminal line asks for the API user and keeps the password unseen: ' + creds);
++  const agent = await page.locator('#agent pre').last().innerText();
++  const pinned = /curl -fsSL https:\/\/raw\.githubusercontent\.com\/vineetu\/simple-host\/v\d+\.\d+\.\d+\/deploy\/install\/install\.sh -o \/tmp\/install\.sh && sudo bash \/tmp\/install\.sh --host hack\.example\.com --content sites\.hack\.example\.com/;
++  assert(pinned.test(agent) && !/simple-host\/main\//.test(agent), 'the prompt runs the installer from the pinned release with this page\'s flags');
++  assert(pinned.test(await page.locator('#files pre').first().innerText()), 'so does the install command');
++  for (const want of ['UpCloud', 'UPCLOUD_USERNAME', 'upctl', 'STARTER-1xCPU-1GB', 'Ubuntu Server 24.04 LTS', 'tier `standard`', '~/.ssh/simple-host.pub', 'hack.example.com, *.hack.example.com', 'https://hack.example.com/admin', 'https://hack.example.com/healthz', 'root@<the server’s IPv4>'])
++    assert(agent.includes(want), 'the UpCloud prompt has ' + want);
++  assert(/never ask me to paste them into this chat, never print them, and never write them to a file/.test(agent), 'the prompt keeps the UpCloud credentials in the environment');
++  assert(!/UPCLOUD_PASSWORD=\S/.test(agent), 'the prompt holds no credential value');
+   assert(agent.includes('dig +short hack.example.com') && agent.includes('RATE_LIMIT_UPLOAD=120,2s') && agent.includes('/healthz') && agent.includes('/setup?product=small-box#help'), 'the block for your AI agent has DNS, the files, the checks and the help link');
+   await page.locator('#agent').screenshot({ path: `${shots}/${tag}-files-agent.png` });
+ 
+@@ -192,7 +225,7 @@ async function smallBox(browser, width) {
+   await page.waitForFunction(() => !document.querySelector('#sh-assist-panel[aria-busy]') && document.querySelectorAll('.sh-ask-turn').length === 3 && !document.querySelector('.sh-ask-turn:last-child .is-loading'));
+   turn = page.locator('.sh-ask-turn').last();
+   await turn.getByRole('button', { name: /^Apply:/ }).click();
+-  env = await page.locator('pre').nth(1).innerText();
++  env = await page.locator('#files pre').nth(1).innerText();
+   assert(!/RATE_LIMIT_STATE/.test(env) && env.includes('RATE_LIMIT_UPLOAD=120,2s'), 'clean-up applied: the files follow');
+   await shot(page, `${tag}-4-cleanup`);
+   await page.close();
+@@ -214,10 +247,14 @@ async function smallBox(browser, width) {
+   await help.locator('.sh-assist-item').getByRole('button', { name: /^Apply:/ }).click();
+   if (width < 600) await closeWithEscape(help); else await help.getByRole('button', { name: 'Close the assistant' }).click();
+   await help.getByRole('button', { name: 'Next' }).click();
++  await help.locator('label.choice', { hasText: 'A server I already have' }).click();
+   await help.fill('#f-domain', 'hack.example.com');
+   await help.getByRole('button', { name: 'Show my files' }).click();
+-  await help.waitForSelector('pre');
+-  assert((await help.locator('pre').first().innerText()).includes('--keep-versions 5'), 'the applied fix is in the install command');
++  await help.waitForSelector('#files pre');
++  assert((await help.locator('#files pre').first().innerText()).includes('--keep-versions 5'), 'the applied fix is in the install command');
++  const own = await help.locator('#agent pre').innerText();
++  assert(own.includes('--keep-versions 5') && !/UpCloud|upctl|UPCLOUD/.test(own) && own.includes('fresh Ubuntu server'), 'on a server of your own the prompt has no UpCloud steps');
++  assert(await help.locator('#files').evaluate(n => n === document.querySelector('#app .card')), 'and the files come first');
+   await help.close();
+ }
+ 

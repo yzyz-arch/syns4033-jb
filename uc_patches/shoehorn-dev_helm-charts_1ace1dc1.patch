@@ -1,0 +1,57 @@
+From 1ace1dc13508728e3f5008db90043013f70145d6 Mon Sep 17 00:00:00 2001
+From: Anders <anders@shoehorn.dev>
+Date: Sat, 5 Sep 2026 09:55:07 +0200
+Subject: [PATCH] Give the api and worker their UpCloud environment (#67)
+
+* fix(chart): add UpCloud token and API base URL support in deployment
+
+* fix(chart): enable UpCloud cloud provider janitor registration
+---
+ shoehorn/templates/deployment-api.yaml    |  9 +++++++++
+ shoehorn/templates/deployment-worker.yaml | 13 +++++++++++++
+ 2 files changed, 22 insertions(+)
+
+diff --git a/shoehorn/templates/deployment-api.yaml b/shoehorn/templates/deployment-api.yaml
+index b6fa58a..1bcdaa7 100644
+--- a/shoehorn/templates/deployment-api.yaml
++++ b/shoehorn/templates/deployment-api.yaml
+@@ -288,6 +288,15 @@ spec:
+         {{- include "shoehorn.secretRef" (dict "env" (printf "NOTIFICATIONS_SECRET_%s" (.name | upper)) "ref" .secretRef "root" $) | nindent 8 }}
+         {{- end }}
+ 
++        # Cloud providers
++        {{- if .Values.cloudProviders.upcloud.enabled }}
++        {{- include "shoehorn.secretRef" (dict "env" "UPCLOUD_TOKEN" "ref" .Values.cloudProviders.upcloud.tokenSecretRef "root" . "optional" true) | nindent 8 }}
++        {{- with .Values.cloudProviders.upcloud.apiBaseUrl }}
++        - name: UPCLOUD_API_BASE_URL
++          value: {{ . | quote }}
++        {{- end }}
++        {{- end }}
++
+         volumeMounts:
+         {{- include "shoehorn.extraVolumeMounts" . | nindent 8 }}
+         {{- include "shoehorn.grpcMtlsVolumeMounts" . | nindent 8 }}
+diff --git a/shoehorn/templates/deployment-worker.yaml b/shoehorn/templates/deployment-worker.yaml
+index a6a4f6e..a78311f 100644
+--- a/shoehorn/templates/deployment-worker.yaml
++++ b/shoehorn/templates/deployment-worker.yaml
+@@ -109,6 +109,19 @@ spec:
+           value: {{ .Values.global.mtls.caFile | quote }}
+         {{- end }}
+ 
++        # UpCloud: this flag alone is what registers the cloud-discovery janitor
++        # (cmd/worker/wiring.go gates SetCloudJanitorJob on it). Without it the
++        # janitor never registers, so entities the provider sync tombstoned as
++        # end-of-life are never hard-deleted and accumulate indefinitely.
++        #
++        # Deliberately no UPCLOUD_TOKEN here: the janitor is pure database
++        # cleanup (NewJanitor takes db, logger, rlsHelper, eventBus) and never
++        # calls the UpCloud API. Only the crawler needs the credential.
++        {{- if .Values.cloudProviders.upcloud.enabled }}
++        - name: CLOUD_PROVIDER_UPCLOUD_ENABLED
++          value: "true"
++        {{- end }}
++
+         {{- if .Values.global.mtls.enabled }}
+         volumeMounts:
+         {{- include "shoehorn.grpcMtlsVolumeMounts" . | nindent 8 }}

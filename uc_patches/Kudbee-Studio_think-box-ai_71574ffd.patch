@@ -1,0 +1,728 @@
+From 71574ffddd4f88256393ae71ea1558dc35826b24 Mon Sep 17 00:00:00 2001
+From: "kiloconnect[bot]" <240665456+kiloconnect[bot]@users.noreply.github.com>
+Date: Wed, 16 Sep 2026 18:48:27 +0000
+Subject: [PATCH] docs(agents): add skills + workflows
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Add 7 Kilo skills in .kilo/skills/:
+
+- rpo-assess — full project status assessment
+- upstash-vector-fix — debug and fix Upstash Vector write failures
+- upcloud-setup — UpCloud API token, SSH key, Floating IP setup
+- pr-workflow — create, review, merge PR conventions
+- test-validate — run, validate, interpret test results
+- burst-execute — THINK burst protocol execution
+- swarm-instrument — swarm experiments, TSSI, self-improvement
+
+Add Section 13 'Workflows' to AGENTS.md with 9 procedures:
+Session Start, RPO Assessment, Code Change → PR, Upstash Vector Debug,
+UpCloud Setup, THINK Burst Execution, Swarm Instrumentation, Test-Driven
+Development, Failure Recovery.
+
+Test count: 390 OK (1 skip). All unchanged.
+---
+ .kilo/skills/burst-execute/SKILL.md      |  66 +++++++++++
+ .kilo/skills/pr-workflow/SKILL.md        |  86 ++++++++++++++
+ .kilo/skills/rpo-assess/SKILL.md         |  70 +++++++++++
+ .kilo/skills/swarm-instrument/SKILL.md   |  71 ++++++++++++
+ .kilo/skills/test-validate/SKILL.md      |  52 +++++++++
+ .kilo/skills/upcloud-setup/SKILL.md      |  71 ++++++++++++
+ .kilo/skills/upstash-vector-fix/SKILL.md |  75 ++++++++++++
+ AGENTS.md                                | 142 +++++++++++++++++++++++
+ 8 files changed, 633 insertions(+)
+ create mode 100644 .kilo/skills/burst-execute/SKILL.md
+ create mode 100644 .kilo/skills/pr-workflow/SKILL.md
+ create mode 100644 .kilo/skills/rpo-assess/SKILL.md
+ create mode 100644 .kilo/skills/swarm-instrument/SKILL.md
+ create mode 100644 .kilo/skills/test-validate/SKILL.md
+ create mode 100644 .kilo/skills/upcloud-setup/SKILL.md
+ create mode 100644 .kilo/skills/upstash-vector-fix/SKILL.md
+
+diff --git a/.kilo/skills/burst-execute/SKILL.md b/.kilo/skills/burst-execute/SKILL.md
+new file mode 100644
+index 00000000..707d6bea
+--- /dev/null
++++ b/.kilo/skills/burst-execute/SKILL.md
+@@ -0,0 +1,66 @@
++# Skill: burst-execute
++
++**Description:** Execute THINK Burst protocol — bounded reasoning bursts on gpt-oss-20b
++
++# When to Use
++
++Use when running THINK burst evaluations — comparing reasoning vs disruptor outputs, capturing reasoning channels, and measuring model quality under bounded budgets.
++
++# Prerequisites
++
++- Valid governance token (burst refuses to start without one)
++- `openai/gpt-oss-20b` model available at `http://127.0.0.1:8001` (loopback only)
++- Auth: `Authorization: Bearer EMPTY`
++
++# Workflow
++
++## Step 1 — Offline Test
++
++```bash
++python3 examples/think_burst_demo.py
++python3 -m unittest tests.unit.test_burst -v
++```
++
++## Step 2 — Live Burst
++
++```bash
++python3 -m thinkbox.burst --live --pairs N --minutes M --max-calls C --budget X
++```
++
++Parameters:
++- `--pairs N` — number of reasoning/disruptor pairs
++- `--minutes M` — time limit
++- `--max-calls C` — hard stop on API calls
++- `--budget X` — hard stop on spend
++
++**The runner refuses to start without a governance token and hard-stops on any limit.**
++
++## Step 3 — Review Output
++
++Check:
++- Grounded vs ungrounded ratio
++- Reasoning channel capture (delta.reasoning / reasoning fields)
++- Governance token ID recorded per call
++- Evidence text in ActionLedger
++
++## Step 4 — Safety
++
++- **Never expose :8000/:8001 publicly**
++- Use HTTP/1.0 if curl hangs: `curl -sS --http1.0 -m 20 ...`
++- Founder starts and STOPS think-v2 (never terminates)
++- Cloud Bot / CloudShell holds SSM access
++
++# Environment Variables
++
++| Variable | Purpose |
++|----------|---------|
++| `THINKBOX_DEFAULT_PROVIDER` | Provider (openai_compat) |
++| `THINKBOX_DEFAULT_MODEL` | Model (gpt-oss-20b) |
++| Governance token | Required to start burst |
++
++# Rules
++
++- Never bind :8000/:8001 to public interfaces
++- Always use governance token — no anonymous bursts
++- Hard stops are enforced — do not bypass
++- Capture reasoning fields when present — never drop them
+diff --git a/.kilo/skills/pr-workflow/SKILL.md b/.kilo/skills/pr-workflow/SKILL.md
+new file mode 100644
+index 00000000..2a1d50e5
+--- /dev/null
++++ b/.kilo/skills/pr-workflow/SKILL.md
+@@ -0,0 +1,86 @@
++# Skill: pr-workflow
++
++**Description:** Create, review, and merge PRs following project conventions
++
++# When to Use
++
++Use for every code change — from bug fixes to features to docs updates.
++
++# Prerequisites
++
++- Working tree clean (commit or stash changes first)
++- Synced to latest main
++- Know the branch naming convention
++
++# Workflow
++
++## Step 1 — Sync to Main
++
++```bash
++git checkout main
++git pull origin main
++git checkout -b feat/descriptive-name
++```
++
++Branch naming: `feat/`, `fix/`, `docs/`, `refactor/`, `test/`, `chore/` prefix + short description.
++
++## Step 2 — Make Changes
++
++Follow AGENTS.md rules:
++- PEP 8, type hints on all public functions
++- Docstrings on all public classes and functions
++- No comments explaining what code does
++- All errors carry: agent_id, task_id, think_box_id, timestamp, error_type, context
++- Test every public function, every error path
++
++## Step 3 — Run Tests
++
++```bash
++python3 -m unittest discover tests/
++```
++
++All tests must pass (or have justified skips). Minimum acceptable: 390 OK.
++
++## Step 4 — Commit
++
++Conventional commit message:
++```
++type(scope): description
++```
++Types: `feat`, `fix`, `docs`, `refactor`, `test`, `chore`
++
++Example: `fix(upstash): embedder + vector upsert fail closed`
++
++## Step 5 — Push and Create PR
++
++```bash
++git push origin feat/descriptive-name
++```
++
++Create PR targeting `main`. Title matches commit message. Description includes:
++- What changed
++- Test results
++- Out of scope items
++- Verification steps
++
++## Step 6 — Wait for Review
++
++Do NOT merge without founder review. Do NOT create a second PR until the first is reviewed.
++
++## Step 7 — Merge
++
++After approval:
++```bash
++git checkout main
++git merge --no-ff feat/descriptive-name -m "Merge PR #N: description"
++git push origin main
++```
++
++# Rules
++
++- ONE PR AT A TIME. Do not merge. Stop after PR is open.
++- Never touch open draft PRs unless explicitly told.
++- Never reopen dead convoy branches (#28, #32).
++- No secrets in commits or PR descriptions.
++- No public binding of services.
++- PR descriptions must include test pass count.
+diff --git a/.kilo/skills/rpo-assess/SKILL.md b/.kilo/skills/rpo-assess/SKILL.md
+new file mode 100644
+index 00000000..4f37f964
+--- /dev/null
++++ b/.kilo/skills/rpo-assess/SKILL.md
+@@ -0,0 +1,70 @@
++# Skill: rpo-assess
++
++**Description:** Full project status assessment — infrastructure, code, tests, and blockers
++
++# When to Use
++
++Run this skill when you need a complete picture of where the project stands, what's broken, what's blocked, and what the next priorities are. Use it at session start, after merges, or when the user asks for a status update.
++
++# Workflow
++
++## Step 1 — Git State
++
++```bash
++git status
++git log --oneline -10
++git branch -vv
++```
++
++Record: current branch, working tree state, last 10 commits.
++
++## Step 2 — Test Results
++
++```bash
++python3 -m unittest discover tests/ 2>&1 | tail -5
++```
++
++Record: pass/fail count, skipped count, any errors.
++
++## Step 3 — Infrastructure Status
++
++Check each service from STATUS.md Access Inventory:
++
++| Service | Check |
++|---------|-------|
++| Inception Mercury 2 | `INCEPTION_API_KEY` present? Live call possible? |
++| Upstash Vector | `UPSTASH_VECTOR_REST_URL/TOKEN` present? Upsert works? |
++| Upstash Box | Preview live? |
++| UpCloud | Token valid? SSH key exists? IP reachable? |
++| OpenAI-compatible | Key set? Endpoint reachable? |
++
++## Step 4 — Known Defects
++
++Read `STATUS.md` Known defects section and `docs/PREP.md` Known defects table.
++
++## Step 5 — Priority Output
++
++Produce a numbered list:
++
++1. **P0** — Immediate blockers (infrastructure, credentials)
++2. **P1** — Test gaps, missing capabilities
++3. **P2** — Optimization, polish
++4. **P3** — Enhancement, nice-to-have
++
++# Output Format
++
++```
++BRANCH: <name>
++TESTS: <N> OK / <M> FAIL / <K> SKIP
++INFRA: <services OK> / <services blocked>
++DEFECTS: <N> open
++NEXT:
++1. <task>
++2. <task>
++```
++
++# Rules
++
++- Never invent test counts — run the tests.
++- Never hide defects — report them honestly.
++- If a service is untested, say "not verified."
+diff --git a/.kilo/skills/swarm-instrument/SKILL.md b/.kilo/skills/swarm-instrument/SKILL.md
+new file mode 100644
+index 00000000..b77af22b
+--- /dev/null
++++ b/.kilo/skills/swarm-instrument/SKILL.md
+@@ -0,0 +1,71 @@
++# Skill: swarm-instrument
++
++**Description:** Run swarm instrumentation, interpret TSSI scores, and identify improvements
++
++# When to Use
++
++Use when running swarm experiments, measuring improvement, or validating that swarm behavior is getting better over time.
++
++# Prerequisites
++
++- `thinkbox/experiments.py` available
++- `ExperimentStore` initialized (SQLite)
++- Live provider (Mercury 2) for real runs
++
++# Workflow
++
++## Step 1 — Verify Instrumentation (11 checks)
++
++```bash
++python3 experiments/verify_instrumentation.py --live
++```
++
++All 11 checks should pass (10 offline + 1 live).
++
++## Step 2 — Run Swarm
++
++```bash
++python3 experiments/big_swarm.py --primary 256 --validators 64 --concurrency 32 --arena
++```
++
++## Step 3 — Check Dashboard
++
++```bash
++python3 experiments/swarm_dashboard.py --port 8787
++```
++
++Mobile-first, stdlib, DB-backed view.
++
++## Step 4 — Interpret Results
++
++Key metrics from `verify_instrumentation.py`:
++
++| Metric | Current | Notes |
++|--------|---------|-------|
++| TSSI | 0.7318 | After 2 runs |
++| Learning curve | +0.0913 | Improvement per session |
++| Mercury 2 ceiling | ~24 rps | Single client, 0 errors to conc 64 |
++| Test count | 390 OK | Baseline |
++
++## Step 5 — Self-Improvement Loop
++
++The `SelfImprovementLoop` class (`thinkbox/experiments.py:299`) exists and is tested but NOT yet wired into automatic swarm runs. Current work: wire it so each run automatically evaluates, proposes improvements, retests, and records verdicts.
++
++# Ten Instruments
++
++1. Flight recorder — permanent per-worker records + proof chains
++2. Challenge arena — adversarial traps with detection/recovery
++3. TSSI + learning curve — strength index + session store
++4. Memory evolution — lifecycle (created → promoted/decayed)
++5. Proof-carrying decisions — evidence-based decisions
++6. Worker reputation — demonstrated performance scores
++7. A/B experiments — variants + self-improvement loop
++8. Cost/intelligence efficiency — tokens per insight
++9. Swarm genome — replay capability
++10. Self-improvement loop — weakest component → change → retest
++
++# Rules
++
++- Never fake metrics — all numbers must come from actual runs
++- Learning curve improvements must be measured, not assumed
++- Self-ImprovementLoop is NOT auto-wired yet — document as TODO
+diff --git a/.kilo/skills/test-validate/SKILL.md b/.kilo/skills/test-validate/SKILL.md
+new file mode 100644
+index 00000000..092e8a54
+--- /dev/null
++++ b/.kilo/skills/test-validate/SKILL.md
+@@ -0,0 +1,52 @@
++# Skill: test-validate
++
++**Description:** Run, validate, and interpret test results
++
++# When to Use
++
++Use before committing, after changes, and when investigating failures.
++
++# Workflow
++
++## Step 1 — Run All Tests
++
++```bash
++python3 -m unittest discover tests/ 2>&1 | tail -5
++```
++
++## Step 2 — Run Specific Module
++
++```bash
++python3 -m unittest tests.unit.test_session_tracker -v
++python3 -m unittest tests.unit.test_substrate -v
++python3 -m unittest tests.unit.test_swarm_instrumentation -v
++```
++
++## Step 3 — Interpret Results
++
++| Result | Meaning | Action |
++|--------|---------|--------|
++| OK | All tests pass | Safe to commit |
++| FAIL | Test assertion failed | Fix the code or fix the test (if test is wrong) |
++| ERROR | Unhandled exception | Debug and fix |
++| SKIP | Optional dependency absent | Expected, no action needed |
++
++## Step 4 — Test Count Baseline
++
++Current baseline: **390 tests OK, 1 skip** (optional fastapi/uvicorn in sandbox).
++
++If count drops significantly, investigate immediately.
++
++## Step 5 — New Test Requirements
++
++Every public function needs at least one test covering:
++- Valid input
++- Invalid input (fail-closed where appropriate)
++- Edge cases
++
++# Rules
++
++- Never commit with failing tests (unless documented as known issues)
++- Never skip tests to make the count look better
++- Test counts must be honest — document any expected skips
++- Run tests before and after every commit
+diff --git a/.kilo/skills/upcloud-setup/SKILL.md b/.kilo/skills/upcloud-setup/SKILL.md
+new file mode 100644
+index 00000000..34b68ac8
+--- /dev/null
++++ b/.kilo/skills/upcloud-setup/SKILL.md
+@@ -0,0 +1,71 @@
++# Skill: upcloud-setup
++
++**Description:** Set up UpCloud infrastructure — API token, SSH key, Floating IP
++
++# When to Use
++
++Use when UpCloud access is blocked (401 token, missing SSH key, Cloudflare block) or when setting up a stable endpoint for the dashboard.
++
++# Prerequisites
++
++- Access to UpCloud panel (https://upcloud.com)
++- Know the server hostname (e.g., `kudbee-host-v1`)
++- Know the server IP (e.g., `212.147.250.183`)
++
++# Workflow
++
++## Step 1 — API Token
++
++1. Log in to UpCloud panel
++2. Go to API keys section
++3. Create new API key
++4. Set `THINKBOX_UPCLOUD_API_TOKEN` env var
++5. Verify: `curl -s -H "Authorization: Bearer $THINKBOX_UPCLOUD_API_TOKEN" https://api.upcloud.com/v1/server`
++
++## Step 2 — SSH Key
++
++1. Generate or locate SSH key pair
++2. Upload public key to UpCloud panel (Server → SSH keys → Add)
++3. Place private key at `UPCLOUD_SSH_KEY_PATH` (default: `~/.ssh/kilo-upcloud`)
++4. Set permissions: `chmod 600 ~/.ssh/kilo-upcloud`
++5. Verify: `ssh -i ~/.ssh/kilo-upcloud root@$UPCLOUD_SERVER_IP`
++
++## Step 3 — Cloudflare Bypass
++
++If IP is behind Cloudflare (error 1003):
++1. Request direct IP access from UpCloud support, OR
++2. Use SSH tunnel instead of HTTP, OR
++3. Use Floating IP (not behind Cloudflare)
++
++## Step 4 — Floating IP (recommended)
++
++1. Purchase Floating IP from UpCloud (~$3.50/month)
++2. Assign to server in UpCloud panel
++3. Note the Floating IP address
++4. Dashboard URL: `http://FLOATING-IP:8787`
++5. Bookmark on phone
++
++## Step 5 — Verify Substrate Detection
++
++```python
++from thinkbox.substrate import detect_substrate
++print(detect_substrate())  # Should print "upcloud-gpu"
++```
++
++Requires `THINKBOX_UPCLOUD_API_TOKEN` env var set.
++
++# Environment Variables
++
++| Variable | Purpose |
++|----------|---------|
++| `THINKBOX_UPCLOUD_API_TOKEN` | UpCloud API key |
++| `UPCLOUD_SERVER_HOSTNAME` | Server hostname |
++| `UPCLOUD_SERVER_IP` | Server IP |
++| `UPCLOUD_SSH_KEY_PATH` | Path to SSH private key |
++| `UPCLOUD_SSH_USER` | SSH username (default: root) |
++
++# Rules
++
++- Never commit API tokens or SSH keys
++- Out of scope for KILO code: this is panel/infrastructure work
++- Floating IP is the recommended stable endpoint approach
+diff --git a/.kilo/skills/upstash-vector-fix/SKILL.md b/.kilo/skills/upstash-vector-fix/SKILL.md
+new file mode 100644
+index 00000000..3ecae2a2
+--- /dev/null
++++ b/.kilo/skills/upstash-vector-fix/SKILL.md
+@@ -0,0 +1,75 @@
++# Skill: upstash-vector-fix
++
++**Description:** Debug and fix Upstash Vector write failures
++
++# When to Use
++
++Use when Upstash Vector writes fail (HTTP 422, silent failures, or missing vectors in upsert payloads).
++
++# Prerequisites
++
++- Read `data/findings/thinkboxmd_upstash_vector_defect.md` first
++- Check `thinkbox/session.py::UpstashVectorSync` and `thinkbox/embedder.py`
++
++# Workflow
++
++## Step 1 — Verify Index Type
++
++```bash
++curl -X GET "$UPSTASH_VECTOR_REST_URL/info" \
++  -H "Authorization: Bearer $UPSTASH_VECTOR_REST_TOKEN"
++```
++
++Check: `indexType` — must be `DENSE` with matching `dimension`.
++
++## Step 2 — Verify Embedder
++
++```python
++from thinkbox.embedder import OpenAICompatEmbedder, DeterministicEmbedder
++# Production:
++embedder = OpenAICompatEmbedder()  # needs THINKBOX_OPENAI_COMPAT_API_KEY + BASE_URL
++# Test stub:
++embedder = DeterministicEmbedder()  # 1536-dim hash, test-only
++vectors = embedder.embed(["test"])
++assert len(vectors[0]) == 1536
++```
++
++## Step 3 — Verify Upsert Payload Shape
++
++```python
++from thinkbox.session import UpstashVectorSync, SessionContext
++sync = UpstashVectorSync(embedder=embedder)
++session = SessionContext("test", "local", "Ollama", "user")
++# Check payload includes "vector" field
++```
++
++The upsert payload must contain:
++- `id` — session ID
++- `vector` — list of 1536 floats
++- `metadata` — session info dict
++
++## Step 4 — Fix Failures
++
++If upsert fails with 422:
++1. Confirm vector is included in payload
++2. Confirm vector dimension matches index dimension
++3. Confirm embedder produces valid floats (not null, not strings)
++
++If no embedder available:
++1. Set `THINKBOX_OPENAI_COMPAT_API_KEY` and `THINKBOX_OPENAI_COMPAT_BASE_URL`
++2. Or pass `DeterministicEmbedder()` for tests
++3. **Never** run production upsert without a real embedder
++
++## Step 5 — Test
++
++```bash
++python3 -m unittest tests.unit.test_session_tracker.TestUpstashVectorSyncEmbedder -v
++```
++
++Expect: all 9 tests pass.
++
++# Rules
++
++- Fail closed: raise EmbeddingError, never return silent False
++- Never use DeterministicEmbedder in production
++- Always verify payload shape before claiming success
+diff --git a/AGENTS.md b/AGENTS.md
+index 0891781c..26f1a827 100644
+--- a/AGENTS.md
++++ b/AGENTS.md
+@@ -353,6 +353,148 @@ These rules are enforced by:
+ 
+ Violations are bugs. Fix them before merging.
+ 
++---
++
++## 13. Workflows
++
++Step-by-step procedures for common agent tasks. Every agent should know these by heart.
++
++---
++
++### 13.1 Session Start
++
++Every new agent session must:
++
++1. **Read AGENTS.md** (this file)
++2. **Read STATUS.md** — current project state
++3. **Read docs/PREP.md** — handoff & readiness brief
++4. **Check git state** — branch, working tree, last commits
++5. **Run tests** — `python3 -m unittest discover tests/`
++6. **Report** — current branch, test count, blockers
++
++---
++
++### 13.2 RPO Assessment
++
++Full project status check (see skill: `rpo-assess`):
++
++1. Check git state
++2. Run test suite
++3. Check infrastructure status (Inception, Upstash, UpCloud, OpenAI)
++4. Read known defects from STATUS.md and PREP.md
++5. Produce prioritized output:
++   - **P0** — Immediate blockers (infrastructure, credentials)
++   - **P1** — Test gaps, missing capabilities
++   - **P2** — Optimization, polish
++   - **P3** — Enhancement
++
++---
++
++### 13.3 Code Change → PR
++
++Full workflow (see skill: `pr-workflow`):
++
++1. Sync to main: `git checkout main && git pull`
++2. Branch: `git checkout -b feat/descriptive-name`
++3. Make changes following AGENTS.md coding rules
++4. Run tests — all must pass
++5. Commit with conventional message: `type(scope): description`
++6. Push and create ONE PR targeting main
++7. **STOP** — wait for founder review. Do not create another PR.
++8. After approval: merge with `--no-ff`, push main, stop.
++
++---
++
++### 13.4 Upstash Vector Debug
++
++Debug Upstash Vector write failures (see skill: `upstash-vector-fix`):
++
++1. Read `data/findings/thinkboxmd_upstash_vector_defect.md`
++2. Check index type: must be DENSE with matching dimension
++3. Verify embedder: `OpenAICompatEmbedder` (production) or `DeterministicEmbedder` (test-only)
++4. Verify upsert payload includes `vector` field (1536 floats)
++5. Fix fail-closed: raise `EmbeddingError`, never silent `False`
++6. Test: `python3 -m unittest tests.unit.test_session_tracker.TestUpstashVectorSyncEmbedder -v`
++
++---
++
++### 13.5 UpCloud Setup
++
++Set up UpCloud infrastructure (see skill: `upcloud-setup`):
++
++1. Create API token in UpCloud panel → `THINKBOX_UPCLOUD_API_TOKEN`
++2. Upload SSH public key → place private key at `UPCLOUD_SSH_KEY_PATH`
++3. Handle Cloudflare block → direct IP, SSH tunnel, or Floating IP
++4. (Recommended) Purchase Floating IP → stable dashboard endpoint
++5. Verify: `detect_substrate()` returns `upcloud-gpu`
++
++---
++
++### 13.6 THINK Burst Execution
++
++Run burst evaluations (see skill: `burst-execute`):
++
++1. Verify governance token available (required to start)
++2. Offline: `python3 examples/think_burst_demo.py`
++3. Live: `python3 -m thinkbox.burst --live --pairs N --minutes M --max-calls C --budget X`
++4. Capture reasoning fields — never drop `delta.reasoning` / `reasoning`
++5. Hard stops enforced — do not bypass limits
++6. Never expose :8000/:8001 publicly
++
++---
++
++### 13.7 Swarm Instrumentation
++
++Run swarm experiments (see skill: `swarm-instrument`):
++
++1. Verify instrumentation: `python3 experiments/verify_instrumentation.py --live` (expect 11/11)
++2. Run swarm: `python3 experiments/big_swarm.py --primary 256 --validators 64 --concurrency 32 --arena`
++3. Dashboard: `python3 experiments/swarm_dashboard.py --port 8787`
++4. Check metrics: TSSI, learning curve, Mercury 2 throughput
++5. Self-ImprovementLoop: exists but NOT auto-wired into runs (TODO)
++
++---
++
++### 13.8 Test-Driven Development
++
++Every change follows this pattern:
++
++1. **Write failing test first** — valid input, invalid input, edge case
++2. **Implement code** — make test pass
++3. **Refactor** — clean up, preserve all test passes
++4. **Verify** — full suite: `python3 -m unittest discover tests/`
++
++Minimum test counts by module:
++
++| Module | Minimum Tests |
++|--------|---------------|
++| `thinkbox/session.py` | 9 (embedder + upsert) |
++| `thinkbox/substrate.py` | 9 |
++| `core/providers/` | Per-provider |
++| All public functions | At least 1 each |
++| All error paths | At least 1 each |
++
++---
++
++### 13.9 Failure Recovery
++
++When something fails:
++
++1. **Do not hide it** — document in STATUS.md or findings
++2. **Classify the failure** — infrastructure, code, environment, external dependency
++3. **Determine scope** — does this block other work?
++4. **Fix or work around** — choose honestly
++5. **Record** — update docs, findings, STATUS.md
++6. **Test the fix** — prove it works
++
++Known failures to track:
++- Upstash Vector writes (422 dense index, no embedder) — FIXED in PR #67
++- UpCloud access (401 token, no SSH key, CF 1003) — PANEL WORK
++- `tests/e2e/` empty — TODO
++- Solana CLI not installed — environment issue
++
++---
++
+ ## Think-v2 (KUDBEE gpt-oss-20b) — Operational Note
+ 
+ Served model id: `openai/gpt-oss-20b` (NOT bare `gpt-oss-20b`).

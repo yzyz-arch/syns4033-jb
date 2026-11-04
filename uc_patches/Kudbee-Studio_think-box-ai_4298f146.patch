@@ -1,0 +1,22 @@
+From 4298f14646005a68c3cb4aa1b6fd39972815df1f Mon Sep 17 00:00:00 2001
+From: "kiloconnect[bot]" <240665456+kiloconnect[bot]@users.noreply.github.com>
+Date: Tue, 1 Sep 2026 11:53:54 +0000
+Subject: [PATCH] security: remove accidentally committed UpCloud API key
+
+Replace real UPCLOUD_API_KEY with placeholder in .env.example
+---
+ .env.example | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/.env.example b/.env.example
+index c4e99952..e4c062da 100644
+--- a/.env.example
++++ b/.env.example
+@@ -24,4 +24,4 @@ INCEPTION_API_KEY=
+ 
+ # ─── Cursor SDK (optional) ────────────────────────────────────
+ CURSOR_API_KEY=
+-UPCLOUD_API_KEY=ucat_REDACTED_KUDBEE_4298F146
+\ No newline at end of file
++UPCLOUD_API_KEY=ucat_your_key_here
+\ No newline at end of file

@@ -1,0 +1,2126 @@
+From a727e4082467b8bf402889d5ffecd883fa530b15 Mon Sep 17 00:00:00 2001
+From: jahru23 <jahru23@users.noreply.github.com>
+Date: Sun, 18 Oct 2026 10:18:45 +0700
+Subject: [PATCH] wip: fondasi mode SSH root+password (russh + reinstall.sh)
+
+- reinstall.rs: katalog 8 edisi Windows (ejaan dicek ke parser reinstall.sh), builder perintah + bootstrap detached, password lewat variabel lingkungan (tidak di argv), redaksi log, precheck + validasi KVM/RAM/disk/root
+- ssh.rs: klien russh (autentikasi password), exec dengan batas waktu, cek port TCP, sidik jari host key dicatat
+- 46 tes hijau (termasuk tes redaksi yang menangkap bug spasi di kode saya sendiri)
+Belum tersambung ke rute/worker; UpCloud belum dihapus.
+---
+ Cargo.lock       | 958 ++++++++++++++++++++++++++++++++++++++++++++++-
+ Cargo.toml       |   1 +
+ src/main.rs      |   2 +
+ src/reinstall.rs | 518 +++++++++++++++++++++++++
+ src/ssh.rs       | 168 +++++++++
+ 5 files changed, 1638 insertions(+), 9 deletions(-)
+ create mode 100644 src/reinstall.rs
+ create mode 100644 src/ssh.rs
+
+diff --git a/Cargo.lock b/Cargo.lock
+index 0a9a8bc..267258b 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -21,6 +21,7 @@ dependencies = [
+  "cipher",
+  "cpubits",
+  "cpufeatures 0.3.1",
++ "zeroize",
+ ]
+ 
+ [[package]]
+@@ -35,6 +36,7 @@ dependencies = [
+  "ctr",
+  "ctutils",
+  "ghash",
++ "zeroize",
+ ]
+ 
+ [[package]]
+@@ -67,6 +69,18 @@ version = "1.0.104"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
+ 
++[[package]]
++name = "argon2"
++version = "0.6.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "134c52ddac6d63c576bef8168db10c83c49c26444ecbc68060fef078925a901c"
++dependencies = [
++ "base64ct",
++ "blake2",
++ "cpufeatures 0.3.1",
++ "password-hash",
++]
++
+ [[package]]
+ name = "askama"
+ version = "0.16.1"
+@@ -250,6 +264,12 @@ dependencies = [
+  "syn 2.0.119",
+ ]
+ 
++[[package]]
++name = "base16ct"
++version = "1.0.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "fd307490d624467aa6f74b0eabb77633d1f758a7b25f12bceb0b22e08d9726f6"
++
+ [[package]]
+ name = "base64"
+ version = "0.22.1"
+@@ -262,6 +282,12 @@ version = "0.23.1"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "ac07cdecf99051d9a5238b80f35af32cdeba5b336e55d957b318b50137e18da5"
+ 
++[[package]]
++name = "base64ct"
++version = "1.8.3"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "2af50177e190e07a26ab74f8b1efbfe2ef87da2116221318cb1c2e82baf7de06"
++
+ [[package]]
+ name = "basic-toml"
+ version = "0.1.10"
+@@ -271,6 +297,17 @@ dependencies = [
+  "serde",
+ ]
+ 
++[[package]]
++name = "bcrypt-pbkdf"
++version = "0.11.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "144e573728da132683b9488acd528274c790e07fc06ff81ee29f9d8f8b1041e0"
++dependencies = [
++ "blowfish",
++ "pbkdf2",
++ "sha2 0.11.1",
++]
++
+ [[package]]
+ name = "bitflags"
+ version = "2.13.2"
+@@ -280,13 +317,22 @@ dependencies = [
+  "serde_core",
+ ]
+ 
++[[package]]
++name = "blake2"
++version = "0.11.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "5b5d4d889834ee8ecfc0f8426ad30faf7cdcb10f741a8e6d7224d95325479f6f"
++dependencies = [
++ "digest 0.11.3",
++]
++
+ [[package]]
+ name = "block-buffer"
+ version = "0.10.4"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "3078c7629b62d3f0439517fa394996acacc5cbc91c5a20d8c658e77abd503a71"
+ dependencies = [
+- "generic-array",
++ "generic-array 0.14.9",
+ ]
+ 
+ [[package]]
+@@ -294,10 +340,30 @@ name = "block-buffer"
+ version = "0.12.1"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "d2f6c7dbe95a6ed67ad9f18e57daf93a2f034c524b99fd2b76d18fdfeb6660aa"
++dependencies = [
++ "hybrid-array",
++ "zeroize",
++]
++
++[[package]]
++name = "block-padding"
++version = "0.4.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "710f1dd022ef4e93f8a438b4ba958de7f64308434fa6a87104481645cc30068b"
+ dependencies = [
+  "hybrid-array",
+ ]
+ 
++[[package]]
++name = "blowfish"
++version = "0.10.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "62ce3946557b35e71d1bbe07ec385073ce9eda05043f95de134eb578fcf1a298"
++dependencies = [
++ "byteorder",
++ "cipher",
++]
++
+ [[package]]
+ name = "bumpalo"
+ version = "3.20.3"
+@@ -316,6 +382,15 @@ version = "1.12.1"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
+ 
++[[package]]
++name = "cbc"
++version = "0.2.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "ce2dc9ee5f88d11e0beb842c88b33c8a5cf0d1329c4b19494af42b07dbfe8896"
++dependencies = [
++ "cipher",
++]
++
+ [[package]]
+ name = "cc"
+ version = "1.8.0"
+@@ -353,8 +428,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "65c35e4b699c7e15ccbe7ee35c005e4fc0a278d22238a2857e6ce2dadeda1b06"
+ dependencies = [
+  "cfg-if",
++ "cipher",
+  "cpufeatures 0.3.1",
+  "rand_core",
++ "zeroize",
+ ]
+ 
+ [[package]]
+@@ -380,6 +457,7 @@ dependencies = [
+  "block-buffer 0.12.1",
+  "crypto-common 0.2.2",
+  "inout",
++ "zeroize",
+ ]
+ 
+ [[package]]
+@@ -500,13 +578,30 @@ version = "0.8.23"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "a31eee39dddec8330830986fcd7625edb5a24ec90ea038215273bbc3adb08ac6"
+ 
++[[package]]
++name = "crypto-bigint"
++version = "0.7.5"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "1a52aa3fcda4e6302a9f48734f234d35d4721b96f8fe07d073f07ce9df4f0271"
++dependencies = [
++ "cpubits",
++ "ctutils",
++ "getrandom 0.4.3",
++ "hybrid-array",
++ "num-traits",
++ "rand_core",
++ "serdect",
++ "subtle",
++ "zeroize",
++]
++
+ [[package]]
+ name = "crypto-common"
+ version = "0.1.6"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "1bfb12502f3fc46cca1bb51ac28df9d618d813cdc3d2f25b9fe775a34af26bb3"
+ dependencies = [
+- "generic-array",
++ "generic-array 0.14.9",
+  "typenum",
+ ]
+ 
+@@ -521,6 +616,16 @@ dependencies = [
+  "rand_core",
+ ]
+ 
++[[package]]
++name = "crypto-primes"
++version = "0.7.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "3633a51a39c69ebbaa4feaa694bd83d241e4093901c84a0963b19d9bb3f0cf8f"
++dependencies = [
++ "crypto-bigint",
++ "rand_core",
++]
++
+ [[package]]
+ name = "ctr"
+ version = "0.10.1"
+@@ -537,6 +642,63 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "03bb0e1cc970d482d121d9a1744999169b69a07470b3d644a7894e53fcaf4574"
+ dependencies = [
+  "cmov",
++ "subtle",
++]
++
++[[package]]
++name = "curve25519-dalek"
++version = "5.0.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "b5eed333089e2e1c1ac8c6c0398e5e2497b4c9926ca6d0365ed1e099afa5bc23"
++dependencies = [
++ "cfg-if",
++ "cpufeatures 0.3.1",
++ "curve25519-dalek-derive",
++ "digest 0.11.3",
++ "fiat-crypto",
++ "rand_core",
++ "rustc_version",
++ "subtle",
++ "zeroize",
++]
++
++[[package]]
++name = "curve25519-dalek-derive"
++version = "0.1.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "f46882e17999c6cc590af592290432be3bce0428cb0d5f8b6715e4dc7b383eb3"
++dependencies = [
++ "proc-macro2",
++ "quote",
++ "syn 2.0.119",
++]
++
++[[package]]
++name = "data-encoding"
++version = "2.11.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "4583a4551df46e2792f82ceeac45e850d2e2d5debba0b91f102385cda5b11f06"
++
++[[package]]
++name = "delegate"
++version = "0.13.5"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "780eb241654bf097afb00fc5f054a09b687dad862e485fdcf8399bb056565370"
++dependencies = [
++ "proc-macro2",
++ "quote",
++ "syn 2.0.119",
++]
++
++[[package]]
++name = "der"
++version = "0.8.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "a878c850e9e421b20262e9b41f9c860e4785fa07541c266b62ff9d1ef998a80a"
++dependencies = [
++ "const-oid",
++ "pem-rfc7468",
++ "zeroize",
+ ]
+ 
+ [[package]]
+@@ -545,6 +707,15 @@ version = "0.5.9"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "9e9de72ce2ad1f90dc62fa25f0f430ef85eb4b0d8fa0be4f30373bc40a21d28e"
+ 
++[[package]]
++name = "des"
++version = "0.9.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "916a94e407b54f9034d71dd748234cd1e516ced6284009906ae246f177eafe5a"
++dependencies = [
++ "cipher",
++]
++
+ [[package]]
+ name = "digest"
+ version = "0.10.7"
+@@ -590,6 +761,47 @@ version = "1.0.5"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "92773504d58c093f6de2459af4af33faa518c13451eb8f2b5698ed3d36e7c813"
+ 
++[[package]]
++name = "ecdsa"
++version = "0.17.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "c0681a4fc24c767085329728d8dfba959af91228aa4610cca4f8ce317ba46ae0"
++dependencies = [
++ "der",
++ "digest 0.11.3",
++ "elliptic-curve",
++ "rfc6979",
++ "signature",
++ "spki",
++ "zeroize",
++]
++
++[[package]]
++name = "ed25519"
++version = "3.0.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "29fcf32e6c73d1079f83ab4d782de2d81620346a5f38c6237a86a22f8368980a"
++dependencies = [
++ "pkcs8",
++ "signature",
++]
++
++[[package]]
++name = "ed25519-dalek"
++version = "3.0.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "6ebaa1a2bf1290ab3bfe5a7b771d050ebffab2711c19a81691c683a5144a25de"
++dependencies = [
++ "curve25519-dalek",
++ "ed25519",
++ "rand_core",
++ "serde",
++ "sha2 0.11.1",
++ "signature",
++ "subtle",
++ "zeroize",
++]
++
+ [[package]]
+ name = "either"
+ version = "1.19.0"
+@@ -599,6 +811,28 @@ dependencies = [
+  "serde",
+ ]
+ 
++[[package]]
++name = "elliptic-curve"
++version = "0.14.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "9d65aa39b3a5c1c9c1b745c9a019234bb7a21b77abcb4f4d266d706e2d577d65"
++dependencies = [
++ "base16ct",
++ "crypto-bigint",
++ "crypto-common 0.2.2",
++ "digest 0.11.3",
++ "ff",
++ "group",
++ "hkdf",
++ "hybrid-array",
++ "pem-rfc7468",
++ "pkcs8",
++ "rand_core",
++ "sec1",
++ "subtle",
++ "zeroize",
++]
++
+ [[package]]
+ name = "encoding_rs"
+ version = "0.8.42"
+@@ -613,6 +847,18 @@ dependencies = [
+  "simdutf8",
+ ]
+ 
++[[package]]
++name = "enum_dispatch"
++version = "0.3.13"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "aa18ce2bc66555b3218614519ac839ddb759a7d6720732f979ef8d13be147ecd"
++dependencies = [
++ "once_cell",
++ "proc-macro2",
++ "quote",
++ "syn 2.0.119",
++]
++
+ [[package]]
+ name = "equivalent"
+ version = "1.0.3"
+@@ -649,6 +895,22 @@ dependencies = [
+  "pin-project-lite",
+ ]
+ 
++[[package]]
++name = "ff"
++version = "0.14.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "a1f686ab92a9fb0eaf188f6c6c87b89490baa6fdb0db4544ba4dc47f7942489f"
++dependencies = [
++ "rand_core",
++ "subtle",
++]
++
++[[package]]
++name = "fiat-crypto"
++version = "0.3.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "64cd1e32ddd350061ae6edb1b082d7c54915b5c672c389143b9a63403a109f24"
++
+ [[package]]
+ name = "find-msvc-tools"
+ version = "0.1.14"
+@@ -693,6 +955,21 @@ version = "1.3.0"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "42703706b716c37f96a77aea830392ad231f44c9e9a67872fa5548707e11b11c"
+ 
++[[package]]
++name = "futures"
++version = "0.3.34"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "9a31d2a3fbaaeb2af2368bbdd904aa8e812d3c04a1ee10d3171f52d556e5d0a3"
++dependencies = [
++ "futures-channel",
++ "futures-core",
++ "futures-executor",
++ "futures-io",
++ "futures-sink",
++ "futures-task",
++ "futures-util",
++]
++
+ [[package]]
+ name = "futures-channel"
+ version = "0.3.34"
+@@ -737,6 +1014,17 @@ version = "0.3.34"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "53c0fa8157de1303bfffdaa1cc2a673bfffb60102f76b0ef4441659124373fed"
+ 
++[[package]]
++name = "futures-macro"
++version = "0.3.34"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "9fb9654ba8355388abeb8dcb4fc62f511300867002afc858860463bdd9fe0c44"
++dependencies = [
++ "proc-macro2",
++ "quote",
++ "syn 3.0.9",
++]
++
+ [[package]]
+ name = "futures-sink"
+ version = "0.3.34"
+@@ -755,8 +1043,10 @@ version = "0.3.34"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "0d50a92467f8ba5dd6e3ee5d4bd04d73ab2e4e1c44474a0674821dfce14b79bc"
+ dependencies = [
++ "futures-channel",
+  "futures-core",
+  "futures-io",
++ "futures-macro",
+  "futures-sink",
+  "futures-task",
+  "memchr",
+@@ -774,6 +1064,17 @@ dependencies = [
+  "version_check",
+ ]
+ 
++[[package]]
++name = "generic-array"
++version = "1.4.5"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "337d46834ee672ab3e48caca2cb0c78cc174fb12b3a68d0d88f99a0519a5e36e"
++dependencies = [
++ "generic-array 0.14.9",
++ "rustversion",
++ "typenum",
++]
++
+ [[package]]
+ name = "getrandom"
+ version = "0.2.17"
+@@ -808,6 +1109,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "2eecf2d5dc9b66b732b97707a0210906b1d30523eb773193ab777c0c84b3e8d5"
+ dependencies = [
+  "polyval",
++ "zeroize",
+ ]
+ 
+ [[package]]
+@@ -816,6 +1118,17 @@ version = "0.3.4"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "e4eba85ea1d0a966a983acd07deee566e67395d2d96b6fb39e62b5a833f1eb0b"
+ 
++[[package]]
++name = "group"
++version = "0.14.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "7fd1a1c7a5206c5b7a3f5a0d7ccd3ff85d0c8f5133d62a02680255b0004af5f4"
++dependencies = [
++ "ff",
++ "rand_core",
++ "subtle",
++]
++
+ [[package]]
+ name = "h2"
+ version = "0.4.20"
+@@ -873,6 +1186,12 @@ version = "0.4.3"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
+ 
++[[package]]
++name = "hex-literal"
++version = "1.1.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "e712f64ec3850b98572bffac52e2c6f282b29fe6c5fa6d42334b30be438d95c1"
++
+ [[package]]
+ name = "hkdf"
+ version = "0.13.0"
+@@ -942,7 +1261,10 @@ version = "0.4.15"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "27f864f10dfb56725ce5ce5472bc52252c8f93a4ab86327122cebf62c5f59a17"
+ dependencies = [
++ "ctutils",
++ "subtle",
+  "typenum",
++ "zeroize",
+ ]
+ 
+ [[package]]
+@@ -1150,6 +1472,7 @@ version = "0.2.4"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "3ce983bb6fb399067d101fbfc9e74174e07e9f29a2bc679efefeb8c645819c3f"
+ dependencies = [
++ "block-padding",
+  "hybrid-array",
+ ]
+ 
+@@ -1230,6 +1553,26 @@ dependencies = [
+  "wasm-bindgen",
+ ]
+ 
++[[package]]
++name = "keccak"
++version = "0.2.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "d8f198d1db720e4940b5a493201d199d9f24f568f8f746bd13706243a2f71598"
++dependencies = [
++ "cfg-if",
++ "cpufeatures 0.3.1",
++]
++
++[[package]]
++name = "kem"
++version = "0.3.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "01737161ba802849cfd486b5bd209d38ba4943494c249a8126005170c7621edd"
++dependencies = [
++ "crypto-common 0.2.2",
++ "rand_core",
++]
++
+ [[package]]
+ name = "lazy_static"
+ version = "1.5.1"
+@@ -1305,6 +1648,12 @@ dependencies = [
+  "digest 0.11.3",
+ ]
+ 
++[[package]]
++name = "md5"
++version = "0.8.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "7ebb8d8732c6a6df3d8f032a82911cfc747e00efb95cc46e8d0acd5b5b88570c"
++
+ [[package]]
+ name = "memchr"
+ version = "2.8.3"
+@@ -1328,12 +1677,50 @@ dependencies = [
+  "windows-sys 0.61.2",
+ ]
+ 
++[[package]]
++name = "ml-kem"
++version = "0.3.3"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "a9ba01ebcf90f6aff8e9b9f55bb69b19e6250e4ade5787d0040eaa27dd226238"
++dependencies = [
++ "hybrid-array",
++ "kem",
++ "module-lattice",
++ "pkcs8",
++ "rand_core",
++ "sha3",
++ "shake",
++]
++
++[[package]]
++name = "module-lattice"
++version = "0.2.3"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "0c61b87c9683ab7cb1c6871d261ad5479b6b10ceb52c4352aaca3b5d35a8febe"
++dependencies = [
++ "ctutils",
++ "hybrid-array",
++ "num-traits",
++]
++
+ [[package]]
+ name = "multiversion_no_op"
+ version = "1.0.0"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "743fb55ba31b18fb1ecef6bdc9aa2743314978ac084044301a7eee33fb99a20d"
+ 
++[[package]]
++name = "nix"
++version = "0.31.3"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "cf20d2fde8ff38632c426f1165ed7436270b44f199fc55284c38276f9db47c3d"
++dependencies = [
++ "bitflags",
++ "cfg-if",
++ "cfg_aliases",
++ "libc",
++]
++
+ [[package]]
+ name = "nu-ansi-term"
+ version = "0.50.3"
+@@ -1343,12 +1730,33 @@ dependencies = [
+  "windows-sys 0.61.2",
+ ]
+ 
++[[package]]
++name = "num-bigint"
++version = "0.5.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "93e7820bc0a80a0238e650327316f929ba18d5be054b647490a3a6a339f3e7c0"
++dependencies = [
++ "num-integer",
++ "num-traits",
++ "rand",
++ "rand_core",
++]
++
+ [[package]]
+ name = "num-conv"
+ version = "0.2.2"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "521739c6d2bac4aa25192232afe6841231376b2b26d4d9fae5ecf8ca5772e441"
+ 
++[[package]]
++name = "num-integer"
++version = "0.1.47"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "7ce2d95d4b3734dc35aa2f45e1aa22cd416814592a4f9d9205e11affd5b8e10b"
++dependencies = [
++ "num-traits",
++]
++
+ [[package]]
+ name = "num-traits"
+ version = "0.2.19"
+@@ -1370,6 +1778,67 @@ version = "0.2.1"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "7c87def4c32ab89d880effc9e097653c8da5d6ef28e6b539d313baaacfbafcbe"
+ 
++[[package]]
++name = "p256"
++version = "0.14.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "d2c9239b2dbc807adbbe147e8cf72ea7450c3a0aabe62cb8e75ff4ec22e1f72a"
++dependencies = [
++ "ecdsa",
++ "elliptic-curve",
++ "primefield",
++ "primeorder",
++ "sha2 0.11.1",
++]
++
++[[package]]
++name = "p384"
++version = "0.14.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "d17b851e6b3e378ab4ecb07fa2ed23f4d15f075735f8fec9fa1e7bdce5f8301f"
++dependencies = [
++ "ecdsa",
++ "elliptic-curve",
++ "fiat-crypto",
++ "primefield",
++ "primeorder",
++ "sha2 0.11.1",
++]
++
++[[package]]
++name = "p521"
++version = "0.14.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "4ad64cc32c2dc466317c12ee5853e61f159f9eab1fe7efade0395dc2e7b43449"
++dependencies = [
++ "base16ct",
++ "ecdsa",
++ "elliptic-curve",
++ "primefield",
++ "primeorder",
++ "sha2 0.11.1",
++]
++
++[[package]]
++name = "pageant"
++version = "0.2.4"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "f0786409b5aaa884655c9b4065681db0835db0cc185a6fb19fb17a5d38656866"
++dependencies = [
++ "base16ct",
++ "byteorder",
++ "bytes",
++ "delegate",
++ "futures",
++ "log",
++ "rand",
++ "sha2 0.11.1",
++ "thiserror 2.0.21",
++ "tokio",
++ "windows",
++ "windows-strings",
++]
++
+ [[package]]
+ name = "parking"
+ version = "2.2.1"
+@@ -1400,16 +1869,93 @@ dependencies = [
+ ]
+ 
+ [[package]]
+-name = "percent-encoding"
+-version = "2.3.2"
++name = "password-hash"
++version = "0.6.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "aab41826031698d6ffcd9cff78ef56ef998e39dc7e5067cdfebe373842d4723b"
++dependencies = [
++ "phc",
++]
++
++[[package]]
++name = "pbkdf2"
++version = "0.13.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "112d82ceb8c5bf524d9af484d4e4970c9fd5a0cc15ba14ad93dccd28873b0629"
++dependencies = [
++ "digest 0.11.3",
++ "hmac",
++]
++
++[[package]]
++name = "pem-rfc7468"
++version = "1.0.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "a6305423e0e7738146434843d1694d621cce767262b2a86910beab705e4493d9"
++dependencies = [
++ "base64ct",
++]
++
++[[package]]
++name = "percent-encoding"
++version = "2.3.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
++
++[[package]]
++name = "phc"
++version = "0.6.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "44dc769b75f93afdddd8c7fa12d685292ddeff1e66f7f0f3a234cf1818afe892"
++dependencies = [
++ "base64ct",
++ "ctutils",
++]
++
++[[package]]
++name = "pin-project-lite"
++version = "0.2.17"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "a89322df9ebe1c1578d689c92318e070967d1042b512afbe49518723f4e6d5cd"
++
++[[package]]
++name = "pkcs1"
++version = "0.8.0-rc.4"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "986d2e952779af96ea048f160fd9194e1751b4faea78bcf3ceb456efe008088e"
++dependencies = [
++ "der",
++ "spki",
++]
++
++[[package]]
++name = "pkcs5"
++version = "0.8.1"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
++checksum = "63d440a804ec8d6fafbb6b84471e013286658d373248927692ab3366686220ca"
++dependencies = [
++ "aes",
++ "aes-gcm",
++ "cbc",
++ "der",
++ "pbkdf2",
++ "rand_core",
++ "scrypt",
++ "sha2 0.11.1",
++ "spki",
++]
+ 
+ [[package]]
+-name = "pin-project-lite"
+-version = "0.2.17"
++name = "pkcs8"
++version = "0.11.0"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "a89322df9ebe1c1578d689c92318e070967d1042b512afbe49518723f4e6d5cd"
++checksum = "451913da69c775a56034ea8d9003d27ee8948e12443eae7c038ba100a4f21cb7"
++dependencies = [
++ "der",
++ "pkcs5",
++ "rand_core",
++ "spki",
++]
+ 
+ [[package]]
+ name = "pkg-config"
+@@ -1417,6 +1963,17 @@ version = "0.3.34"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "f6b464fbc74e149a392436b17d523f769e057cb6877f6a5c4618bc6f11800548"
+ 
++[[package]]
++name = "poly1305"
++version = "0.9.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "6e2d0073b297041425c7c3df6eb4792d598a15323fe63346852b092eca02904c"
++dependencies = [
++ "cpufeatures 0.3.1",
++ "universal-hash",
++ "zeroize",
++]
++
+ [[package]]
+ name = "polyval"
+ version = "0.7.3"
+@@ -1426,6 +1983,7 @@ dependencies = [
+  "cpubits",
+  "cpufeatures 0.3.1",
+  "universal-hash",
++ "zeroize",
+ ]
+ 
+ [[package]]
+@@ -1443,6 +2001,33 @@ version = "0.2.1"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "4a6394b9e965e73d0a289ee54f589087e2c676aedf60885baf52c76b771e4958"
+ 
++[[package]]
++name = "primefield"
++version = "0.14.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "c555a6e4eb7d4e158fcb028c835c3b8642206ddc279b5c6b202ef9a8bdb592f4"
++dependencies = [
++ "crypto-bigint",
++ "crypto-common 0.2.2",
++ "ff",
++ "rand_core",
++ "subtle",
++ "zeroize",
++]
++
++[[package]]
++name = "primeorder"
++version = "0.14.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "5c9f42978c78a00e3d68f69fc03e57a234debae69da4020a4fb588fcdcd07b06"
++dependencies = [
++ "elliptic-curve",
++ "once_cell",
++ "primefield",
++ "serdect",
++ "wnaf",
++]
++
+ [[package]]
+ name = "proc-macro2"
+ version = "1.0.107"
+@@ -1566,6 +2151,7 @@ dependencies = [
+  "hex",
+  "hmac",
+  "reqwest",
++ "russh",
+  "serde",
+  "serde_json",
+  "sha2 0.11.1",
+@@ -1647,6 +2233,16 @@ dependencies = [
+  "web-sys",
+ ]
+ 
++[[package]]
++name = "rfc6979"
++version = "0.6.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "b4a459cddafb3fe76b31fd8f1108007566c40301feb64dc7b54656eb7388172b"
++dependencies = [
++ "crypto-bigint",
++ "hmac",
++]
++
+ [[package]]
+ name = "ring"
+ version = "0.17.14"
+@@ -1661,12 +2257,134 @@ dependencies = [
+  "windows-sys 0.52.0",
+ ]
+ 
++[[package]]
++name = "rsa"
++version = "0.10.0-rc.18"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "30b2aa4ba0d89f73d1e332df05be0eeab8840351c36ca5654341dfdb57bb3caf"
++dependencies = [
++ "const-oid",
++ "crypto-bigint",
++ "crypto-primes",
++ "digest 0.11.3",
++ "pkcs1",
++ "pkcs8",
++ "rand_core",
++ "sha2 0.11.1",
++ "signature",
++ "spki",
++ "zeroize",
++]
++
++[[package]]
++name = "russh"
++version = "0.64.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "ba61e87b9ec9a39a59a6bbed4c0b8ff7fb07073405b24a767a1f2c8560ac8f58"
++dependencies = [
++ "aes",
++ "bitflags",
++ "block-padding",
++ "byteorder",
++ "bytes",
++ "cbc",
++ "cipher",
++ "crypto-bigint",
++ "ctr",
++ "curve25519-dalek",
++ "data-encoding",
++ "delegate",
++ "der",
++ "digest 0.11.3",
++ "ecdsa",
++ "ed25519-dalek",
++ "elliptic-curve",
++ "enum_dispatch",
++ "futures",
++ "generic-array 1.4.5",
++ "getrandom 0.4.3",
++ "ghash",
++ "hex-literal",
++ "hmac",
++ "inout",
++ "keccak",
++ "log",
++ "md5",
++ "ml-kem",
++ "module-lattice",
++ "num-bigint",
++ "p256",
++ "p384",
++ "p521",
++ "pageant",
++ "pbkdf2",
++ "pkcs1",
++ "pkcs5",
++ "pkcs8",
++ "polyval",
++ "rand",
++ "rand_core",
++ "ring",
++ "rsa",
++ "russh-cryptovec",
++ "russh-util",
++ "salsa20",
++ "scrypt",
++ "sec1",
++ "sha1",
++ "sha2 0.11.1",
++ "sha3",
++ "signature",
++ "spki",
++ "ssh-encoding",
++ "ssh-key",
++ "subtle",
++ "thiserror 2.0.21",
++ "tokio",
++ "typenum",
++ "universal-hash",
++ "zeroize",
++]
++
++[[package]]
++name = "russh-cryptovec"
++version = "0.62.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "3aec6cb630dbe85d72ffd7bcd95f07e1bd69f9f270ee8adfa1afe443a6331438"
++dependencies = [
++ "log",
++ "nix",
++ "ssh-encoding",
++ "windows-sys 0.61.2",
++]
++
++[[package]]
++name = "russh-util"
++version = "0.52.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "668424a5dde0bcb45b55ba7de8476b93831b4aa2fa6947e145f3b053e22c60b6"
++dependencies = [
++ "chrono",
++ "tokio",
++ "wasm-bindgen",
++ "wasm-bindgen-futures",
++]
++
+ [[package]]
+ name = "rustc-hash"
+ version = "2.1.3"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "6b1e7f9a428571be2dc5bc0505c13fb6bf936822b894ec87abf8a08a4e51742d"
+ 
++[[package]]
++name = "rustc_version"
++version = "0.4.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "cfcb3a22ef46e85b45de6ee7e79d063319ebb6594faafcf1c225ea92ab6e9b92"
++dependencies = [
++ "semver",
++]
++
+ [[package]]
+ name = "rustls"
+ version = "0.23.46"
+@@ -1754,6 +2472,16 @@ version = "1.0.23"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
+ 
++[[package]]
++name = "salsa20"
++version = "0.11.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "2f874456e72520ff1375a06c588eaf074b0f01f9e9e1aada45bd9b7954a6e42c"
++dependencies = [
++ "cfg-if",
++ "cipher",
++]
++
+ [[package]]
+ name = "same-file"
+ version = "1.0.6"
+@@ -1778,6 +2506,32 @@ version = "1.2.0"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
+ 
++[[package]]
++name = "scrypt"
++version = "0.12.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "d87af57419b594aa23fa95f09f0e06d80d84ba01c26148c43844cad6ff4485f0"
++dependencies = [
++ "cfg-if",
++ "pbkdf2",
++ "salsa20",
++ "sha2 0.11.1",
++]
++
++[[package]]
++name = "sec1"
++version = "0.8.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "d56d437c2f19203ce5f7122e507831de96f3d2d4d3be5af44a0b0a09d8a80e4d"
++dependencies = [
++ "base16ct",
++ "ctutils",
++ "der",
++ "hybrid-array",
++ "subtle",
++ "zeroize",
++]
++
+ [[package]]
+ name = "security-framework"
+ version = "3.7.0"
+@@ -1801,6 +2555,12 @@ dependencies = [
+  "libc",
+ ]
+ 
++[[package]]
++name = "semver"
++version = "1.0.28"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "8a7852d02fc848982e0c167ef163aaff9cd91dc640ba85e263cb1ce46fae51cd"
++
+ [[package]]
+ name = "serde"
+ version = "1.0.229"
+@@ -1867,6 +2627,16 @@ dependencies = [
+  "serde",
+ ]
+ 
++[[package]]
++name = "serdect"
++version = "0.4.3"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "66cf8fedced2fcf12406bcb34223dffb92eaf34908ede12fed414c82b7f00b3e"
++dependencies = [
++ "base16ct",
++ "serde",
++]
++
+ [[package]]
+ name = "sha1"
+ version = "0.11.0"
+@@ -1900,6 +2670,28 @@ dependencies = [
+  "digest 0.11.3",
+ ]
+ 
++[[package]]
++name = "sha3"
++version = "0.12.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "bc9bad02c26382724b2d2692c6f179285e4b54eeecd7968f52a50059c3c11759"
++dependencies = [
++ "digest 0.11.3",
++ "keccak",
++ "sponge-cursor",
++]
++
++[[package]]
++name = "shake"
++version = "0.1.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "09057cb2149ad4cbd2da1e26b351f9a4c354219421229c69c3063e6f61947c4a"
++dependencies = [
++ "digest 0.11.3",
++ "keccak",
++ "sponge-cursor",
++]
++
+ [[package]]
+ name = "sharded-slab"
+ version = "0.1.7"
+@@ -1925,6 +2717,16 @@ dependencies = [
+  "libc",
+ ]
+ 
++[[package]]
++name = "signature"
++version = "3.0.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "28d567dcbaf0049cb8ac2608a76cd95ff9e4412e1899d389ee400918ca7537f5"
++dependencies = [
++ "digest 0.11.3",
++ "rand_core",
++]
++
+ [[package]]
+ name = "simdutf8"
+ version = "0.1.5"
+@@ -1965,6 +2767,22 @@ dependencies = [
+  "lock_api",
+ ]
+ 
++[[package]]
++name = "spki"
++version = "0.8.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "7ef958a98b9d5da290cfc78946e9f3e61e1e62a18db0d92cac0b83cc161491a9"
++dependencies = [
++ "base64ct",
++ "der",
++]
++
++[[package]]
++name = "sponge-cursor"
++version = "0.1.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "3a0219bd7d979d58245a4f41f695e1ac9f8befdffadd7f61f1bae9e39abc6620"
++
+ [[package]]
+ name = "sqlx"
+ version = "0.9.0"
+@@ -2068,7 +2886,7 @@ dependencies = [
+  "either",
+  "futures-core",
+  "futures-util",
+- "generic-array",
++ "generic-array 0.14.9",
+  "log",
+  "percent-encoding",
+  "serde",
+@@ -2140,6 +2958,65 @@ dependencies = [
+  "url",
+ ]
+ 
++[[package]]
++name = "ssh-cipher"
++version = "0.3.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "d801accda99469cde6d73da741422610fdf6508a72d9a69d1b55cb241c720597"
++dependencies = [
++ "aead",
++ "aes",
++ "aes-gcm",
++ "chacha20",
++ "cipher",
++ "ctutils",
++ "des",
++ "poly1305",
++ "ssh-encoding",
++ "zeroize",
++]
++
++[[package]]
++name = "ssh-encoding"
++version = "0.3.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "7b54d0ed0498daf3f78d82e00e28c8eec9d75a067c4cfbcc7a0f7d0f4077749e"
++dependencies = [
++ "base64ct",
++ "bytes",
++ "crypto-bigint",
++ "ctutils",
++ "digest 0.11.3",
++ "pem-rfc7468",
++ "zeroize",
++]
++
++[[package]]
++name = "ssh-key"
++version = "0.7.0-rc.11"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "f9a32fae177b74a22aa9c5b01bf7e68b33545be32d9e381e248058d2adc15ce3"
++dependencies = [
++ "argon2",
++ "bcrypt-pbkdf",
++ "ctutils",
++ "ed25519-dalek",
++ "hex",
++ "hmac",
++ "p256",
++ "p384",
++ "p521",
++ "rand_core",
++ "rsa",
++ "sec1",
++ "sha1",
++ "sha2 0.11.1",
++ "signature",
++ "ssh-cipher",
++ "ssh-encoding",
++ "zeroize",
++]
++
+ [[package]]
+ name = "stable_deref_trait"
+ version = "1.2.1"
+@@ -2706,6 +3583,27 @@ dependencies = [
+  "windows-sys 0.61.2",
+ ]
+ 
++[[package]]
++name = "windows"
++version = "0.62.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "527fadee13e0c05939a6a05d5bd6eec6cd2e3dbd648b9f8e447c6518133d8580"
++dependencies = [
++ "windows-collections",
++ "windows-core",
++ "windows-future",
++ "windows-numerics",
++]
++
++[[package]]
++name = "windows-collections"
++version = "0.3.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "23b2d95af1a8a14a3c7367e1ed4fc9c20e0a26e79551b1454d72583c97cc6610"
++dependencies = [
++ "windows-core",
++]
++
+ [[package]]
+ name = "windows-core"
+ version = "0.62.2"
+@@ -2719,6 +3617,17 @@ dependencies = [
+  "windows-strings",
+ ]
+ 
++[[package]]
++name = "windows-future"
++version = "0.3.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "e1d6f90251fe18a279739e78025bd6ddc52a7e22f921070ccdc67dde84c605cb"
++dependencies = [
++ "windows-core",
++ "windows-link",
++ "windows-threading",
++]
++
+ [[package]]
+ name = "windows-implement"
+ version = "0.60.2"
+@@ -2747,6 +3656,16 @@ version = "0.2.1"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "f0805222e57f7521d6a62e36fa9163bc891acd422f971defe97d64e70d0a4fe5"
+ 
++[[package]]
++name = "windows-numerics"
++version = "0.3.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "6e2e40844ac143cdb44aead537bbf727de9b044e107a0f1220392177d15b0f26"
++dependencies = [
++ "windows-core",
++ "windows-link",
++]
++
+ [[package]]
+ name = "windows-result"
+ version = "0.4.1"
+@@ -2823,6 +3742,15 @@ dependencies = [
+  "windows_x86_64_msvc 0.52.6",
+ ]
+ 
++[[package]]
++name = "windows-threading"
++version = "0.2.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "3949bd5b99cafdf1c7ca86b43ca564028dfe27d66958f2470940f73d86d75b37"
++dependencies = [
++ "windows-link",
++]
++
+ [[package]]
+ name = "windows_aarch64_gnullvm"
+ version = "0.42.2"
+@@ -2922,6 +3850,18 @@ dependencies = [
+  "memchr",
+ ]
+ 
++[[package]]
++name = "wnaf"
++version = "0.14.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "795ca18b3fdb5e62bf982199278341ddcf7ebf7d32e25e212ad05d496e95f6fa"
++dependencies = [
++ "ff",
++ "group",
++ "hybrid-array",
++ "primefield",
++]
++
+ [[package]]
+ name = "writeable"
+ version = "0.6.4"
+diff --git a/Cargo.toml b/Cargo.toml
+index 0e8df93..586ef22 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -30,6 +30,7 @@ hex = "0.4"
+ getrandom = "0.4"
+ time = "0.3"
+ subtle = "2"
++russh = { version = "0.64", default-features = false, features = ["ring", "rsa"] }
+ reqwest = { version = "0.13", default-features = false, features = ["json", "http2", "charset", "rustls", "rustls-native-certs"] }
+ 
+ [profile.release]
+diff --git a/src/main.rs b/src/main.rs
+index 53eea42..8007a73 100644
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -9,7 +9,9 @@ mod error;
+ mod jobs;
+ mod models;
+ mod paygate;
++mod reinstall;
+ mod routes;
++mod ssh;
+ mod upcloud;
+ mod views;
+ 
+diff --git a/src/reinstall.rs b/src/reinstall.rs
+new file mode 100644
+index 0000000..8f99fd3
+--- /dev/null
++++ b/src/reinstall.rs
+@@ -0,0 +1,518 @@
++//! Mode "cloud lain": VPS Linux milik pelanggan dirombak jadi Windows lewat
++//! SSH root + password, memakai skrip bin456789/reinstall.
++//!
++//! Urutannya sengaja: precheck dulu (kalau mesin tidak memenuhi syarat, lebih
++//! baik menolak daripada meninggalkan mesin setengah rusak), baru push skrip
++//! yang berjalan detached. Instalasi akan me-reboot mesin dan memutus SSH —
++//! itu normal, bukan kegagalan.
++
++use std::fmt;
++
++pub const REINSTALL_URL: &str =
++    "https://raw.githubusercontent.com/bin456789/reinstall/main/reinstall.sh";
++
++/// Ditolak: reinstall tidak mungkin di virtualisasi kontainer.
++const BLOCKED_VIRT: [&str; 6] = [
++    "openvz",
++    "lxc",
++    "lxc-libvirt",
++    "openvzve",
++    "vserver",
++    "docker",
++];
++
++#[derive(Debug, Clone, Copy, PartialEq, Eq)]
++pub enum Edition {
++    Win10Pro,
++    Win10Ltsc2021,
++    Win11Pro,
++    Win11Ltsc2024,
++    Server2016,
++    Server2019,
++    Server2022,
++    Server2025,
++}
++
++impl Edition {
++    pub const ALL: [Edition; 8] = [
++        Edition::Server2022,
++        Edition::Server2019,
++        Edition::Server2025,
++        Edition::Server2016,
++        Edition::Win11Ltsc2024,
++        Edition::Win11Pro,
++        Edition::Win10Ltsc2021,
++        Edition::Win10Pro,
++    ];
++
++    /// String yang diteruskan ke `--image-name`. Ejaan mengikuti parser di
++    /// reinstall.sh (`windows [server] <versi> [r2] <edisi>`); huruf besar/kecil
++    /// tidak masalah karena skrip menormalkannya sendiri.
++    pub fn image_name(self) -> &'static str {
++        match self {
++            Edition::Win10Pro => "Windows 10 Pro",
++            Edition::Win10Ltsc2021 => "Windows 10 Enterprise LTSC 2021",
++            Edition::Win11Pro => "Windows 11 Pro",
++            Edition::Win11Ltsc2024 => "Windows 11 Enterprise LTSC 2024",
++            Edition::Server2016 => "Windows Server 2016 SERVERDATACENTER",
++            Edition::Server2019 => "Windows Server 2019 SERVERDATACENTER",
++            Edition::Server2022 => "Windows Server 2022 SERVERDATACENTER",
++            Edition::Server2025 => "Windows Server 2025 SERVERDATACENTER",
++        }
++    }
++
++    pub fn key(self) -> &'static str {
++        match self {
++            Edition::Win10Pro => "w10pro",
++            Edition::Win10Ltsc2021 => "w10ltsc21",
++            Edition::Win11Pro => "w11pro",
++            Edition::Win11Ltsc2024 => "w11ltsc24",
++            Edition::Server2016 => "srv2016",
++            Edition::Server2019 => "srv2019",
++            Edition::Server2022 => "srv2022",
++            Edition::Server2025 => "srv2025",
++        }
++    }
++
++    pub fn label(self) -> &'static str {
++        match self {
++            Edition::Win10Pro => "Windows 10 Pro",
++            Edition::Win10Ltsc2021 => "Windows 10 LTSC 2021",
++            Edition::Win11Pro => "Windows 11 Pro",
++            Edition::Win11Ltsc2024 => "Windows 11 LTSC 2024",
++            Edition::Server2016 => "Server 2016",
++            Edition::Server2019 => "Server 2019",
++            Edition::Server2022 => "Server 2022",
++            Edition::Server2025 => "Server 2025",
++        }
++    }
++
++    pub fn note(self) -> &'static str {
++        match self {
++            Edition::Win10Pro => "paling dikenal, banyak panduan",
++            Edition::Win10Ltsc2021 => "tanpa bloat, jarang update",
++            Edition::Win11Pro => "butuh RAM 2 GB ke atas",
++            Edition::Win11Ltsc2024 => "paling bersih untuk RDP",
++            Edition::Server2016 => "paling ringan",
++            Edition::Server2019 => "pilihan umum untuk RDP",
++            Edition::Server2022 => "rekomendasi server",
++            Edition::Server2025 => "terbaru, butuh RAM 2 GB ke atas",
++        }
++    }
++
++    /// Kebutuhan minimum menurut README reinstall (1 GB, 2 GB untuk Win11/2025).
++    pub fn min_ram_gb(self) -> u32 {
++        match self {
++            Edition::Win11Pro | Edition::Win11Ltsc2024 | Edition::Server2025 => 2,
++            _ => 1,
++        }
++    }
++
++    pub fn from_key(key: &str) -> Option<Edition> {
++        Edition::ALL.iter().copied().find(|e| e.key() == key)
++    }
++}
++
++impl fmt::Display for Edition {
++    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        f.write_str(self.key())
++    }
++}
++
++#[derive(Debug, Clone, Copy, PartialEq, Eq)]
++pub enum Lang {
++    En,
++    ZhCn,
++}
++
++impl Lang {
++    pub fn code(self) -> &'static str {
++        match self {
++            Lang::En => "en-us",
++            Lang::ZhCn => "zh-cn",
++        }
++    }
++
++    pub fn label(self) -> &'static str {
++        match self {
++            Lang::En => "English",
++            Lang::ZhCn => "Chinese Simplified",
++        }
++    }
++
++    pub fn from_code(code: &str) -> Option<Lang> {
++        match code {
++            "en-us" | "en" => Some(Lang::En),
++            "zh-cn" | "cn" => Some(Lang::ZhCn),
++            _ => None,
++        }
++    }
++}
++
++#[derive(Debug, Clone)]
++pub struct InstallSpec {
++    pub image_name: String,
++    pub lang: String,
++    pub username: String,
++    pub password: String,
++    pub rdp_port: u16,
++    pub ssh_port: u16,
++    pub allow_ping: bool,
++}
++
++/// Perintah reinstall.sh. Password TIDAK ikut di sini: pada bootstrap ia
++/// dipasang lewat variabel lingkungan lalu dirujuk sebagai $RDP_PW, supaya
++/// tidak muncul di daftar proses maupun riwayat perintah.
++pub fn build_command(spec: &InstallSpec) -> String {
++    let mut parts: Vec<String> = vec![
++        "bash reinstall.sh windows".into(),
++        format!("--image-name={}", shell_quote(&spec.image_name)),
++        format!("--lang={}", shell_quote(&spec.lang)),
++        format!("--username={}", shell_quote(&spec.username)),
++        "--password=\"$RDP_PW\"".into(),
++        format!("--rdp-port={}", spec.rdp_port),
++    ];
++    if spec.allow_ping {
++        parts.push("--allow-ping".into());
++    }
++    if spec.ssh_port != 22 {
++        parts.push(format!("--ssh-port={}", spec.ssh_port));
++    }
++    parts.join(" ")
++}
++
++/// Skrip yang dijalankan di VPS pelanggan: unduh reinstall.sh, jalankan
++/// detached dengan output ke berkas log, lalu cetak penanda supaya kita tahu
++/// prosesnya benar-benar mulai.
++pub fn build_bootstrap(spec: &InstallSpec) -> String {
++    let cmd = build_command(spec);
++    let pw = shell_single_quote(&spec.password);
++    let cmd_q = shell_single_quote(&cmd);
++    format!(
++        r#"set -e
++cd /root 2>/dev/null || cd /tmp
++if ! command -v curl >/dev/null 2>&1; then
++  (command -v apt-get >/dev/null 2>&1 && apt-get update -qq && apt-get install -y -qq curl) \
++  || (command -v yum >/dev/null 2>&1 && yum install -y -q curl) \
++  || (command -v dnf >/dev/null 2>&1 && dnf install -y -q curl) || true
++fi
++if command -v curl >/dev/null 2>&1; then
++  curl -fsSL -o reinstall.sh {url}
++else
++  wget -qO reinstall.sh {url}
++fi
++chmod +x reinstall.sh
++export RDP_PW={pw}
++nohup bash -c {cmd_q} >/root/rdp-install.log 2>&1 &
++echo "LAUNCHED $!"
++"#,
++        url = REINSTALL_URL,
++        pw = pw,
++        cmd_q = cmd_q,
++    )
++}
++
++/// Untuk tombol pemulihan kalau instalasi meninggalkan mesin tidak bisa boot.
++pub fn reset_command() -> &'static str {
++    "bash reinstall.sh reset"
++}
++
++pub fn shell_quote(s: &str) -> String {
++    if !s.is_empty()
++        && s.chars()
++            .all(|c| c.is_ascii_alphanumeric() || "._-/:@+ ".contains(c))
++    {
++        format!("\"{s}\"")
++    } else {
++        shell_single_quote(s)
++    }
++}
++
++pub fn shell_single_quote(s: &str) -> String {
++    format!("'{}'", s.replace('\'', r"'\''"))
++}
++
++/// Sembunyikan nilai password di setiap baris log yang kita tampilkan.
++pub fn redact(line: &str) -> String {
++    let mut out = String::with_capacity(line.len());
++    let mut rest = line;
++    while let Some(pos) = rest.find("--password") {
++        let (head, tail) = rest.split_at(pos);
++        out.push_str(head);
++        out.push_str("--password ***");
++        // lewati nilai setelah '=' atau spasi
++        let after = &tail["--password".len()..];
++        let skip = match after.find([' ', '=']) {
++            // nilai diawali spasi: lompati nilai, sisakan spasi pemisahnya
++            Some(0) => after[1..].find(' ').map(|p| p + 1).unwrap_or(after.len()),
++            // nilai ditulis setelah '='
++            Some(p) => p,
++            None => 0,
++        };
++        rest = &after[skip..];
++    }
++    out.push_str(rest);
++    out
++}
++
++// ------------------------------------------------------------------ precheck
++
++#[derive(Debug, Clone, Default)]
++pub struct Precheck {
++    pub virt: String,
++    pub os: String,
++    pub kernel: String,
++    pub arch: String,
++    pub whoami: String,
++    pub bootmode: String,
++    pub ram_gb: f64,
++    pub disk_gb: f64,
++    pub has_curl: bool,
++}
++
++#[derive(Debug, Clone)]
++pub struct PrecheckError(pub String);
++
++impl fmt::Display for PrecheckError {
++    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        f.write_str(&self.0)
++    }
++}
++
++/// Skrip precheck. Tidak mengubah apa pun di mesin target.
++pub const PRECHECK_SCRIPT: &str = r#"set -e
++echo "VIRT=$(systemd-detect-virt 2>/dev/null || echo unknown)"
++echo "OS=$((. /etc/os-release 2>/dev/null && echo "$PRETTY_NAME") || uname -s)"
++echo "KERNEL=$(uname -r)"
++echo "ARCH=$(uname -m)"
++echo "WHOAMI=$(id -un)"
++echo "BOOTMODE=$([ -d /sys/firmware/efi ] && echo efi || echo bios)"
++echo "RAMKB=$(awk '/MemTotal/{print $2}' /proc/meminfo)"
++ROOTDEV=$(lsblk -ndo NAME,TYPE 2>/dev/null | awk '$2=="disk"{print "/dev/"$1; exit}')
++echo "ROOTDEV=$ROOTDEV"
++echo "DISKBYTES=$(lsblk -ndbo SIZE "$ROOTDEV" 2>/dev/null | head -1)"
++command -v curl >/dev/null 2>&1 && echo "HAVECURL=yes" || echo "HAVECURL=no"
++"#;
++
++pub fn parse_precheck(out: &str) -> Precheck {
++    let mut p = Precheck {
++        virt: "unknown".into(),
++        has_curl: false,
++        ..Default::default()
++    };
++    for line in out.lines() {
++        let Some((k, v)) = line.split_once('=') else {
++            continue;
++        };
++        let v = v.trim();
++        match k.trim() {
++            "VIRT" => p.virt = v.to_lowercase(),
++            "OS" => p.os = v.to_string(),
++            "KERNEL" => p.kernel = v.to_string(),
++            "ARCH" => p.arch = v.to_string(),
++            "WHOAMI" => p.whoami = v.to_string(),
++            "BOOTMODE" => p.bootmode = v.to_string(),
++            "RAMKB" => p.ram_gb = v.parse::<f64>().unwrap_or(0.0) / 1024.0 / 1024.0,
++            "DISKBYTES" => p.disk_gb = v.parse::<f64>().unwrap_or(0.0) / 1024.0 / 1024.0 / 1024.0,
++            "HAVECURL" => p.has_curl = v.eq_ignore_ascii_case("yes"),
++            _ => {}
++        }
++    }
++    p
++}
++
++/// Tolak lebih awal dengan alasan yang bisa dibaca manusia. Batas RAM/disk
++/// mengikuti README reinstall; Windows 11 dan Server 2025 butuh 2 GB.
++pub fn validate(p: &Precheck, edition: Edition) -> Result<(), PrecheckError> {
++    if BLOCKED_VIRT.contains(&p.virt.as_str()) || p.virt.contains("openvz") || p.virt == "lxc" {
++        return Err(PrecheckError(format!(
++            "VPS ini memakai virtualisasi {} (kontainer). Reinstall hanya bisa di KVM.",
++            if p.virt.is_empty() {
++                "tidak dikenal"
++            } else {
++                &p.virt
++            }
++        )));
++    }
++    if !p.whoami.is_empty() && p.whoami != "root" {
++        return Err(PrecheckError(format!(
++            "Masuk sebagai '{}', bukan root. Reinstall butuh akses root.",
++            p.whoami
++        )));
++    }
++    let min_ram = edition.min_ram_gb() as f64;
++    if p.ram_gb > 0.0 && p.ram_gb + 0.05 < min_ram {
++        return Err(PrecheckError(format!(
++            "RAM {:.2} GB, sedangkan {} butuh minimal {} GB.",
++            p.ram_gb,
++            edition.label(),
++            min_ram
++        )));
++    }
++    if p.disk_gb > 0.0 && p.disk_gb < 25.0 {
++        return Err(PrecheckError(format!(
++            "Disk {:.1} GB, minimal 25 GB untuk memasang Windows.",
++            p.disk_gb
++        )));
++    }
++    if p.arch != "x86_64" && p.arch != "aarch64" && !p.arch.is_empty() {
++        return Err(PrecheckError(format!(
++            "Arsitektur {} belum didukung (hanya x86_64 dan aarch64).",
++            p.arch
++        )));
++    }
++    Ok(())
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    fn spec() -> InstallSpec {
++        InstallSpec {
++            image_name: Edition::Server2022.image_name().into(),
++            lang: "en-us".into(),
++            username: "JayAdmin".into(),
++            password: "Kata1!SandiXy".into(),
++            rdp_port: 3389,
++            ssh_port: 22,
++            allow_ping: false,
++        }
++    }
++
++    #[test]
++    fn command_matches_documented_shape() {
++        let c = build_command(&spec());
++        assert!(c.starts_with("bash reinstall.sh windows "));
++        assert!(c.contains(r#"--image-name="Windows Server 2022 SERVERDATACENTER""#));
++        assert!(c.contains("--lang=\"en-us\""));
++        assert!(c.contains("--username=\"JayAdmin\""));
++        assert!(c.contains("--rdp-port=3389"));
++        assert!(
++            !c.contains("--ssh-port"),
++            "port 22 default tidak perlu ditulis"
++        );
++        assert!(!c.contains("--allow-ping"));
++    }
++
++    #[test]
++    fn password_never_appears_in_the_command() {
++        let c = build_command(&spec());
++        assert!(
++            !c.contains("Kata1!SandiXy"),
++            "password tidak boleh di argv: {c}"
++        );
++        assert!(c.contains("--password=\"$RDP_PW\""));
++    }
++
++    #[test]
++    fn bootstrap_passes_password_via_environment_and_is_detached() {
++        let b = build_bootstrap(&spec());
++        assert!(b.contains("export RDP_PW='Kata1!SandiXy'"));
++        assert!(
++            b.contains("nohup bash -c "),
++            "harus detached, instalasi me-reboot mesin"
++        );
++        assert!(b.contains("chmod +x reinstall.sh"));
++        assert!(b.contains(REINSTALL_URL));
++        assert!(b.contains("LAUNCHED"));
++    }
++
++    #[test]
++    fn bootstrap_survives_password_with_quote() {
++        let mut s = spec();
++        s.password = "Pw'dengan'kutip".into();
++        let b = build_bootstrap(&s);
++        assert!(
++            b.contains(r"'Pw'\''dengan'\''kutip'"),
++            "kutip harus di-escape"
++        );
++    }
++
++    #[test]
++    fn ssh_port_and_ping_appear_when_requested() {
++        let mut s = spec();
++        s.ssh_port = 2222;
++        s.allow_ping = true;
++        let c = build_command(&s);
++        assert!(c.contains("--ssh-port=2222"));
++        assert!(c.contains("--allow-ping"));
++    }
++
++    #[test]
++    fn parses_precheck_output() {
++        let out = "VIRT=kvm\nOS=Debian GNU/Linux 11 (bullseye)\nKERNEL=5.10.0-8-amd64\nARCH=x86_64\nWHOAMI=root\nBOOTMODE=bios\nRAMKB=2048000\nROOTDEV=/dev/vda\nDISKBYTES=53687091200\nHAVECURL=yes\n";
++        let p = parse_precheck(out);
++        assert_eq!(p.virt, "kvm");
++        assert_eq!(p.arch, "x86_64");
++        assert_eq!(p.whoami, "root");
++        assert!(p.ram_gb > 1.9 && p.ram_gb < 2.0);
++        assert!(p.disk_gb > 49.0 && p.disk_gb < 51.0);
++        assert!(p.has_curl);
++        assert!(validate(&p, Edition::Server2022).is_ok());
++    }
++
++    #[test]
++    fn rejects_containers_and_small_machines() {
++        let mut p = parse_precheck(
++            "VIRT=lxc\nWHOAMI=root\nRAMKB=1048576\nDISKBYTES=53687091200\nARCH=x86_64",
++        );
++        assert!(
++            validate(&p, Edition::Server2022).is_err(),
++            "LXC tidak bisa di-reinstall"
++        );
++
++        p.virt = "kvm".into();
++        p.ram_gb = 1.0;
++        assert!(
++            validate(&p, Edition::Server2022).is_ok(),
++            "1 GB cukup untuk Server 2022"
++        );
++        assert!(
++            validate(&p, Edition::Win11Pro).is_err(),
++            "Windows 11 butuh 2 GB"
++        );
++
++        p.ram_gb = 4.0;
++        p.disk_gb = 20.0;
++        assert!(
++            validate(&p, Edition::Server2022).is_err(),
++            "disk < 25 GB ditolak"
++        );
++
++        p.disk_gb = 50.0;
++        p.whoami = "ubuntu".into();
++        assert!(
++            validate(&p, Edition::Server2022).is_err(),
++            "bukan root ditolak"
++        );
++    }
++
++    #[test]
++    fn redacts_password_values_from_logs() {
++        assert_eq!(
++            redact("bash reinstall.sh windows --password KitaRahasia --rdp-port=3389"),
++            "bash reinstall.sh windows --password *** --rdp-port=3389"
++        );
++        assert_eq!(
++            redact("--password=KitaRahasia --lang=en-us"),
++            "--password *** --lang=en-us"
++        );
++        assert_eq!(
++            redact("tidak ada rahasia di sini"),
++            "tidak ada rahasia di sini"
++        );
++    }
++
++    #[test]
++    fn every_edition_has_distinct_key_and_image_name() {
++        let mut keys: Vec<&str> = Edition::ALL.iter().map(|e| e.key()).collect();
++        keys.sort();
++        keys.dedup();
++        assert_eq!(keys.len(), Edition::ALL.len());
++        for e in Edition::ALL {
++            assert!(e.image_name().to_lowercase().starts_with("windows"));
++            assert_eq!(Edition::from_key(e.key()), Some(e));
++        }
++    }
++}
+diff --git a/src/ssh.rs b/src/ssh.rs
+new file mode 100644
+index 0000000..6b8e142
+--- /dev/null
++++ b/src/ssh.rs
+@@ -0,0 +1,168 @@
++//! Klien SSH (russh) untuk mode "cloud lain".
++//!
++//! Hanya yang dibutuhkan: autentikasi password, jalankan satu perintah, dan
++//! cek port TCP. Kunci host pelanggan diterima pada pemakaian pertama, seperti
++//! SSH biasa, dan sidik jarinya dicatat ke log supaya bisa diperiksa.
++
++use std::sync::Arc;
++use std::time::Duration;
++
++use russh::client::{self, Handle};
++use russh::keys::PublicKeyOrCertificate;
++use russh::{ChannelMsg, Disconnect};
++
++#[derive(Debug)]
++pub enum Error {
++    Connect(String),
++    Auth,
++    Exec(String),
++    Timeout(u64),
++    Russh(String),
++}
++
++impl std::fmt::Display for Error {
++    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
++        match self {
++            Error::Connect(m) => write!(f, "Tidak bisa terhubung ke VPS: {m}"),
++            Error::Auth => f.write_str("Username atau password SSH salah."),
++            Error::Exec(m) => write!(f, "Perintah gagal dijalankan: {m}"),
++            Error::Timeout(s) => write!(f, "Perintah tidak selesai dalam {s} detik."),
++            Error::Russh(m) => write!(f, "Kesalahan SSH: {m}"),
++        }
++    }
++}
++
++impl std::error::Error for Error {}
++
++#[derive(Debug, Clone, Default)]
++pub struct Output {
++    pub ok: bool,
++    pub stdout: String,
++    pub stderr: String,
++    pub code: u32,
++}
++
++pub struct Handler;
++
++impl client::Handler for Handler {
++    type Error = russh::Error;
++
++    async fn check_server_key(
++        &mut self,
++        server_public_key: &PublicKeyOrCertificate,
++    ) -> Result<bool, Self::Error> {
++        // Diterima (trust on first use, sama seperti ssh pada umumnya), tapi
++        // sidik jarinya dicatat agar bisa dicocokkan pelanggan bila perlu.
++        if let PublicKeyOrCertificate::PublicKey { key, .. } = server_public_key {
++            tracing::info!(
++                "ssh host key {}",
++                key.fingerprint(russh::keys::HashAlg::Sha256)
++            );
++        }
++        Ok(true)
++    }
++}
++
++pub async fn connect(
++    host: &str,
++    port: u16,
++    user: &str,
++    password: &str,
++    timeout: Duration,
++) -> Result<Handle<Handler>, Error> {
++    let config = Arc::new(client::Config {
++        inactivity_timeout: Some(Duration::from_secs(30)),
++        ..Default::default()
++    });
++    let mut handle = tokio::time::timeout(timeout, client::connect(config, (host, port), Handler))
++        .await
++        .map_err(|_| Error::Timeout(timeout.as_secs()))?
++        .map_err(|e| Error::Connect(e.to_string()))?;
++
++    let res = handle
++        .authenticate_password(user, password)
++        .await
++        .map_err(|e| Error::Russh(e.to_string()))?;
++    if !res.success() {
++        return Err(Error::Auth);
++    }
++    Ok(handle)
++}
++
++/// Jalankan satu perintah, kumpulkan stdout+stderr, hormati batas waktu.
++pub async fn exec(handle: &Handle<Handler>, cmd: &str, timeout: Duration) -> Result<Output, Error> {
++    let fut = async {
++        let mut channel = handle
++            .channel_open_session()
++            .await
++            .map_err(|e| Error::Russh(e.to_string()))?;
++        channel
++            .exec(true, cmd)
++            .await
++            .map_err(|e| Error::Exec(e.to_string()))?;
++
++        let mut stdout = Vec::new();
++        let mut stderr = Vec::new();
++        let mut code = None;
++        while let Some(msg) = channel.wait().await {
++            match msg {
++                ChannelMsg::Data { ref data } => stdout.extend_from_slice(data),
++                ChannelMsg::ExtendedData { ref data, .. } => stderr.extend_from_slice(data),
++                ChannelMsg::ExitStatus { exit_status } => code = Some(exit_status),
++                _ => {}
++            }
++        }
++        Ok::<Output, Error>(Output {
++            ok: code.unwrap_or(1) == 0,
++            stdout: String::from_utf8_lossy(&stdout).to_string(),
++            stderr: String::from_utf8_lossy(&stderr).to_string(),
++            code: code.unwrap_or(1),
++        })
++    };
++
++    tokio::time::timeout(timeout, fut)
++        .await
++        .map_err(|_| Error::Timeout(timeout.as_secs()))?
++}
++
++pub async fn disconnect(handle: Handle<Handler>) {
++    let _ = handle
++        .disconnect(Disconnect::ByApplication, "selesai", "")
++        .await;
++}
++
++/// Cek port TCP. Dipakai untuk memantau: SSH terbuka = masih Linux/mengunduh,
++/// SSH tertutup = sedang me-reboot (normal), RDP terbuka = Windows siap.
++pub async fn tcp_open(host: &str, port: u16, timeout: Duration) -> bool {
++    matches!(
++        tokio::time::timeout(timeout, tokio::net::TcpStream::connect((host, port))).await,
++        Ok(Ok(_))
++    )
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn error_messages_are_readable() {
++        assert!(Error::Auth.to_string().contains("password SSH salah"));
++        assert!(Error::Timeout(60).to_string().contains("60 detik"));
++    }
++
++    #[tokio::test]
++    async fn tcp_open_is_false_for_closed_port() {
++        // port tinggi yang hampir pasti kosong di loopback
++        assert!(!tcp_open("127.0.0.1", 59999, Duration::from_millis(300)).await);
++    }
++
++    #[tokio::test]
++    async fn tcp_open_is_true_for_open_port() {
++        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
++        let port = listener.local_addr().unwrap().port();
++        tokio::spawn(async move {
++            let _ = listener.accept().await;
++        });
++        assert!(tcp_open("127.0.0.1", port, Duration::from_secs(2)).await);
++    }
++}

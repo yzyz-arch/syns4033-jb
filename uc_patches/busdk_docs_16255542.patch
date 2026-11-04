@@ -1,0 +1,1286 @@
+From 16255542d3b3425dc215530bd3d29cde2c5b18a0 Mon Sep 17 00:00:00 2001
+From: Jaakko Heusala <jheusala@iki.fi>
+Date: Thu, 30 Apr 2026 16:03:02 +0300
+Subject: [PATCH] docs: document UpCloud worker operations
+
+Expand the UpCloud integration page into a production runbook and move the exhaustive flag/env reference into a dedicated module page. The update clarifies startup order, token scope choices, systemd deployment, container runner handling, and operator verification steps for VM and container deployments.
+
+Verification: ran git diff --cached --check before committing; docs build not run here.
+
+Config: documents BUS_EVENTS_API_URL, BUS_API_TOKEN, UPCLOUD_TOKEN, runner networking, systemd environment files, and UpCloud worker option defaults.
+
+Migration: no repository data migration; operators should align deployed BusDK services to one release set and update service environment files as documented.
+
+Security: emphasizes secret files and operator-controlled secret storage; no sensitive logging change in this docs-only commit.
+---
+ .../bus-integration-upcloud-reference.md      | 233 +++++
+ docs/modules/bus-integration-upcloud.md       | 951 +++++++++++++++---
+ 2 files changed, 1017 insertions(+), 167 deletions(-)
+ create mode 100644 docs/modules/bus-integration-upcloud-reference.md
+
+diff --git a/docs/modules/bus-integration-upcloud-reference.md b/docs/modules/bus-integration-upcloud-reference.md
+new file mode 100644
+index 00000000..391a7b65
+--- /dev/null
++++ b/docs/modules/bus-integration-upcloud-reference.md
+@@ -0,0 +1,233 @@
++---
++title: bus-integration-upcloud option reference
++description: Complete command option reference for the UpCloud event integration worker.
++---
++
++## `bus-integration-upcloud` Option Reference
++
++Flags take precedence over environment variables. Environment variables take
++precedence over the hardcoded defaults listed below. Boolean environment values
++accept `1`, `true`, `yes`, `on`, `0`, `false`, `no`, and `off`; invalid
++boolean environment values fall back to the hardcoded default.
++
++### `--help`
++
++Optional. Prints help and exits. Default is off.
++
++### `--self-test`
++
++Optional. Runs an in-memory worker check and exits. Default is off. It does
++not require Events API or UpCloud credentials.
++
++### `--check-vm-status`
++
++Optional. Prints one VM status response through the selected provider and
++exits. Default is off. With `--provider upcloud`, `UPCLOUD_TOKEN` and a VM
++name are required.
++
++### `--once`
++
++Optional. Processes one event and exits. Default is off. Use for diagnostics,
++not long-running production workers.
++
++### `--events-url <url>`
++
++Required for event-listener mode. Defaults to `BUS_EVENTS_API_URL`. The value
++must be the Bus Events API collection URL including `/api/v1/events`.
++
++### `--provider <static|upcloud>`
++
++Optional. Defaults to `BUS_UPCLOUD_PROVIDER` or `static`. Accepted values are
++`static` and `upcloud`. Any other value fails with `unsupported provider`.
++
++### `--upcloud-api-url <url>`
++
++Optional. Defaults to `UPCLOUD_API_BASE_URL` or
++`https://api.upcloud.com/1.3`. Use this only for a compatible UpCloud API
++endpoint.
++
++### `--vm-name <name-or-uuid>`
++
++Required for UpCloud VM status/start/stop. Defaults to `UPCLOUD_VM_NAME`.
++Accepts an UpCloud server name or UUID.
++
++### `--container-runner-name <name-or-uuid>`
++
++Required for UpCloud container workflows. Defaults to
++`UPCLOUD_CONTAINER_RUNNER_NAME`. Accepts an UpCloud server name or UUID.
++
++### `--container-codex-image <image>`
++
++Optional. Defaults to `UPCLOUD_CONTAINER_CODEX_IMAGE` or
++`docker.io/library/alpine:3.20`. Used when a run request selects
++`profile=codex` without an explicit image.
++
++### `--container-zone <zone>`
++
++Optional. Defaults to `UPCLOUD_CONTAINER_ZONE` or `fi-hel2`. Used when creating
++the runner.
++
++### `--container-plan <plan>`
++
++Optional. Defaults to `UPCLOUD_CONTAINER_PLAN` or `CLOUDNATIVE-1xCPU-4GB`.
++Used when creating the runner.
++
++### `--container-os <template>`
++
++Optional. Defaults to `UPCLOUD_CONTAINER_OS` or
++`Ubuntu Server 24.04 LTS (Noble Numbat)`. Used when creating the runner OS
++disk.
++
++### `--container-os-storage-size <gb>`
++
++Optional. Defaults to `UPCLOUD_CONTAINER_OS_STORAGE_SIZE` or `0`. Units are
++gigabytes. `0` leaves the provider default.
++
++### `--container-network-mode <private|public>`
++
++Optional. Defaults to `UPCLOUD_CONTAINER_NETWORK_MODE` or `private`. Accepted
++values are `private` and `public`. Other values fail with `unsupported
++container network mode`.
++
++### `--container-private-network <name-or-uuid>`
++
++Required when `--container-network-mode private` creates a runner. Defaults to
++`UPCLOUD_CONTAINER_PRIVATE_NETWORK_NAME` or
++`ai-platform-private-<container-zone>`. Accepts an UpCloud network name or
++UUID.
++
++### `--container-private-ip <ipv4>`
++
++Optional. Defaults to `UPCLOUD_CONTAINER_PRIVATE_IP`. When set, requests that
++private IPv4 address for the runner NIC.
++
++### `--container-ssh-keys <paths>`
++
++Required when creating a new runner. Defaults to `UPCLOUD_CONTAINER_SSH_KEYS`.
++The value is a space-separated list of SSH public key file paths.
++
++### `--container-ssh-target <user@host>`
++
++Optional. Defaults to `UPCLOUD_CONTAINER_SSH_TARGET`. When set, skips address
++discovery and probes the supplied SSH target.
++
++### `--container-ssh-users <users>`
++
++Optional. Defaults to `UPCLOUD_CONTAINER_USERNAME_CANDIDATES` or `root ubuntu`.
++The value is a space-separated list of usernames tried during SSH target
++discovery.
++
++### `--container-run-network <mode>`
++
++Optional. Defaults to `UPCLOUD_CONTAINER_RUN_NETWORK` or `slirp4netns`. Passed
++to Podman for disposable container runs. Podman is the container runtime used
++inside the runner.
++
++### `--container-run-tmpfs-size <size>`
++
++Optional. Defaults to `UPCLOUD_CONTAINER_RUN_TMPFS_SIZE` or `1g`. Passed to
++Podman as the temporary work directory size.
++
++### `--container-run-read-only`
++
++Optional boolean flag. Defaults to `UPCLOUD_CONTAINER_RUN_READ_ONLY` or true.
++When enabled, disposable containers get a read-only root filesystem and should
++write temporary data only to configured writable mounts such as the workdir
++tmpfs. Set `UPCLOUD_CONTAINER_RUN_READ_ONLY=0` only for images that require a
++writable root filesystem.
++
++### `--container-run-user <user>`
++
++Optional. Defaults to `UPCLOUD_CONTAINER_RUN_USER`. When set, runs the
++disposable container as that user.
++
++### `--container-run-workdir <path>`
++
++Optional. Defaults to `UPCLOUD_CONTAINER_RUN_WORKDIR` or `/workspace`. Passed
++to Podman as the container working directory.
++
++### `--container-run-timeout <duration>`
++
++Optional. Defaults to `UPCLOUD_CONTAINER_RUN_TIMEOUT` or `30m`. Durations use
++Go duration syntax such as `30s`, `5m`, or `1h`; integer environment values
++are interpreted as seconds.
++
++### `--container-start-timeout <duration>`
++
++Optional. Defaults to `UPCLOUD_CONTAINER_START_TIMEOUT` or `10m`. This bounds
++runner create/start/bootstrap. Durations use Go duration syntax; integer
++environment values are seconds.
++
++### `--runner-dns-servers <ip,ip>`
++
++Optional. Defaults to `BUS_RUNNER_DNS_SERVERS`. Use a comma-separated list of
++DNS server IP addresses. Empty disables DNS override.
++
++### `--runner-netplan-mode <mac-match>`
++
++Optional. Defaults to `BUS_RUNNER_NETPLAN_MODE` or `mac-match`. `mac-match`
++matches the provider-discovered NIC MAC address. This is the only production
++safe mode. `bus-integration-ssh-runner` rejects unsupported modes with
++`unsupported runner netplan mode`. In `mac-match` mode, a missing discovered
++MAC fails with `runner netplan mode mac-match requires interface MAC` instead
++of guessing an interface.
++
++### `--runner-apply-netplan`
++
++Optional boolean flag. Defaults to `BUS_RUNNER_APPLY_NETPLAN` or false.
++Enable only when runner bootstrap should render and apply netplan before
++package installation.
++
++### `--runner-delete-stop-first`
++
++Optional boolean flag. Defaults to `BUS_RUNNER_DELETE_STOP_FIRST` or true.
++When true, delete first stops the runner if it is not already in a
++delete-ready state.
++
++### `--runner-delete-ready-states <states>`
++
++Optional. Defaults to `BUS_RUNNER_DELETE_READY_STATES` or `stopped`. Use
++comma-separated generic lifecycle states. Production-safe value is `stopped`.
++Other values are accepted as strings, but misspelled or provider-unmapped
++states will not match and can make deletion wait until
++`--runner-delete-timeout`.
++
++### `--runner-transient-states <states>`
++
++Optional. Defaults to `BUS_RUNNER_TRANSIENT_STATES` or `maintenance,pending`.
++Use comma-separated generic lifecycle states that should be polled through.
++Production-safe values include `maintenance` and `pending`. Other values are
++accepted as strings, but misspelled or provider-unmapped states will not match
++and may produce a faster delete failure instead of a retry.
++
++### `--runner-delete-timeout <duration>`
++
++Optional. Defaults to `BUS_RUNNER_DELETE_TIMEOUT` or `10m`. Durations use Go
++duration syntax; integer environment values are seconds.
++
++### `--runner-delete-poll-interval <duration>`
++
++Optional. Defaults to `BUS_RUNNER_DELETE_POLL_INTERVAL` or `5s`. Durations use
++Go duration syntax; integer environment values are seconds.
++
++### `--runner-delete-storage`
++
++Optional boolean flag. Defaults to `BUS_RUNNER_DELETE_STORAGE` or true. When
++true, runner storage is deleted with the runner. This is destructive for the
++runner disk. Set `BUS_RUNNER_DELETE_STORAGE=0` or omit this flag when the disk
++must be preserved for inspection.
++
++### `--runner-ssh-ready-timeout <duration>`
++
++Optional. Defaults to `BUS_RUNNER_SSH_READY_TIMEOUT` or `10m`. This bounds the
++provider-state and SSH TCP readiness wait. Durations use Go duration syntax;
++integer environment values are seconds.
++
++### `--runner-ssh-ready-poll-interval <duration>`
++
++Optional. Defaults to `BUS_RUNNER_SSH_READY_POLL_INTERVAL` or `5s`. Durations
++use Go duration syntax; integer environment values are seconds.
++
++## Sources
++
++- [bus-integration-upcloud runbook](./bus-integration-upcloud)
+diff --git a/docs/modules/bus-integration-upcloud.md b/docs/modules/bus-integration-upcloud.md
+index 65f40097..09eb3e6b 100644
+--- a/docs/modules/bus-integration-upcloud.md
++++ b/docs/modules/bus-integration-upcloud.md
+@@ -3,238 +3,855 @@ title: bus-integration-upcloud — UpCloud event integration
+ description: bus-integration-upcloud is the event-driven UpCloud worker for Bus VM and container workflows.
+ ---
+ 
+-## `bus-integration-upcloud` — UpCloud event integration
++## Run The UpCloud Worker
++
++Deploy and verify the worker that handles Bus VM and container events through
++UpCloud. VM means virtual machine. The worker listens to Bus Events, operates
++UpCloud resources, and publishes response events for cloud-neutral API
++providers such as `bus-api-provider-vm` and `bus-api-provider-containers`.
++
++Use this page as the production runbook. The full flag and environment
++reference is in [bus-integration-upcloud option reference](./bus-integration-upcloud-reference.md).
++
++### How It Works
++
++The Bus Events API is the HTTP event service provided by
++`bus-api-provider-events`. The UpCloud worker receives request events,
++performs UpCloud API actions, and publishes correlated response events. A
++correlated response event carries the same request identifier so the caller can
++match the response to the original request.
++
++A request/reply worker is a long-running process that listens for request
++events and publishes matching response events. Account isolation means users
++can see and control only resources owned by their own Bus account.
++
++For container execution, UpCloud owns VM lifecycle only. SSH means Secure
++Shell. `bus-integration-ssh-runner` owns SSH keys, known-hosts handling,
++script execution, and foreground command output.
++
++## Prerequisites
++
++### Environment
++
++Run the worker on a Linux host or container with a POSIX shell. The host must
++reach the configured Bus Events API URL and `https://api.upcloud.com/1.3`.
++When a container runner has only a private IP address,
++`bus-integration-upcloud` must reach it for SSH readiness probes and
++`bus-integration-ssh-runner` must reach it for SSH execution.
++
++The examples use systemd for production service management. Other supervisors
++are supported when they provide the same basics: inject secrets outside Git,
++restart on failure, run from a stable working directory, and capture stderr
++logs.
++
++For systemd deployments, the operator needs root or `sudo` access to create
++the selected `/etc/systemd/system/bus-integration-upcloud-*.service`, set environment-file
++permissions, run `systemctl`, and read `journalctl`. For systemd, the default
++environment-file ownership is `root:root` with mode `0600` because systemd
++reads it before starting the service. For non-systemd supervisors, make the
++file readable only by the supervisor or service user that reads it.
++Privileged examples below assume a root shell. If you are not root, prefix
++`systemctl`, service-file writes, and permission changes with `sudo`.
++
++Required command-line tools are the Bus binaries listed below and `curl` for
++HTTP readiness checks. On systemd hosts, the production procedure also uses
++`systemctl`, `journalctl`, `install`, `ls`, `getent`, `groupadd`, `useradd`,
++and `id`. If the service user and group are pre-created by packaging, skip the
++user/group creation commands.
++
++Systemd prerequisite checklist:
++
++- `bus` user and group exist, or the operator can create them.
++- `/var/lib/bus` is writable by the `bus` service user.
++- `/usr/local/bin/bus-integration-upcloud` points to the matching release binary.
++- `/etc/bus` is a root-owned configuration directory.
++- The selected mode-specific environment file is `root:root` with mode `0600`.
++
++### Version Pinning
++
++Use one BusDK release set for these components:
++
++- `bus-integration-upcloud`
++- `bus-integration-ssh-runner`
++- `bus-api-provider-events`
++- `bus-api-provider-vm`
++- `bus-api-provider-containers`
++- `bus-vm`
++- `bus-containers`
++
++For release images or packages, use the same release tag for each service. For
++source deployments, pin and deploy one exact superproject checkout. Do not mix
++an older UpCloud worker with newer Events, VM, or container providers.
++
++Install the matching release binaries, packages, or service images before
++using this runbook. Installation method is deployment-specific; the
++requirement here is that every BusDK component comes from the same release set.
++Operators using release artifacts should start from the BusDK release or
++package source used by their deployment, for example
++[BusDK releases](https://github.com/busdk/busdk/releases), and install all
++required BusDK binaries from the same release tag.
++
++Verify command availability before deployment:
+ 
+-`bus-integration-upcloud` is the event-driven worker for UpCloud-specific VM
+-and container operations. It listens for cloud-neutral Bus Events and emits
+-correlated result/status events.
++```sh
++bus-integration-upcloud --help
++bus-integration-ssh-runner --help
++bus auth --help
++bus operator --help
++bus events listen --help
++bus vm --help
++bus containers --help
++```
++
++Success means each command prints help and exits successfully.
++
++For an existing deployment, verify the deployed release tag with your package,
++image, or service
++metadata. A simple service-environment convention is to set the same
++`BUSDK_RELEASE` value in each Bus service environment file:
++
++```sh
++grep '^BUSDK_RELEASE=' /etc/bus/*.env
++```
++
++Success means every printed value is the same release tag, for example
++`BUSDK_RELEASE=v0.0.123`.
++
++### URLs
++
++Set `BUS_API_BASE_URL` to the public Bus API base URL used by `bus vm` and
++`bus containers`, for example `https://example.test`.
++`BUS_API_BASE_URL` is used by verification commands, not by
++`bus-integration-upcloud`.
++
++Set `BUS_EVENTS_API_URL` to the Bus Events API collection URL including
++`/api/v1/events`, for example `https://example.test/api/v1/events`.
++`BUS_EVENTS_API_URL` is consumed by `bus-integration-upcloud` through
++`--events-url` or the matching environment default.
++Avoid a trailing slash. `BUS_API_BASE_URL` and `BUS_EVENTS_API_URL` normally
++share the same origin in production, but they may differ when the Events API is
++served from a separate host. If a reverse proxy rewrites paths, configure
++`BUS_EVENTS_API_URL` to the externally reachable post-rewrite collection path
++that clients actually call.
++
++### Startup Order And Preflight Service Checks
++
++For a new shell session, set `BUS_API_BASE_URL` and `BUS_EVENTS_API_URL`
++before the service checks:
++
++```sh
++export BUS_API_BASE_URL="https://example.test"
++export BUS_EVENTS_API_URL="https://example.test/api/v1/events"
++```
++
++For cold deployment startup, start `bus-api-provider-events` before the
++UpCloud worker. Start `bus-api-provider-vm` and
++`bus-api-provider-containers` after the UpCloud worker so public API providers
++do not become active before request/reply workers are available. If a process
++supervisor starts public API providers earlier, their readiness may stay
++unhealthy until the UpCloud worker connects.
++
++For VM-only operation, use this order:
+ 
+-Use this integration when a Bus deployment should control UpCloud VMs or a
+-configured UpCloud container runner through Bus Events. User-facing HTTP APIs
+-remain available through modules such as `bus-api-provider-vm` and
+-`bus-api-provider-containers`; this process is the UpCloud worker behind those
+-event flows.
++1. `bus-api-provider-events`
++2. `bus-integration-upcloud`
++3. `bus-api-provider-vm`
+ 
+-The worker supports Bus Events API mode, a deterministic static provider for
+-local checks, and the real UpCloud HTTP API provider. It handles VM
+-status/start/stop and can create, start, or clean up the configured container
+-runner. Generic SSH transport is handled by
+-`bus-integration-ssh-runner` through Bus Events.
++For container operation, use this order:
+ 
+-For local development, run the static provider against a Bus Events API:
++1. `bus-api-provider-events`
++2. `bus-integration-ssh-runner`
++3. `bus-integration-upcloud`
++4. `bus-api-provider-containers`
++
++Verify provider command availability:
+ 
+ ```sh
+-bus-integration-upcloud --events-url "$BUS_EVENTS_API_URL"
++bus-api-provider-events --help
++bus-api-provider-vm --help
++bus-api-provider-containers --help
+ ```
+ 
+-`BUS_API_TOKEN` is a normal Bus API JWT with audience `ai.hg.fi/api`. It
+-must include the domain scopes for the events this worker listens to and emits,
+-such as `vm:read`, `vm:write`, `container:read`, `container:run`, and
+-`container:delete`. Internal runner lifecycle events also require
+-`container:admin` when the containers provider exposes
+-`/api/internal/containers/runner` through the Events backend.
+-If that token is issued by `bus-api-provider-auth` as an internal service token,
+-set `BUS_AUTH_INTERNAL_TOKEN_TTL_SECONDS` long enough for the expected
+-VM/container operation lifetime or rotate/restart the worker before token
+-expiry.
++Success means each provider command prints help and exits successfully. If a
++command is missing, install the matching BusDK release binary before
++continuing.
+ 
+-For real UpCloud VM lifecycle calls, use the `upcloud` provider:
++Verify the Events API is reachable before starting the worker:
+ 
+ ```sh
+-bus-integration-upcloud \
+-  --provider upcloud \
+-  --events-url "$BUS_EVENTS_API_URL" \
+-  --vm-name "$UPCLOUD_VM_NAME" \
+-  --container-runner-name "$UPCLOUD_CONTAINER_RUNNER_NAME"
++bus events listen --api-url "$BUS_EVENTS_API_URL" --name bus.vm.status.response --no-follow
++```
++
++Success returns an empty replay or existing matching events without a
++connection error. The event name is only a replay filter in this check; it
++does not require a VM deployment. If VM or container API providers are already
++started, verify their public API service is reachable:
++
++```sh
++curl -fsS "$BUS_API_BASE_URL/readyz"
++```
++
++Success means HTTP status 2xx. If the provider returns a non-2xx not-ready
++response before the worker connects, that is acceptable only before startup;
++connection refusal, DNS failure, or TLS failure must be fixed before
++continuing.
++
++Use service names matching the binary names when installing these as
++long-running services. See
++[bus-api-provider-events](./bus-api-provider-events.md),
++[bus-api-provider-vm](./bus-api-provider-vm.md),
++[bus-api-provider-containers](./bus-api-provider-containers.md), and
++[bus-integration-ssh-runner](./bus-integration-ssh-runner.md) for the provider
++commands and options.
++
++### Tokens And Credentials
++
++Do not commit `BUS_API_TOKEN`, `UPCLOUD_TOKEN`, SSH keys, or local environment
++files. This repository is public; secrets must stay in operator-controlled
++secret storage.
++
++`BUS_API_TOKEN` is read directly by `bus-integration-upcloud` and used to
++access the Bus Events API. `SERVICE_OR_USER_JWT` is only a local shell helper
++used in examples before exporting `BUS_API_TOKEN`.
++
++#### Required Production Token
++
++For normal VM and end-user container events, `BUS_API_TOKEN` must contain a
++Bus API JSON Web Token (JWT) with audience `ai.hg.fi/api`. The recommended
++production default is the narrowest API token that matches the public API
++events the worker processes.
++
++Default production choice: use one service-issued, narrow-scoped
++API-audience token per worker mode.
++
++Use these public API token variants for `BUS_API_TOKEN`:
++
++- VM-only worker: `ai.hg.fi/api` with `vm:read vm:write`.
++- Container worker: `ai.hg.fi/api` with `container:read container:run container:delete`.
++
++Plan token rotation before running this as a service. If `BUS_API_TOKEN`
++expires, replace the secret in the environment file and restart the service.
++Use a service-issued token for long-running workers when the deployment
++supports it; use a user token only for operator-controlled short-lived runs.
++The operator command requires an active operator/admin account or service
++context that is allowed to issue API-audience service tokens.
++
++Create a VM-only service-issued API token through operator tooling:
++
++```sh
++bus operator token --format token issue \
++  --subject bus-integration-upcloud \
++  --audience ai.hg.fi/api \
++  --scope 'vm:read vm:write'
++```
++
++Create a container-only service-issued API token through operator tooling:
++
++```sh
++bus operator token --format token issue \
++  --subject bus-integration-upcloud \
++  --audience ai.hg.fi/api \
++  --scope 'container:read container:run container:delete'
++```
++
++Success prints only the token string on stdout. A permission failure means the
++operator account or service context cannot issue tokens for the requested
++audience or scopes.
++
++#### Smoke-Test User Tokens
++
++Use the `bus auth token` examples in this subsection only for smoke tests or
++operator-controlled short-lived runs. They are not the recommended production
++service-token path.
++
++Before creating end-user API tokens, complete the normal `bus auth` login and
++one-time password verification flow and confirm the user is approved:
++
++```sh
++bus auth login --email user@example.com
++bus auth verify --email user@example.com --otp '<one-time-password-from-login-flow>'
++bus auth status
++```
++
++See [bus-auth](./bus-auth.md) for the full registration and approval flow.
++
++Create an approved user API token for VM-only smoke tests:
++
++```sh
++bus auth token --scope 'vm:read vm:write'
++```
++
++Create an approved user API token for container-only smoke tests:
++
++```sh
++bus auth token --scope 'container:read container:run container:delete'
++```
++
++#### UpCloud Token
++
++`UPCLOUD_TOKEN` must come from a deployment secret, local secret store, or
++untracked environment file.
++
++Use the least-privilege UpCloud credential boundary supported by the
++deployment. VM-only workers need access to the configured VM. Container
++workers need access to runner server, network, and storage operations.
++Destructive delete permissions are required only for runner cleanup modes. Use
++the current [UpCloud API documentation](https://developers.upcloud.com/1.3/)
++and account documentation for provider-side role names.
++
++Verify VM credentials with the VM-only one-shot diagnostic before enabling a VM
++worker:
++
++```sh
++bus-integration-upcloud --provider upcloud --check-vm-status --vm-name "$UPCLOUD_VM_NAME"
++```
++
++Success prints one JSON VM status response.
++
++For container-only deployments with an existing runner, verify that the token
++can read the runner as an UpCloud server:
++
++```sh
++bus-integration-upcloud --provider upcloud --check-vm-status --vm-name "$UPCLOUD_CONTAINER_RUNNER_NAME"
++```
++
++Success prints one JSON server status response. If the runner is created on
++demand and does not exist yet, the first disposable container run is the
++credential preflight for create, network attach, storage, and cleanup actions.
++
++### Optional Diagnostic Tools
++
++Troubleshooting examples use `journalctl` on systemd hosts, `curl` for HTTP
++checks, `nc` for TCP connectivity probes, and `ssh` for optional manual SSH
++checks. TCP means
++Transmission Control Protocol. Run TCP and SSH probes from the same network
++location as the UpCloud worker.
++
++## Deploy The Worker With Systemd
++
++Recommended default path: deploy one systemd service per worker mode. Use a
++VM-only service for VM lifecycle events, a container service for container
++runner events, and a separate protected administration service only when the
++deployment needs internal runner administration. Protected administration is
++out of scope for this public VM/container runbook; it applies only to internal
++runner operations such as protected runner start/delete with `container:admin`.
++Use the [option reference](./bus-integration-upcloud-reference.md) before
++deploying that separate mode. Use foreground commands only as smoke tests or
++as the command body for a non-systemd supervisor.
++
++Choose one mode before copying commands:
++
++- VM-only: use `bus-integration-upcloud-vm.service` and `/etc/bus/bus-integration-upcloud-vm.env`.
++- Container-only: use `bus-integration-upcloud-containers.service` and `/etc/bus/bus-integration-upcloud-containers.env`.
++
++For the shell commands below, run exactly one of these snippets.
++
++VM-only:
++
++```sh
++SELECTED_SERVICE=bus-integration-upcloud-vm
++SELECTED_ENV_FILE=bus-integration-upcloud-vm.env
++```
++
++Container-only:
++
++```sh
++SELECTED_SERVICE=bus-integration-upcloud-containers
++SELECTED_ENV_FILE=bus-integration-upcloud-containers.env
++```
++
++### Before You Start
++
++`SERVICE_OR_USER_JWT` is the local shell variable used below before exporting
++`BUS_API_TOKEN`. In production, set it from a service-issued token or secret
++manager, not from the smoke-test `bus auth token` examples.
++
++Final gate before running the worker:
++
++- Required services and preflight checks above have passed.
++- `SERVICE_OR_USER_JWT` is created or injected with the required audience and scopes.
++- `UPCLOUD_TOKEN` is injected from a secret manager or untracked environment file.
++- Target VM or runner names are set in the selected `ExecStart=` command.
++
++For VM-only production operation, inject a VM service token:
++
++```sh
++SERVICE_OR_USER_JWT="$(bus operator token --format token issue --subject bus-integration-upcloud --audience ai.hg.fi/api --scope 'vm:read vm:write')"
++```
++
++For container production operation, inject a container service token:
++
++```sh
++SERVICE_OR_USER_JWT="$(bus operator token --format token issue --subject bus-integration-upcloud --audience ai.hg.fi/api --scope 'container:read container:run container:delete')"
++```
++
++Validate the token before writing it to the service environment:
++
++```sh
++BUS_API_TOKEN="$SERVICE_OR_USER_JWT" bus events listen --api-url "$BUS_EVENTS_API_URL" --name bus.readiness.probe --no-follow
++```
++
++Success means the Events API accepts the token. Then write the same token value
++as `BUS_API_TOKEN` in the selected mode-specific environment file, for example
++`/etc/bus/bus-integration-upcloud-vm.env` or
++`/etc/bus/bus-integration-upcloud-containers.env`. The startup shell must fail
++closed when either token variable is missing.
++
++### Configure Environment
++
++Choose either shell exports or a service-manager environment file. Do not copy
++shell `export` syntax into a systemd `EnvironmentFile`; systemd files must
++contain direct `KEY=value` lines as shown below.
++
++For VM-only deployments:
++
++```sh
++: "${SERVICE_OR_USER_JWT:?set from service-issued token or secret manager; use bus auth token only for smoke tests}"
++: "${UPCLOUD_TOKEN:?set from an operator-controlled secret manager}"
++export BUS_API_TOKEN="$SERVICE_OR_USER_JWT"
++export BUS_API_BASE_URL="https://example.test"
++export BUS_EVENTS_API_URL="https://example.test/api/v1/events"
++export UPCLOUD_TOKEN
++export UPCLOUD_VM_NAME="ai-platform-gpu"
++```
++
++For container deployments:
++
++```sh
++: "${SERVICE_OR_USER_JWT:?set from service-issued token or secret manager; use bus auth token only for smoke tests}"
++: "${UPCLOUD_TOKEN:?set from an operator-controlled secret manager}"
++export BUS_API_TOKEN="$SERVICE_OR_USER_JWT"
++export BUS_API_BASE_URL="https://example.test"
++export BUS_EVENTS_API_URL="https://example.test/api/v1/events"
++export UPCLOUD_TOKEN
++export UPCLOUD_CONTAINER_RUNNER_NAME="ai-platform-container-runner"
++export UPCLOUD_CONTAINER_PRIVATE_NETWORK_NAME="ai-platform-private-fi-hel2"
++export UPCLOUD_CONTAINER_SSH_KEYS="/var/lib/bus/.ssh/bus_runner.pub"
++```
++
++Success means the shell exits before starting the worker if required secrets
++are missing.
++
++### Production Systemd Service
++
++Recommended production default: run the worker under systemd or another
++service supervisor. The service should stay running and subscribed to Bus
++Events. There is no startup success banner; the first successful VM or
++container API check is authoritative.
++
++For systemd deployments, save one of the following unit bodies to the selected
++service path, such as `/etc/systemd/system/bus-integration-upcloud-vm.service`
++or `/etc/systemd/system/bus-integration-upcloud-containers.service`, and adjust
++paths for the target host. The examples are mutually exclusive unless you
++intentionally deploy separate VM and container services.
++Before starting the service, replace the literal `ExecStart=` URL, VM name,
++runner name, and binary path with values for this deployment.
++
++Follow these systemd steps in order.
++
++Step 1: create the service user and working directory if they do not already
++exist:
++
++```sh
++getent group bus >/dev/null || groupadd --system bus
++id bus >/dev/null 2>&1 || useradd --system --gid bus --home-dir /var/lib/bus --shell /usr/sbin/nologin bus
++install -d -m 0750 -o bus -g bus /var/lib/bus
++```
++
++For container deployments, install the SSH public key used when creating the
++runner. In the command below, `./bus_runner.pub` is the public key from the SSH
++key pair already configured for `bus-integration-ssh-runner`; the matching
++private key must be available to the SSH runner before container execution can
++succeed:
++
++```sh
++install -d -m 0700 -o bus -g bus /var/lib/bus/.ssh
++install -m 0644 -o bus -g bus ./bus_runner.pub /var/lib/bus/.ssh/bus_runner.pub
++```
++
++Step 2: install the release binary at the path used by the unit. In the command below,
++`./bus-integration-upcloud` means the worker binary extracted from the matching
++BusDK release archive in the current directory. If a package or container
++image already installed the binary, skip this command and keep `ExecStart=`
++aligned with the installed path:
++
++```sh
++install -m 0755 ./bus-integration-upcloud /usr/local/bin/bus-integration-upcloud
++test -x /usr/local/bin/bus-integration-upcloud
++```
++
++Do not create or start the systemd unit until this check succeeds.
++
++Step 3: create the environment file path. Replace the filename with the
++mode-specific name selected above when running separate services.
++
++```sh
++install -d -m 0750 -o root -g bus /etc/bus
++install -m 0600 -o root -g root /dev/null "/etc/bus/$SELECTED_ENV_FILE"
++```
++
++Step 4: write the unit content to
++the selected service file.
++
++```sh
++${EDITOR:-vi} "/etc/systemd/system/$SELECTED_SERVICE.service"
++```
++
++Choose exactly one unit body.
++
++For container deployments:
++
++Before saving this unit, replace `https://example.test/api/v1/events` and
++`ai-platform-container-runner` with this deployment's Events API URL and runner
++name. Keep `EnvironmentFile=` aligned with the selected container environment
++file.
++
++```ini
++[Unit]
++Description=Bus UpCloud integration worker
++After=network-online.target bus-api-provider-events.service bus-integration-ssh-runner.service
++Wants=network-online.target
++
++[Service]
++User=bus
++WorkingDirectory=/var/lib/bus
++EnvironmentFile=/etc/bus/bus-integration-upcloud-containers.env
++ExecStart=/usr/local/bin/bus-integration-upcloud --provider upcloud --events-url https://example.test/api/v1/events --container-runner-name ai-platform-container-runner
++Restart=on-failure
++
++[Install]
++WantedBy=multi-user.target
++```
++
++For VM-only deployments:
++
++Before saving this unit, replace `https://example.test/api/v1/events` and
++`ai-platform-gpu` with this deployment's Events API URL and VM name. Keep
++`EnvironmentFile=` aligned with the selected VM environment file.
++
++```ini
++[Unit]
++Description=Bus UpCloud integration worker
++After=network-online.target bus-api-provider-events.service
++Wants=network-online.target
++
++[Service]
++User=bus
++WorkingDirectory=/var/lib/bus
++EnvironmentFile=/etc/bus/bus-integration-upcloud-vm.env
++ExecStart=/usr/local/bin/bus-integration-upcloud --provider upcloud --events-url https://example.test/api/v1/events --vm-name ai-platform-gpu
++Restart=on-failure
++
++[Install]
++WantedBy=multi-user.target
++```
++
++These units use literal `ExecStart=` values to avoid relying on systemd
++environment expansion in command arguments. If your configuration manager
++generates units, generate these literal values from the same source as the
++environment file.
++
++Systemd reads `EnvironmentFile=` as the service manager before starting the
++process, so `root:root` with mode `0600` is expected for systemd. Non-systemd
++supervisors may need the file readable by the service user instead. It must
++contain `BUS_API_TOKEN` directly:
++
++For VM-only service files:
++
++```dotenv
++BUSDK_RELEASE=v0.0.123
++BUS_API_TOKEN=<api-audience-jwt-with-vm-scopes>
++UPCLOUD_TOKEN=<upcloud-token-from-secret-manager>
++```
++
++For container service files:
++
++```dotenv
++BUSDK_RELEASE=v0.0.123
++BUS_API_TOKEN=<api-audience-jwt-with-container-scopes>
++UPCLOUD_TOKEN=<upcloud-token-from-secret-manager>
++UPCLOUD_CONTAINER_PRIVATE_NETWORK_NAME=ai-platform-private-fi-hel2
++UPCLOUD_CONTAINER_SSH_KEYS=/var/lib/bus/.ssh/bus_runner.pub
++```
++
++Do not copy placeholder values such as `<api-audience-jwt-with-vm-scopes>` or
++`<upcloud-token-from-secret-manager>` literally. Replace them with real values
++from the deployment secret manager. Write exactly one of the shown `KEY=value`
++blocks, with real secret values, into
++the selected environment file before checking permissions or starting the
++service.
++
++```sh
++${EDITOR:-vi} "/etc/bus/$SELECTED_ENV_FILE"
++```
++
++Verify the final permissions:
++
++```sh
++ls -l "/etc/bus/$SELECTED_ENV_FILE"
++```
++
++Expected result: the file is owned by `root:root` and has mode `0600`.
++
++For non-systemd deployments, configure the equivalent restart, logging,
++working-directory, and secret-injection behavior in the local supervisor. The
++supervisor must provide an equivalent log source to `journalctl`, such as
++container logs, a process-manager log file, or centralized service logs.
++
++Reload systemd and start the service:
++
++```sh
++systemctl daemon-reload
++systemctl start "$SELECTED_SERVICE"
++systemctl status "$SELECTED_SERVICE" --no-pager
++```
++
++Success means `systemctl status` reports `Active: active (running)` for
++the selected service. Enable it for boot only after the manual start succeeds:
++
++```sh
++systemctl enable "$SELECTED_SERVICE"
++```
++
++View logs after starting the service with
++`journalctl -u "$SELECTED_SERVICE"`.
++
++### First Verification
++
++Check the worker log immediately after startup:
++
++```sh
++journalctl -u "$SELECTED_SERVICE" -n 50 --no-pager
++```
++
++Success means the log has no repeated Events API connection errors,
++authentication errors, UpCloud credential errors, or
++`ssh response listener` errors after startup. The worker currently has no
++dedicated success banner; the reliable proof is the first successful VM or
++container request. Run the mode-specific success check immediately after this
++log check: [VM-Only Deployment](#vm-only-deployment) or
++[Container-Only Deployment](#container-only-deployment).
++
++You can also check Events API reachability from the same host:
++
++```sh
++bus events listen --api-url "$BUS_EVENTS_API_URL" --name bus.vm.status.response --no-follow
++```
++
++Success returns an empty replay or existing matching events without a
++connection error. The event name is only a replay filter in this check; it
++does not require a VM deployment.
++
++After the VM or container API provider starts, verify its HTTP readiness
++endpoint is reachable:
++
++```sh
++curl -fsS "$BUS_API_BASE_URL/readyz"
+ ```
+ 
+-### Command Options
++Success means HTTP status 2xx. After the worker starts, a non-2xx readiness
++response means the API service is still not ready. Connection refusal, DNS
++failure, or TLS failure means the API service or reverse proxy is not ready.
+ 
+-`--help` prints command help and exits.
++## Troubleshooting
+ 
+-`--self-test` runs a deterministic in-memory worker self-test and exits.
++### Mismatched BusDK Release Set
+ 
+-`--check-vm-status` prints one VM status response through the selected provider
+-and exits instead of opening the Events listener.
++Symptom: providers and integrations start, but events time out or response
++shapes do not match.
+ 
+-`--once` processes one event and exits.
++Check the installed release tags, image tags, package versions, or pinned
++source commits for every required component listed in
++[Version Pinning](#version-pinning).
+ 
+-`--events-url <url>` sets the Bus Events API base URL. It defaults to
+-`BUS_EVENTS_API_URL`.
++Expected result: all required BusDK components come from one release set.
+ 
+-`--provider <static|upcloud>` selects the backend. `static` is for local tests;
+-`upcloud` calls the UpCloud HTTP API.
++Corrective action: redeploy the mismatched component from the same release tag
++or source checkout as the rest of the Bus deployment.
+ 
+-`--upcloud-api-url <url>` sets the UpCloud API base URL. It defaults to
+-`UPCLOUD_API_BASE_URL` or the public UpCloud API.
++### Expired Or Invalid Token
+ 
+-`--vm-name <name-or-uuid>` selects the UpCloud VM used for VM runtime events.
+-It defaults to `UPCLOUD_VM_NAME`.
++Symptom: the Events API returns 401.
+ 
+-`--container-runner-name <name-or-uuid>` selects the UpCloud server used as the
+-container runner. It defaults to `UPCLOUD_CONTAINER_RUNNER_NAME`.
++Check:
+ 
+-`--container-codex-image <image>` sets the container image used for
+-`profile=codex`. It defaults to `UPCLOUD_CONTAINER_CODEX_IMAGE` or Alpine.
++```sh
++bus events listen --api-url "$BUS_EVENTS_API_URL" --name bus.vm.status.response --no-follow
++```
++
++Expected result: the command connects without an authentication error.
++
++Corrective action: issue or inject a new token with the correct audience and
++scopes. Use `ai.hg.fi/api` for user-visible VM/container events and
++`ai.hg.fi/internal` only for protected runner administration.
++
++### Missing Scope
++
++Symptom: VM, container, runner, or SSH events are denied with 403 or an
++authorization error.
++
++Check the token scopes against the requested operation:
+ 
+-`--container-zone <zone>` sets the UpCloud zone for runner creation. It
+-defaults to `UPCLOUD_CONTAINER_ZONE`.
++- VM status requires `vm:read`.
++- VM start or stop requires `vm:write`.
++- Container status requires `container:read`.
++- Container runs require `container:run`.
++- Owned container deletion requires `container:delete`.
++- Protected runner administration requires `container:admin`.
++- SSH runner script execution requires `ssh:run` on the SSH runner side.
++
++Corrective action: request the narrowest token containing the missing scope.
++
++### Events API Unreachable
++
++Symptom: listener startup or `bus events listen` fails with connection errors.
++
++Check:
++
++```sh
++bus events listen --api-url "$BUS_EVENTS_API_URL" --name bus.vm.status.response --no-follow
++```
+ 
+-`--container-plan <plan>` sets the UpCloud plan for runner creation. It
+-defaults to `UPCLOUD_CONTAINER_PLAN`.
++Expected result: the command returns an empty replay or matching events without
++a connection error.
+ 
+-`--container-os <template>` sets the UpCloud OS template for runner creation.
+-It defaults to `UPCLOUD_CONTAINER_OS`.
++Corrective action: verify `BUS_EVENTS_API_URL`, TLS termination, firewall
++rules, and that `bus-api-provider-events` is running. TLS means Transport
++Layer Security, the security layer used by HTTPS.
+ 
+-`--container-os-storage-size <gb>` sets the runner OS disk size. It defaults to
+-`UPCLOUD_CONTAINER_OS_STORAGE_SIZE`; zero leaves the provider default.
++### UpCloud Maintenance Timeout
+ 
+-`--container-network-mode <private|public>` selects runner networking. It
+-defaults to `UPCLOUD_CONTAINER_NETWORK_MODE`.
++Symptom: VM or runner startup waits until timeout while UpCloud reports a
++transient state.
+ 
+-`--container-private-network <name-or-uuid>` selects the private network for
+-private runner creation. It defaults to `UPCLOUD_CONTAINER_PRIVATE_NETWORK_NAME`.
++Check:
+ 
+-`--container-private-ip <ipv4>` requests a specific private IPv4 address for
+-the runner. It defaults to `UPCLOUD_CONTAINER_PRIVATE_IP`.
++```sh
++bus-integration-upcloud \
++  --provider upcloud \
++  --check-vm-status \
++  --vm-name "$UPCLOUD_VM_NAME"
++```
+ 
+-`--container-ssh-keys <paths>` gives space-separated SSH public key files used
+-when creating a runner. It defaults to `UPCLOUD_CONTAINER_SSH_KEYS`.
++Expected result: the command prints the current VM state.
+ 
+-`--container-ssh-target <user@host>` sets an explicit runner SSH target and
+-skips address discovery. It defaults to `UPCLOUD_CONTAINER_SSH_TARGET`.
++Corrective action: if the cloud operation is expected to take longer, increase
++the relevant timeout. Otherwise inspect the UpCloud server state and resolve
++the provider-side maintenance or pending operation.
+ 
+-`--container-ssh-users <users>` gives space-separated usernames to try during
+-target discovery. It defaults to `UPCLOUD_CONTAINER_USERNAME_CANDIDATES`.
++### SSH Readiness Timeout
+ 
+-`--container-run-network <mode>` sets the Podman network mode for disposable
+-runs. It defaults to `UPCLOUD_CONTAINER_RUN_NETWORK`.
++Symptom: container runs fail while waiting for SSH readiness.
+ 
+-`--container-run-tmpfs-size <size>` sets the tmpfs size for disposable
+-container work directories. It defaults to `UPCLOUD_CONTAINER_RUN_TMPFS_SIZE`.
++Define these placeholders before manual probes:
+ 
+-`--container-run-read-only` runs containers with a read-only root filesystem.
+-It defaults to `UPCLOUD_CONTAINER_RUN_READ_ONLY` and is enabled by default.
++- `RUNNER_HOST` is the runner IP address or host discovered from UpCloud.
++- `RUNNER_USER` is one of the configured SSH username candidates, commonly
++  `root` or `ubuntu`.
+ 
+-`--container-run-user <user>` sets the optional user inside the disposable
+-container. It defaults to `UPCLOUD_CONTAINER_RUN_USER`.
++Check TCP port 22 from the same network location as the worker:
+ 
+-`--container-run-workdir <path>` sets the disposable container working
+-directory. It defaults to `UPCLOUD_CONTAINER_RUN_WORKDIR`.
++```sh
++nc -vz "$RUNNER_HOST" 22
++```
+ 
+-`--container-run-timeout <duration>` sets the maximum foreground container run
+-duration. It defaults to `UPCLOUD_CONTAINER_RUN_TIMEOUT`.
++Expected result: TCP connects successfully.
+ 
+-`--container-start-timeout <duration>` sets the maximum runner start/bootstrap
+-duration. It defaults to `UPCLOUD_CONTAINER_START_TIMEOUT`.
++If direct SSH is allowed for the operator, check SSH with the same key material
++used by `bus-integration-ssh-runner`:
+ 
+-`--runner-dns-servers <ip,ip>` sets optional DNS servers for provider-driven
+-runner netplan bootstrap. It defaults to `BUS_RUNNER_DNS_SERVERS`.
++```sh
++ssh "$RUNNER_USER@$RUNNER_HOST" true
++```
+ 
+-`--runner-netplan-mode <mac-match>` sets the safe interface matching mode for
+-runner netplan bootstrap. It defaults to `BUS_RUNNER_NETPLAN_MODE`.
++Corrective action: verify private-network routing, firewall rules,
++`UPCLOUD_CONTAINER_SSH_TARGET`, SSH username candidates, and that the SSH
++runner has the private key matching the public key used to create the runner.
+ 
+-`--runner-apply-netplan` enables provider-driven netplan before package
+-installation. It defaults to `BUS_RUNNER_APPLY_NETPLAN`.
++### Runner Delete Timeout
+ 
+-`--runner-delete-stop-first` stops the runner before delete when required by
+-provider state. It defaults to `BUS_RUNNER_DELETE_STOP_FIRST`.
++Symptom: protected runner delete waits until timeout.
+ 
+-`--runner-delete-ready-states <states>` sets comma-separated generic states
+-that are safe to delete. It defaults to `BUS_RUNNER_DELETE_READY_STATES`.
++Check the runner state with the container provider or UpCloud status tools.
++Then compare the state with the configured delete-ready and transient states in
++the option reference.
+ 
+-`--runner-transient-states <states>` sets comma-separated generic states that
+-are retried while deleting. It defaults to `BUS_RUNNER_TRANSIENT_STATES`.
++Expected result: the runner reaches a delete-ready state, normally `stopped`,
++or a configured transient state that the worker can poll through.
+ 
+-`--runner-delete-timeout <duration>` sets the maximum runner delete lifecycle
+-wait. It defaults to `BUS_RUNNER_DELETE_TIMEOUT`.
++Corrective action: enable stop-before-delete when the provider requires a stop
++first, adjust timeout only when the cloud operation is legitimately slow, and
++disable storage deletion only when the disk must be preserved for inspection.
+ 
+-`--runner-delete-poll-interval <duration>` sets the runner delete lifecycle
+-poll interval. It defaults to `BUS_RUNNER_DELETE_POLL_INTERVAL`.
++## Success Check
+ 
+-`--runner-delete-storage` deletes runner storage with the runner. It defaults
+-to `BUS_RUNNER_DELETE_STORAGE`.
++### VM-Only Deployment
+ 
+-`--runner-ssh-ready-timeout <duration>` sets the maximum wait for provider
+-state and SSH TCP readiness. It defaults to `BUS_RUNNER_SSH_READY_TIMEOUT`.
++Verify only the VM provider path:
+ 
+-`--runner-ssh-ready-poll-interval <duration>` sets the runner SSH readiness
+-poll interval. It defaults to `BUS_RUNNER_SSH_READY_POLL_INTERVAL`.
++```sh
++bus vm --api-url "$BUS_API_BASE_URL" status --format json
++```
+ 
+-Use `--check-vm-status` for a one-shot diagnostic that prints VM status and
+-exits instead of listening for events. Real credentials must come from local
+-environment variables, deployment secrets, or untracked operator configuration;
+-do not commit them to the BusDK superproject.
++Success returns JSON containing the configured UpCloud VM state. For this
++worker path, the response must include a string state field and identify the
++provider or runtime as UpCloud. If the JSON only contains an `error` field,
++treat it as a failed verification. If it fails with 401 or 403, use the token
++and scope troubleshooting sections. If it times out, check Events API
++reachability and UpCloud maintenance state.
+ 
+-When UpCloud returns `SERVER_STATE_ILLEGAL` or reports the configured VM or
+-runner in maintenance during start, the worker treats that as transient. It
+-polls until the server leaves maintenance or the bounded operation timeout
+-expires, then returns a clear maintenance timeout error.
++Minimal valid shape:
+ 
+-For container execution, configure runner creation and target selection with
+-environment variables or the matching command flags. Common settings are
+-`UPCLOUD_CONTAINER_SSH_KEYS` for public key files used when creating a runner,
+-`UPCLOUD_CONTAINER_SSH_TARGET=user@host` for an explicit target, and
+-`UPCLOUD_CONTAINER_USERNAME_CANDIDATES` for discovered runner addresses. Runner
+-shape and network selection use `UPCLOUD_CONTAINER_ZONE`,
+-`UPCLOUD_CONTAINER_PLAN`, `UPCLOUD_CONTAINER_OS`,
+-`UPCLOUD_CONTAINER_NETWORK_MODE`, and
+-`UPCLOUD_CONTAINER_PRIVATE_NETWORK_NAME`. Private-key loading and known_hosts
+-validation are configured on the separate SSH runner process.
++```json
++{"status":{"state":"ready","provider":"upcloud"}}
++```
+ 
+-Before UpCloud publishes bootstrap or foreground container run events to the SSH
+-runner, it waits for the runner to reach a usable provider state and then polls
+-SSH TCP connectivity on the discovered or explicit target addresses. Configure
+-this bounded wait with `BUS_RUNNER_SSH_READY_TIMEOUT` and
+-`BUS_RUNNER_SSH_READY_POLL_INTERVAL`. Connection refused, timeout, and no-route
+-errors are treated as temporary until the configured timeout expires.
++### Container-Only Deployment
+ 
+-Optional DNS/netplan bootstrap is configured through generic runner variables,
+-not through UpCloud-specific container logic:
++Verify container status. This is a readiness check for account isolation and
++provider request/reply wiring; it does not prove runner creation, SSH dispatch,
++or cleanup:
+ 
+-```bash
+-BUS_RUNNER_DNS_SERVERS=1.1.1.1,8.8.8.8
+-BUS_RUNNER_NETPLAN_MODE=mac-match
+-BUS_RUNNER_APPLY_NETPLAN=1
++```sh
++bus containers --api-url "$BUS_API_BASE_URL" status --format json
+ ```
+ 
+-When enabled, UpCloud discovers the private runner NIC MAC address and passes it
+-as generic `network_bootstrap` data to `bus-integration-ssh-runner`. The SSH
+-runner applies netplan before the package-install/bootstrap script. Other
+-providers can omit this data or provide their own bootstrap config.
++Success returns account-scoped JSON for the requesting account only. For this
++worker path, the response must include a container status collection or a
++runner/runtime status object, and it must not include runs owned by another
++account. If the JSON only contains an `error` field, treat it as a failed
++verification. If it fails with 401 or 403, check token audience and
++`container:read`. If it times out, verify Events API reachability and that the
++UpCloud worker is running.
+ 
+-Runner deletion is also policy-driven:
++Minimal valid shape:
+ 
+-```bash
+-BUS_RUNNER_DELETE_STOP_FIRST=1
+-BUS_RUNNER_DELETE_READY_STATES=stopped
+-BUS_RUNNER_TRANSIENT_STATES=maintenance,pending
+-BUS_RUNNER_DELETE_TIMEOUT=10m
+-BUS_RUNNER_DELETE_POLL_INTERVAL=5s
+-BUS_RUNNER_DELETE_STORAGE=1
++```json
++{"items":[]}
+ ```
+ 
+-UpCloud maps its provider states into generic lifecycle states and the generic
+-policy decides when to stop, wait, retry, and delete. UpCloud still performs the
+-actual provider API stop/delete calls.
++Optional billable smoke test:
+ 
+-For container execution, run `bus-integration-ssh-runner` against the same Bus
+-Events API or host both UpCloud and SSH-runner registrations with
+-`bus-integration`. UpCloud sends `bus.ssh.script.run.request` events and waits
+-for correlated `bus.ssh.script.run.response` events.
++This command may create or start UpCloud runner resources and can incur cloud
++cost. Expected cleanup behavior is that disposable workload state is removed
++after the run, while runner VM/storage cleanup follows the configured runner
++delete policy.
+ 
+-To avoid startup-order coupling with the Events API, the worker supports the
+-shared integration listener retry environment: `BUS_EVENTS_LISTENER_RETRY`,
+-`BUS_EVENTS_LISTENER_RETRY_MIN`, `BUS_EVENTS_LISTENER_RETRY_MAX`,
+-`BUS_EVENTS_LISTENER_REQUIRED`, and `BUS_EVENTS_TOKEN_REFRESH`.
++The `codex` container profile must already be configured in the container API
++provider or deployment profile catalog. Use a profile that exists in your
++deployment if the name differs. Profiles are configured in the container API
++provider deployment; see
++[bus-api-provider-containers](./bus-api-provider-containers.md).
+ 
+-The worker also handles protected runner administration events:
+-`bus.containers.runner.status.request`,
+-`bus.containers.runner.start.request`, and
+-`bus.containers.runner.delete.request`. These operate on the configured runner
+-only and are intended for internal service cleanup/startup flows.
++Run it only when you intentionally want to verify real container execution:
+ 
+-### Sources
++```sh
++bus containers --api-url "$BUS_API_BASE_URL" run --profile codex -- sh -c 'printf BUS_CONTAINER_OK'
++```
+ 
+-- [bus-integration-upcloud README](../../../bus-integration-upcloud/README.md)
+-- [bus-integration-ssh-runner](./bus-integration-ssh-runner.md)
++Success returns a completed run response whose stdout contains
++`BUS_CONTAINER_OK`. The Events API should show a correlated SSH script request
++and response during the run. If the run fails before the runner starts, check
++container scopes and runner configuration. If it fails while waiting for SSH,
++use the SSH readiness troubleshooting path. If cleanup fails, use the runner
++delete troubleshooting path.

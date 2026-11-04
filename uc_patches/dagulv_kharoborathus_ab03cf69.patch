@@ -1,0 +1,61 @@
+From ab03cf69b78c7e3dfbdcb3799c86fb0d2de6ed2c Mon Sep 17 00:00:00 2001
+From: dagulv <dagulvsback@gmail.com>
+Date: Sun, 18 Oct 2026 13:07:14 +0200
+Subject: [PATCH] Authenticate OpenTofu with an UpCloud API token
+
+---
+ docs/kb/infra.md       | 2 +-
+ infra/README.md        | 8 ++------
+ infra/tofu/versions.tf | 2 +-
+ 3 files changed, 4 insertions(+), 8 deletions(-)
+
+diff --git a/docs/kb/infra.md b/docs/kb/infra.md
+index 72692b2..998dbee 100644
+--- a/docs/kb/infra.md
++++ b/docs/kb/infra.md
+@@ -79,7 +79,7 @@ Secrets:
+ - Secrets live in the `dev` and `prod` SOPS vaults, one Kubernetes `Secret` manifest per file, since that is the format `vault` manages. Only `data` and `stringData` are encrypted. Both vaults share one age key, kept in a Bitwarden custom field `AGE-SECRET-KEY`. `vault` requires a cluster name, so they name `none`.
+ - `secrets.sh` unlocks Bitwarden with the master password, decrypts every file of one vault, or the one file named after a colon, in memory and exports its `stringData` keys, then locks Bitwarden and runs the command. The password and session go through env, never argv. A set `SOPS_AGE_KEY` skips Bitwarden and is unset before the command runs.
+ - The Go app and Vite both let the process env win over their `.env`, and both expand `${POSTGRES_PASSWORD}` in a `.env` value from it. The dev Postgres container reads `POSTGRES_PASSWORD` from the process env too.
+-- UpCloud credentials: `UPCLOUD_USERNAME` is a safe value you export. `UPCLOUD_PASSWORD` and `TF_VAR_state_passphrase` live in the prod vault's `tofu.yaml`. The OpenTofu state stays local, encrypted and gitignored.
++- UpCloud credentials: an API token, not a user's password, since it expires within a year, can be limited to your IP and revoked alone. `UPCLOUD_TOKEN` and `TF_VAR_state_passphrase` live in the prod vault's `tofu.yaml`. The OpenTofu state stays local, encrypted and gitignored.
+ - Haloy passes each value `haloy.yaml` names to its container. The rest of the prod vault never leaves your machine.
+ - The Haloy API token lives in `~/.config/haloy` locally and in `/etc/haloy` on the server.
+ 
+diff --git a/infra/README.md b/infra/README.md
+index 331511a..289d9a4 100644
+--- a/infra/README.md
++++ b/infra/README.md
+@@ -18,7 +18,7 @@ Each has a `.env-sample` or `.env.example` beside it. The dev db also builds fro
+ |---|---|---|
+ | dev | `kharoborathus/app.yaml` | `POSTGRES_PASSWORD`, `ADMIN_PASSWORD`, `DEEPSEEK_API_KEY`, `TYPESAFE_API_KEY`, `BRAVE_API_KEY` |
+ | prod | `kharoborathus/app.yaml` | The dev keys plus `POSTGRES_CONNECTION_STRING` |
+-| prod | `kharoborathus/tofu.yaml` | `UPCLOUD_PASSWORD`, `TF_VAR_state_passphrase` |
++| prod | `kharoborathus/tofu.yaml` | `UPCLOUD_TOKEN`, `TF_VAR_state_passphrase` |
+ 
+ Each file is a Kubernetes `Secret` with the keys under `stringData`, since that is what `vault` manages. Nothing here deploys to a cluster, so `vault diff` and `vault apply` don't apply.
+ 
+@@ -46,11 +46,7 @@ Add one by writing the manifest to the open directory, for example `secrets/prod
+    go install github.com/haloydev/haloy/cmd/haloy@v0.1.0-beta.73
+    ```
+ 
+-2. Create an UpCloud API user. Seal its password and a state passphrase of at least 16 characters in the prod vault's `tofu.yaml`. Export the username:
+-
+-   ```bash
+-   export UPCLOUD_USERNAME=...
+-   ```
++2. Create an UpCloud API token under Account > API Tokens, limited to your IP. It lasts at most 365 days, so renew it before it expires. Seal it as `UPCLOUD_TOKEN` in the prod vault's `tofu.yaml`, with a state passphrase of at least 16 characters.
+ 
+ 3. Put your SSH public key and the Haloy API domain in `terraform.tfvars`. The server ignores later changes to either, so a wrong key locks you out:
+ 
+diff --git a/infra/tofu/versions.tf b/infra/tofu/versions.tf
+index f4fa684..553b19e 100644
+--- a/infra/tofu/versions.tf
++++ b/infra/tofu/versions.tf
+@@ -29,5 +29,5 @@ terraform {
+   }
+ }
+ 
+-# Credentials come from UPCLOUD_USERNAME and UPCLOUD_PASSWORD.
++# Credentials come from UPCLOUD_TOKEN. The provider still marks token auth experimental.
+ provider "upcloud" {}

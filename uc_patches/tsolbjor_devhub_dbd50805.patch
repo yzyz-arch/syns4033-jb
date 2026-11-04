@@ -1,0 +1,1134 @@
+From dbd50805909cd9bb6689227df0e3c85fb904868c Mon Sep 17 00:00:00 2001
+From: Thomas Solbjor <thomas.solbjor@fortedigital.com>
+Date: Sat, 22 Aug 2026 10:35:50 +0200
+Subject: [PATCH] Make UpCloud deployment-ready: object storage for
+ Loki/Velero, deploy guards
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+UpCloud previously came up degraded: Loki on a throwaway PVC, Velero
+never installed (so Forgejo's volume and Vault's snapshots had no
+backup), and a fresh deploy failed outright because external-dns's
+--atomic install waited on a Cloudflare token secret nothing had
+created.
+
+- tofu/upcloud: buckets <prefix>-loki and <prefix>-velero, one
+  object-storage user each with a bucket-scoped policy and access key
+  — UpCloud has no workload identity, so scoped keys are the ceiling.
+  Keys flow through gitignored secrets.env into Kubernetes Secrets;
+  they never enter values files or the published GitOps repo.
+- deploy.sh: upcloud arms for the Loki overlay and Velero target,
+  creates both credential Secrets, and skips external-dns with
+  instructions instead of rolling back the deploy when the Cloudflare
+  secret is missing.
+- New upcloud overlays: Loki S3 backend (creds via the AWS env-var
+  chain), Velero with the aws plugin against the S3-compatible
+  endpoint and kopia FS backup — no snapshot plugin exists, and FS
+  backup cannot reach unmounted PVCs (documented in OPERATIONS.md).
+- quickstart: the upcloud DNS-zone detector checked a secret in a
+  cluster that does not exist yet at that step, wedging
+  --run-remaining-steps; it now checks public NS delegation.
+- Docs: UPCLOUD_SETUP.md claimed KMS auto-unseal (UpCloud has none —
+  3-of-5 manual keys) and an api_allowed_cidrs=[] example the module
+  rejects; all *_SETUP.md gain the gitops-repo and validate --e2e
+  steps; CLOUD_CAPABILITIES.md gap section rewritten to what remains.
+- Cleanup: dead tofu/scripts/ (wrong env vars, nonexistent outputs),
+  orphaned pre-Gateway cluster-issuer.yaml, stale GitLab/nginx
+  comments.
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
+---
+ CLAUDE.md                                     |  7 +-
+ devhub                                        |  4 +-
+ k8s/docs/AWS_SETUP.md                         | 22 +++++-
+ k8s/docs/AZURE_SETUP.md                       | 22 +++++-
+ k8s/docs/CLOUD_CAPABILITIES.md                | 51 +++++++------
+ k8s/docs/GCP_SETUP.md                         | 22 +++++-
+ k8s/docs/LOCAL_SETUP.md                       | 19 +++--
+ k8s/docs/OPERATIONS.md                        |  7 ++
+ k8s/docs/UPCLOUD_SETUP.md                     | 44 ++++++++---
+ .../upcloud/cert-manager/cluster-issuer.yaml  | 38 ----------
+ .../devops/monitoring/loki-values.yaml        | 50 +++++++++++++
+ .../upcloud/devops/velero/values.yaml         | 51 +++++++++++++
+ k8s/scripts/deploy.sh                         | 37 ++++++++++
+ k8s/scripts/quickstart.sh                     | 10 ++-
+ k8s/scripts/sync-tofu-outputs.sh              |  9 +++
+ tofu/aws/workload/main.tf                     |  2 +-
+ tofu/azure/workload/main.tf                   |  2 +-
+ tofu/gcp/workload/main.tf                     |  2 +-
+ tofu/scripts/.env.example                     |  5 --
+ tofu/scripts/setup-cluster.sh                 | 72 ------------------
+ tofu/scripts/upcloud-login.sh                 | 62 ----------------
+ tofu/upcloud/dev/outputs.tf                   | 28 +++++++
+ tofu/upcloud/modules/cluster/main.tf          | 73 +++++++++++++++++++
+ tofu/upcloud/modules/cluster/outputs.tf       | 32 ++++++++
+ tofu/upcloud/prod/outputs.tf                  | 28 +++++++
+ tofu/upcloud/workload/main.tf                 |  2 +-
+ 26 files changed, 473 insertions(+), 228 deletions(-)
+ delete mode 100644 k8s/overlays/upcloud/cert-manager/cluster-issuer.yaml
+ create mode 100644 k8s/overlays/upcloud/devops/monitoring/loki-values.yaml
+ create mode 100644 k8s/overlays/upcloud/devops/velero/values.yaml
+ delete mode 100644 tofu/scripts/.env.example
+ delete mode 100755 tofu/scripts/setup-cluster.sh
+ delete mode 100755 tofu/scripts/upcloud-login.sh
+
+diff --git a/CLAUDE.md b/CLAUDE.md
+index 0414b68..ac97885 100644
+--- a/CLAUDE.md
++++ b/CLAUDE.md
+@@ -238,7 +238,11 @@ Registering a workload cluster is enough to start receiving apps — no manifest
+ 
+ Per cloud, tofu also provisions: Loki log storage + identity, Velero backup
+ storage + identity, a Vault auto-unseal KMS key + identity, an external-dns
+-identity, and a tainted spot/preemptible CI node pool.
++identity, and a tainted spot/preemptible CI node pool. UpCloud differs: no
++workload identity (bucket-scoped access keys for Loki/Velero instead, turned
++into Kubernetes Secrets by deploy.sh), no Vault KMS seal (manual 3-of-5
++unseal), no DNS product (external-dns uses Cloudflare with a hand-made token
++secret), and Velero uses kopia file-system backup — no snapshot plugin.
+ 
+ Forgejo keeps repositories, packages and registry blobs on its **PersistentVolume**
+ — it supports local disk or S3-compatible storage only, and Azure Blob and GCS have
+@@ -314,7 +318,6 @@ devhub/
+ │   ├── {upcloud,azure,gcp,aws}/
+ │   │   ├── modules/cluster/           #   main.tf, addons.tf (AWS), platform.tf, variables, outputs
+ │   │   ├── dev/ prod/ workload/       #   root modules: backend.tf + tfvars.example + main + outputs
+-│   └── scripts/                       # shared tofu helpers
+ ├── k8s/
+ │   ├── base/
+ │   │   ├── devops/                    # per-service Helm values + manifests
+diff --git a/devhub b/devhub
+index 18b46fb..7ca18dd 100755
+--- a/devhub
++++ b/devhub
+@@ -244,7 +244,7 @@ cmd_bootstrap() {
+         fi
+ 
+         # Managed PostgreSQL has no Terraform resource for local users, and both
+-        # Keycloak and GitLab fail to start without them — so this runs before the
++        # Keycloak and Forgejo fail to start without them — so this runs before the
+         # platform deploy, not after.
+         if [[ "$(env_cloud_of "$ENV_ARG")" != "upcloud" ]]; then
+             log_phase "Creating managed PostgreSQL users"
+@@ -500,7 +500,7 @@ Platform / workload clusters
+   register --env <env> [--platform-env <env>]
+                                   register a workload cluster with the platform
+   ca --env <env>                  local CA + TLS certificates
+-  cluster --env <env>             nginx-ingress + cluster resources
++  cluster --env <env>             cluster prerequisites (namespaces, priority classes)
+ 
+ Identity, secrets, GitOps
+   vault --env <env> [action]      init | unseal | configure | seed-secrets | status
+diff --git a/k8s/docs/AWS_SETUP.md b/k8s/docs/AWS_SETUP.md
+index 52e9489..b73ead2 100644
+--- a/k8s/docs/AWS_SETUP.md
++++ b/k8s/docs/AWS_SETUP.md
+@@ -210,7 +210,27 @@ monitoring stack, Kyverno, Reloader, Headlamp, Homepage and Velero **through
+ git** — ArgoCD
+ self-heals manual `helm upgrade`s away. See [OPERATIONS.md](OPERATIONS.md).
+ 
+-### Step 6: Verify
++### Step 6: Publish the environment's GitOps repository
++
++```bash
++./devhub gitops-repo --env aws-dev
++```
++
++Publishes a standalone copy of the platform into this environment's own
++Forgejo and points ArgoCD at it. From then on the environment is independent
++of this devhub checkout — work on it from its own repository. If you gave
++`setup` a mirror URL and token, Forgejo pushes every commit to the
++off-cluster mirror.
++
++### Step 7: Verify
++
++```bash
++# Browser end-to-end: one Keycloak sign-in, then read-only assertions
++# against every service (Grafana datasources, ArgoCD apps, Vault seal state…)
++./devhub validate --e2e --env aws-dev
++```
++
++#### Further checks
+ 
+ ```bash
+ # Check all services
+diff --git a/k8s/docs/AZURE_SETUP.md b/k8s/docs/AZURE_SETUP.md
+index b9e0f92..39b000e 100644
+--- a/k8s/docs/AZURE_SETUP.md
++++ b/k8s/docs/AZURE_SETUP.md
+@@ -194,7 +194,27 @@ monitoring stack, Kyverno, Reloader, Headlamp, Homepage and Velero **through
+ git** — ArgoCD
+ self-heals manual `helm upgrade`s away. See [OPERATIONS.md](OPERATIONS.md).
+ 
+-### Step 6: Verify
++### Step 6: Publish the environment's GitOps repository
++
++```bash
++./devhub gitops-repo --env azure-dev
++```
++
++Publishes a standalone copy of the platform into this environment's own
++Forgejo and points ArgoCD at it. From then on the environment is independent
++of this devhub checkout — work on it from its own repository. If you gave
++`setup` a mirror URL and token, Forgejo pushes every commit to the
++off-cluster mirror.
++
++### Step 7: Verify
++
++```bash
++# Browser end-to-end: one Keycloak sign-in, then read-only assertions
++# against every service (Grafana datasources, ArgoCD apps, Vault seal state…)
++./devhub validate --e2e --env azure-dev
++```
++
++#### Further checks
+ 
+ ```bash
+ # Check all services
+diff --git a/k8s/docs/CLOUD_CAPABILITIES.md b/k8s/docs/CLOUD_CAPABILITIES.md
+index e6ac1b4..d3da2e0 100644
+--- a/k8s/docs/CLOUD_CAPABILITIES.md
++++ b/k8s/docs/CLOUD_CAPABILITIES.md
+@@ -52,8 +52,8 @@ Vault as the source of truth for platform credentials via External Secrets.
+ 
+ | | UpCloud | Azure | GCP | AWS | local |
+ |---|---|---|---|---|---|
+-| Loki chunks in object storage | **—** local PVC | ✓ | ✓ | ✓ | — local PVC |
+-| Velero cluster backups | **—** | ✓ | ✓ | ✓ | — |
++| Loki chunks in object storage | ✓ (access key) | ✓ | ✓ | ✓ | — local PVC |
++| Velero cluster backups | ✓ (FS backup) | ✓ | ✓ | ✓ | — |
+ | Vault raft snapshots (CronJob) | ✓ | ✓ | ✓ | ✓ | ✓ |
+ | Forgejo state (repos, packages, registry) | PVC + Velero | PVC + Velero | PVC + Velero | PVC + Velero | PVC only |
+ | Node autoscaling | fixed pool | ✓ built-in | ✓ built-in | ✓ cluster-autoscaler | n/a |
+@@ -69,26 +69,30 @@ Vault as the source of truth for platform credentials via External Secrets.
+ 
+ ## Known gaps and what to do about them
+ 
+-### UpCloud: no Loki object storage, no Velero, no Vault auto-unseal
+-
+-The UpCloud module provisions object storage but not the Loki or Velero buckets,
+-and UpCloud has no Vault seal type. Consequences and mitigations:
+-
+-- **Logs** live on a 10Gi PVC and are lost when the Loki pod is replaced. Mitigate
+-  by adding a Loki bucket + access key to `tofu/upcloud/modules/cluster` and an
+-  `overlays/upcloud/devops/monitoring/loki-values.yaml` using the S3 backend with a
+-  custom endpoint (the AWS overlay is the template; credentials come from a key, not
+-  a role).
+-- **No cluster-object backups.** Managed PostgreSQL has its own backups, and Vault
+-  snapshots run, but Kubernetes objects and PVCs are not backed up. Same fix
+-  shape: a Velero bucket + key, then `overlays/upcloud/devops/velero/values.yaml`.
+-- **Vault needs 3 of 5 unseal keys after every restart.** `setup-vault.sh` prints
+-  the keys once and writes them to a mode-600 gitignored file; move that file to
+-  offline storage. Watch the `VaultSealed` alert — on this cloud it is not
+-  theoretical.
+-
+-Until those exist, `deploy.sh` skips Velero and the Loki overlay with a warning
+-rather than failing, so the platform still comes up.
++### UpCloud: access keys instead of workload identity, no Vault auto-unseal
++
++UpCloud's Managed Object Storage has no workload identity, so Loki and Velero
++each get a dedicated object-storage user with a bucket-scoped policy and an
++access key (`tofu/upcloud/modules/cluster`). The keys flow through
++`secrets.env` into Kubernetes Secrets (`loki-objstore-credentials`,
++`velero-objstore-credentials`) — never into values files or git. Remaining
++differences from the other clouds:
++
++- **Velero uses file-system backups** (kopia via the node agent) — there is no
++  UpCloud volume-snapshot plugin. FS backup only reaches volumes mounted by a
++  running pod: an unmounted PVC, such as `vault-snapshots` between CronJob
++  runs, is not captured. The Vault raft data itself (mounted by `vault-0`) is.
++- **Vault needs 3 of 5 unseal keys after every restart** — UpCloud has no
++  Vault seal type. `setup-vault.sh` prints the keys once and writes them to a
++  mode-600 gitignored file; move that file to offline storage. Watch the
++  `VaultSealed` alert — on this cloud it is not theoretical.
++- **Key rotation is manual**: taint the
++  `upcloud_managed_object_storage_user_access_key` resource, re-apply, re-run
++  `sync` and `deploy` for the affected components.
++
++If the tofu outputs lack the buckets or keys (module not yet re-applied),
++`deploy.sh` skips Velero and the Loki overlay with a warning rather than
++failing, so the platform still comes up.
+ 
+ ### Forgejo keeps its state on a volume, not in object storage
+ 
+@@ -138,7 +142,8 @@ the platform, not for testing its cloud behaviour.
+   (with the local admin account disabled) and as Keycloak's upstream IdP.
+ - **Simplest private networking** — GCP: private nodes plus Cloud NAT, private
+   Cloud SQL and Memorystore, one Workload Identity mechanism throughout.
+-- **Lowest cost / EU-only footprint** — UpCloud, accepting the three gaps above.
++- **Lowest cost / EU-only footprint** — UpCloud, accepting manual Vault unseal,
++  access keys instead of workload identity, and Cloudflare for DNS.
+ - **Fastest to try** — local.
+ 
+ Adding a cloud, or closing one of the gaps above, follows the same checklist:
+diff --git a/k8s/docs/GCP_SETUP.md b/k8s/docs/GCP_SETUP.md
+index e35b4bb..a05e78a 100644
+--- a/k8s/docs/GCP_SETUP.md
++++ b/k8s/docs/GCP_SETUP.md
+@@ -214,7 +214,27 @@ monitoring stack, Kyverno, Reloader, Headlamp, Homepage and Velero **through
+ git** — ArgoCD
+ self-heals manual `helm upgrade`s away. See [OPERATIONS.md](OPERATIONS.md).
+ 
+-### Step 6: Verify
++### Step 6: Publish the environment's GitOps repository
++
++```bash
++./devhub gitops-repo --env gcp-dev
++```
++
++Publishes a standalone copy of the platform into this environment's own
++Forgejo and points ArgoCD at it. From then on the environment is independent
++of this devhub checkout — work on it from its own repository. If you gave
++`setup` a mirror URL and token, Forgejo pushes every commit to the
++off-cluster mirror.
++
++### Step 7: Verify
++
++```bash
++# Browser end-to-end: one Keycloak sign-in, then read-only assertions
++# against every service (Grafana datasources, ArgoCD apps, Vault seal state…)
++./devhub validate --e2e --env gcp-dev
++```
++
++#### Further checks
+ 
+ ```bash
+ # Check all services
+diff --git a/k8s/docs/LOCAL_SETUP.md b/k8s/docs/LOCAL_SETUP.md
+index a86c865..44531ec 100644
+--- a/k8s/docs/LOCAL_SETUP.md
++++ b/k8s/docs/LOCAL_SETUP.md
+@@ -88,16 +88,23 @@ cd k8s/scripts
+ every platform Application sits at `Sync=Unknown`; the components keep running,
+ because they were installed with Helm first, but nothing reconciles.
+ 
+-Create it once Forgejo is up (log in at https://git.localhost, create the `devhub`
+-organisation and a `devhub` repository), then push this checkout:
++Publish it once Forgejo is up:
+ 
+ ```bash
+-git remote add forgejo https://git.localhost/devhub/devhub.git
+-git push forgejo main
++./devhub gitops-repo --env local
+ ```
+ 
+-For a private repository, register the credentials with ArgoCD as well
+-(`argocd repo add https://git.localhost/devhub/devhub.git --username ... --password ...`).
++This creates the repository in the environment's own Forgejo, pushes a
++standalone copy of the platform into it, and registers the credentials with
++ArgoCD. From then on the environment is independent of this devhub checkout.
++(In-cluster, ArgoCD clones Forgejo's Service name rather than
++`git.localhost` — glibc resolves `*.localhost` to loopback inside pods.)
++
++Then verify the whole environment from a browser:
++
++```bash
++./devhub validate --e2e --env local
++```
+ 
+ ## Access URLs
+ 
+diff --git a/k8s/docs/OPERATIONS.md b/k8s/docs/OPERATIONS.md
+index 4869d2b..2fe67d8 100644
+--- a/k8s/docs/OPERATIONS.md
++++ b/k8s/docs/OPERATIONS.md
+@@ -151,6 +151,13 @@ denied, so a leaked admin token cannot switch auditing off to cover its tracks.
+ | Managed PostgreSQL | Cloud-native PITR | continuous | `rds_backup_retention_days` / equivalent |
+ | Managed Redis/Valkey | Cloud snapshots | daily | `redis_snapshot_retention_days` |
+ 
++**UpCloud caveat:** Velero uses kopia file-system backup (no volume-snapshot
++plugin exists), which only reaches volumes mounted by a running pod. Vault's
++raft data (mounted by `vault-0`) is captured; the `vault-snapshots` PVC is
++only mounted while the CronJob runs and is usually **not** captured — copy a
++snapshot off-cluster (`kubectl cp`) whenever you want a restore point you can
++rely on independently of the cluster.
++
+ ### Verify (do this, do not assume)
+ 
+ ```bash
+diff --git a/k8s/docs/UPCLOUD_SETUP.md b/k8s/docs/UPCLOUD_SETUP.md
+index 1087c8a..398610f 100644
+--- a/k8s/docs/UPCLOUD_SETUP.md
++++ b/k8s/docs/UPCLOUD_SETUP.md
+@@ -30,7 +30,7 @@ Envoy Gateway / Gateway API (TLS via cert-manager / Let's Encrypt)
+     v (private SDN network)
+     +---> Managed PostgreSQL (Keycloak DB, Forgejo DB)
+     +---> Managed Valkey (Forgejo cache/sessions)
+-    +---> Managed Object Storage (Forgejo artifacts, registry, backups)
++    +---> Managed Object Storage (Loki log chunks, Velero backups)
+ ```
+ 
+ ## Guided path
+@@ -74,8 +74,10 @@ Asks for:
+   - your domain and the ACME contact address
+   - which CIDRs may reach the Kubernetes API (offers your current public IP,
+     specific CIDRs, or no public endpoint at all)
+-#   - the Managed Object Storage S3 endpoint
++  - the Managed Object Storage S3 endpoint for tofu state
+   - where tofu state lives
++  - optionally, an off-cluster mirror for the GitOps repository (URL + write
++    token) — the copy that survives losing the cluster
+ 
+ Then writes `tofu/upcloud/dev/backend.hcl` and `terraform.tfvars`, sets
+ `domain` / `acmeEmail` / `gitops.repoUrl` in `k8s/overlays/upcloud-dev/config.yaml`, and offers
+@@ -105,7 +107,8 @@ tofu init -backend-config=backend.hcl
+ # default — an internet-facing control plane should be a deliberate choice.
+ cp terraform.tfvars.example terraform.tfvars
+ #   api_allowed_cidrs = ["203.0.113.4/32"]   # office egress
+-#   api_allowed_cidrs = []                   # private endpoint only
++# UpCloud has no private API endpoint — the module rejects an empty list;
++# at least one CIDR is required (the other clouds accept [] for private-only).
+ tofu plan     # Review what will be created
+ tofu apply    # Provision (takes 10-15 min)
+ 
+@@ -121,7 +124,9 @@ This provisions:
+ - Managed Kubernetes cluster with private worker nodes
+ - Managed PostgreSQL (databases: `keycloak`, `forgejo`)
+ - Managed Valkey (Redis-compatible)
+-- Managed Object Storage with Forgejo S3 buckets
++- Managed Object Storage with buckets and scoped access keys for Loki (log
++  chunks) and Velero (cluster backups) — Forgejo keeps its state on a
++  PersistentVolume on every cloud
+ 
+ Review environment-specific settings in `tofu/upcloud/dev/main.tf` or `tofu/upcloud/prod/main.tf`.
+ 
+@@ -133,8 +138,9 @@ cd k8s/scripts
+ ```
+ 
+ This script:
+-- Reads tofu outputs (PG host, Valkey host, S3 endpoint, etc.)
+-- Writes them into `k8s/overlays/upcloud-dev/config.yaml`
++- Reads tofu outputs (PG host, Valkey host, buckets, access keys, etc.)
++- Writes them to `k8s/scripts/upcloud-dev/tofu-outputs.env` and `secrets.env`
++  (gitignored, mode 600) — `config.yaml` is never touched
+ - Fetches the cluster kubeconfig via `upctl`
+ 
+ ### Step 3: Configure Domain and Email
+@@ -173,7 +179,10 @@ export KUBECONFIG=upcloud-dev/kubeconfig
+ # Deploy the platform
+ ./deploy.sh --env upcloud-dev
+ 
+-# Initialise Vault (auto-unseals via cloud KMS; root token is revoked at the end)
++# Initialise Vault. UpCloud has no KMS seal: Vault needs 3 of 5 unseal keys
++# after every pod restart. The keys are printed once and written to a mode-600
++# gitignored file — move it to offline storage. The root token is revoked at
++# the end of setup.
+ ./setup-vault.sh --env upcloud-dev
+ 
+ # Realm, groups and OIDC clients
+@@ -192,12 +201,29 @@ monitoring stack, Kyverno, Reloader, Headlamp, Homepage and Velero **through
+ git** — ArgoCD
+ self-heals manual `helm upgrade`s away. See [OPERATIONS.md](OPERATIONS.md).
+ 
+-### Step 6: Verify
++### Step 6: Publish the environment's GitOps repository
++
++```bash
++./devhub gitops-repo --env upcloud-dev
++```
++
++Publishes a standalone copy of the platform into this environment's own
++Forgejo and points ArgoCD at it. From then on the environment is independent
++of this devhub checkout — work on it from its own repository. If you gave
++`setup` a mirror URL and token, Forgejo pushes every commit to the off-cluster
++mirror; without Velero that mirror would be the only copy surviving the
++cluster, so on UpCloud set one up.
++
++### Step 7: Verify
+ 
+ ```bash
+ # Check all services
+ ./deploy.sh --env upcloud-dev all status
+ 
++# Browser end-to-end: one Keycloak sign-in, then read-only assertions
++# against every service (Grafana datasources, ArgoCD apps, Vault seal state…)
++./devhub validate --e2e --env upcloud-dev
++
+ # Check certificate issuance
+ kubectl get certificate -A
+ kubectl describe certificate -n <namespace>
+@@ -230,7 +256,7 @@ IRSA / Workload Identity.
+ cert-manager automatically provisions Let's Encrypt certificates. For initial testing, use the staging issuer to avoid rate limits:
+ 
+ ```yaml
+-# In tofu-outputs.env (generated)
++# In k8s/overlays/upcloud-dev/config.yaml
+ tls:
+   clusterIssuer: letsencrypt-staging   # Switch to letsencrypt-prod when verified
+ ```
+diff --git a/k8s/overlays/upcloud/cert-manager/cluster-issuer.yaml b/k8s/overlays/upcloud/cert-manager/cluster-issuer.yaml
+deleted file mode 100644
+index 1ca2cc7..0000000
+--- a/k8s/overlays/upcloud/cert-manager/cluster-issuer.yaml
++++ /dev/null
+@@ -1,38 +0,0 @@
+-# cert-manager ClusterIssuer for Let's Encrypt
+-# This issues real, trusted SSL certificates for production
+----
+-# Staging issuer - use this for testing to avoid rate limits
+-apiVersion: cert-manager.io/v1
+-kind: ClusterIssuer
+-metadata:
+-  name: letsencrypt-staging
+-spec:
+-  acme:
+-    # Staging server - certificates are NOT trusted but no rate limits
+-    server: https://acme-staging-v02.api.letsencrypt.org/directory
+-    # Update with your email address
+-    email: your-email@example.com
+-    privateKeySecretRef:
+-      name: letsencrypt-staging-key
+-    solvers:
+-      - http01:
+-          ingress:
+-            class: nginx
+----
+-# Production issuer - use this for real certificates
+-apiVersion: cert-manager.io/v1
+-kind: ClusterIssuer
+-metadata:
+-  name: letsencrypt-prod
+-spec:
+-  acme:
+-    # Production server - certificates ARE trusted
+-    server: https://acme-v02.api.letsencrypt.org/directory
+-    # Update with your email address
+-    email: your-email@example.com
+-    privateKeySecretRef:
+-      name: letsencrypt-prod-key
+-    solvers:
+-      - http01:
+-          ingress:
+-            class: nginx
+diff --git a/k8s/overlays/upcloud/devops/monitoring/loki-values.yaml b/k8s/overlays/upcloud/devops/monitoring/loki-values.yaml
+new file mode 100644
+index 0000000..ca0c1aa
+--- /dev/null
++++ b/k8s/overlays/upcloud/devops/monitoring/loki-values.yaml
+@@ -0,0 +1,50 @@
++# Loki UpCloud overlay: S3-compatible Managed Object Storage backend.
++#
++# Provisioned by tofu/upcloud/modules/cluster:
++#   - bucket <prefix>-loki (output: loki_bucket)
++#   - a loki user scoped to that bucket, with an access key
++#     (outputs: loki_s3_access_key_id / loki_s3_secret_access_key)
++# sync-tofu-outputs.sh exports LOKI_BUCKET (public) and the key pair (secrets).
++#
++# No workload identity on UpCloud: deploy.sh writes the key pair into the
++# loki-objstore-credentials Secret, and Loki's S3 client picks it up through
++# the standard AWS env-var chain (extraEnvFrom below). The keys never appear
++# in this file — which is rendered into the published GitOps repository — or
++# anywhere else in git.
++#
++# deploy.sh applies this overlay only when LOKI_S3_ACCESS_KEY_ID is set.
++
++loki:
++  # Retention is enforced by the compactor; the delete store must match the
++  # object-storage backend configured below.
++  compactor:
++    working_directory: /var/loki/compactor
++    retention_enabled: true
++    delete_request_store: s3
++
++  storage:
++    type: s3
++    s3:
++      endpoint: ${S3_ENDPOINT}
++      bucketnames: ${LOKI_BUCKET}
++      region: ${S3_REGION}
++      s3forcepathstyle: true
++      insecure: false
++
++  schemaConfig:
++    configs:
++      - from: "2024-01-01"
++        store: tsdb
++        object_store: s3
++        schema: v13
++        index:
++          prefix: loki_index_
++          period: 24h
++
++# Switch from filesystem to S3 — disable the local PVC, feed the credentials in
++singleBinary:
++  persistence:
++    enabled: false
++  extraEnvFrom:
++    - secretRef:
++        name: loki-objstore-credentials
+diff --git a/k8s/overlays/upcloud/devops/velero/values.yaml b/k8s/overlays/upcloud/devops/velero/values.yaml
+new file mode 100644
+index 0000000..dc37776
+--- /dev/null
++++ b/k8s/overlays/upcloud/devops/velero/values.yaml
+@@ -0,0 +1,51 @@
++# Velero UpCloud overlay — S3-compatible backup location, filesystem backups.
++#
++# Bucket + scoped access key come from tofu/upcloud/modules/cluster
++# (outputs: velero_bucket, velero_s3_access_key_id / velero_s3_secret_access_key).
++# No workload identity on UpCloud: deploy.sh creates the
++# velero-objstore-credentials Secret from the synced outputs and the chart
++# mounts it below. The key never appears in this file — which is rendered into
++# the published GitOps repository — or anywhere else in git.
++#
++# UpCloud also has no Velero volume-snapshot plugin, so PV contents are backed
++# up by the node agent (kopia file-system backup) instead of snapshots.
++# Caveat: file-system backup only reaches volumes mounted by a running pod —
++# an unmounted PVC (e.g. vault-snapshots between CronJob runs) is not captured.
++
++# The AWS plugin speaks S3, which is all this location needs.
++# Plugin version tracks the Velero app version in the pinned chart (1.18.x).
++initContainers:
++  - name: velero-plugin-for-aws
++    image: velero/velero-plugin-for-aws:v1.14.2
++    volumeMounts:
++      - mountPath: /target
++        name: plugins
++
++credentials:
++  useSecret: true
++  existingSecret: velero-objstore-credentials
++
++configuration:
++  backupStorageLocation:
++    - name: default
++      provider: aws
++      bucket: ${VELERO_BUCKET}
++      default: true
++      config:
++        region: ${S3_REGION}
++        s3Url: ${S3_ENDPOINT}
++        s3ForcePathStyle: "true"
++  # No snapshot provider on UpCloud — volume contents go through the node agent.
++  defaultVolumesToFsBackup: true
++
++# Override just the snapshot switches; the schedules' namespaces and TTLs merge
++# in from the base values.
++schedules:
++  daily-full:
++    template:
++      snapshotVolumes: false
++      defaultVolumesToFsBackup: true
++  hourly-platform-state:
++    template:
++      snapshotVolumes: false
++      defaultVolumesToFsBackup: true
+diff --git a/k8s/scripts/deploy.sh b/k8s/scripts/deploy.sh
+index ebde8f3..5e4de91 100755
+--- a/k8s/scripts/deploy.sh
++++ b/k8s/scripts/deploy.sh
+@@ -431,6 +431,22 @@ install_external_dns() {
+         return 0
+     fi
+ 
++    # UpCloud has no external-dns provider; the overlay uses Cloudflare with a
++    # hand-made token secret (preflight prints the command). Installing without
++    # it would not merely degrade — the pod never starts and --atomic below
++    # rolls the release back, failing the whole deploy. Skip and say why.
++    if [[ "$CLOUD" == "upcloud" ]]; then
++        kubectl create namespace external-dns 2>/dev/null || true
++        if ! kubectl get secret external-dns-cloudflare -n external-dns &>/dev/null; then
++            log_warn "Skipping external-dns: secret external-dns-cloudflare not found."
++            log_warn "Create it, then re-run this component:"
++            log_warn "  kubectl create secret generic external-dns-cloudflare -n external-dns \\"
++            log_warn "    --from-literal=api-token=<Cloudflare token with DNS:Edit>"
++            log_warn "  ./deploy.sh --env ${ENV} external-dns"
++            return 0
++        fi
++    fi
++
+     log_step "Installing external-dns..."
+ 
+     local values_args=$(get_values_args "external-dns")
+@@ -548,8 +564,18 @@ install_monitoring() {
+             aws)   [[ -n "${LOKI_IRSA_ROLE_ARN:-}" ]]     && apply_loki_overlay=true ;;
+             azure) [[ -n "${LOKI_IDENTITY_CLIENT_ID:-}" ]] && apply_loki_overlay=true ;;
+             gcp)   [[ -n "${LOKI_GSA_EMAIL:-}" ]]          && apply_loki_overlay=true ;;
++            upcloud) [[ -n "${LOKI_S3_ACCESS_KEY_ID:-}" ]] && apply_loki_overlay=true ;;
+         esac
+         if $apply_loki_overlay; then
++            # UpCloud has no workload identity: Loki's S3 client falls back to
++            # the standard AWS env-var credential chain, fed from this Secret
++            # via the overlay's extraEnvFrom. Keys stay out of values files.
++            if [[ "$CLOUD" == "upcloud" ]]; then
++                kubectl create secret generic loki-objstore-credentials -n monitoring \
++                    --from-literal=AWS_ACCESS_KEY_ID="${LOKI_S3_ACCESS_KEY_ID}" \
++                    --from-literal=AWS_SECRET_ACCESS_KEY="${LOKI_S3_SECRET_ACCESS_KEY}" \
++                    --dry-run=client -o yaml | kubectl apply -f -
++            fi
+             template_values "$loki_overlay" "${dir}/loki-overlay-values.yaml"
+             loki_args="$loki_args -f ${dir}/loki-overlay-values.yaml"
+             log_info "Loki cloud object storage enabled (${LOKI_BUCKET:-${LOKI_CONTAINER:-}})"
+@@ -598,6 +624,7 @@ install_velero() {
+         aws)   [[ -n "${VELERO_BUCKET:-}" ]]    && have_target=true ;;
+         gcp)   [[ -n "${VELERO_BUCKET:-}" ]]    && have_target=true ;;
+         azure) [[ -n "${VELERO_CONTAINER:-}" ]] && have_target=true ;;
++        upcloud) [[ -n "${VELERO_BUCKET:-}" && -n "${VELERO_S3_ACCESS_KEY_ID:-}" ]] && have_target=true ;;
+     esac
+ 
+     if ! $have_target; then
+@@ -610,6 +637,16 @@ install_velero() {
+ 
+     kubectl create namespace velero 2>/dev/null || true
+ 
++    # UpCloud has no workload identity: the chart mounts this Secret as the
++    # AWS-style credentials file (credentials.existingSecret in the overlay).
++    if [[ "$CLOUD" == "upcloud" ]]; then
++        kubectl create secret generic velero-objstore-credentials -n velero \
++            --from-literal=cloud="[default]
++aws_access_key_id=${VELERO_S3_ACCESS_KEY_ID}
++aws_secret_access_key=${VELERO_S3_SECRET_ACCESS_KEY}" \
++            --dry-run=client -o yaml | kubectl apply -f -
++    fi
++
+     local values_args=$(get_values_args "velero")
+ 
+     helm upgrade --install velero vmware-tanzu/velero \
+diff --git a/k8s/scripts/quickstart.sh b/k8s/scripts/quickstart.sh
+index 0b4ca1f..206d319 100755
+--- a/k8s/scripts/quickstart.sh
++++ b/k8s/scripts/quickstart.sh
+@@ -202,8 +202,14 @@ det_dnszone() {
+                         --query "HostedZones[?Name=='${domain}.'].Id" --output text 2>/dev/null | grep -v '^None$')" ]] ;;
+         azure) [[ -n "$(az network dns zone list --query "[?name=='${domain}'].name" -o tsv 2>/dev/null)" ]] ;;
+         gcp)   [[ -n "$(gcloud dns managed-zones list --filter="dnsName=${domain}." --format='value(name)' 2>/dev/null)" ]] ;;
+-        # UpCloud uses Cloudflare; the token secret is the closest observable proxy.
+-        upcloud) kc get secret external-dns-cloudflare -n external-dns >/dev/null ;;
++        # UpCloud uses Cloudflare, and there is no CLI to ask. The token secret
++        # cannot be the marker: this step sits before the cluster exists, so a
++        # kubectl-based detector is permanently 'todo' and --run-remaining-steps
++        # loops on it. Public NS delegation is the pre-cluster observable half;
++        # preflight --dns still explains the token secret.
++        upcloud)
++            command -v dig &>/dev/null || return 0
++            dig +short NS "$domain" 2>/dev/null | grep -q . ;;
+     esac
+ }
+ 
+diff --git a/k8s/scripts/sync-tofu-outputs.sh b/k8s/scripts/sync-tofu-outputs.sh
+index 580eb71..6428e07 100755
+--- a/k8s/scripts/sync-tofu-outputs.sh
++++ b/k8s/scripts/sync-tofu-outputs.sh
+@@ -198,10 +198,19 @@ case "$CLOUD" in
+             add_public VALKEY_PORT "$(out valkey_port)"
+             add_public S3_ENDPOINT "$(out s3_endpoint)"
+             add_public S3_REGION "$(out s3_region)"
++            add_public LOKI_BUCKET "$(out loki_bucket)"
++            add_public VELERO_BUCKET "$(out velero_bucket)"
+ 
+             add_secret PG_KEYCLOAK_PASSWORD "$(out pg_keycloak_password)"
+             add_secret PG_FORGEJO_PASSWORD "$(out pg_forgejo_password)"
+             add_secret REDIS_PASSWORD "$(out valkey_password)"
++            # No workload identity on UpCloud — bucket-scoped access keys instead.
++            # deploy.sh turns these into Kubernetes Secrets; they never enter
++            # values files or git.
++            add_secret LOKI_S3_ACCESS_KEY_ID "$(out loki_s3_access_key_id)"
++            add_secret LOKI_S3_SECRET_ACCESS_KEY "$(out loki_s3_secret_access_key)"
++            add_secret VELERO_S3_ACCESS_KEY_ID "$(out velero_s3_access_key_id)"
++            add_secret VELERO_S3_SECRET_ACCESS_KEY "$(out velero_s3_secret_access_key)"
+         fi
+         ;;
+ esac
+diff --git a/tofu/aws/workload/main.tf b/tofu/aws/workload/main.tf
+index 122c2ae..cd28208 100644
+--- a/tofu/aws/workload/main.tf
++++ b/tofu/aws/workload/main.tf
+@@ -6,7 +6,7 @@
+ # cluster) deploys apps to this cluster via the app-of-apps pattern.
+ #
+ # Platform components deployed by deploy-workload.sh:
+-#   nginx-ingress, cert-manager, external-dns, external-secrets, alloy
++#   envoy-gateway, cert-manager, kyverno, external-dns, external-secrets, alloy
+ #
+ # Usage:
+ #   tofu init && tofu plan && tofu apply
+diff --git a/tofu/azure/workload/main.tf b/tofu/azure/workload/main.tf
+index d7340d6..2868afe 100644
+--- a/tofu/azure/workload/main.tf
++++ b/tofu/azure/workload/main.tf
+@@ -6,7 +6,7 @@
+ # cluster) deploys apps to this cluster via the app-of-apps pattern.
+ #
+ # Platform components deployed by deploy-workload.sh:
+-#   nginx-ingress, cert-manager, external-dns, external-secrets, alloy
++#   envoy-gateway, cert-manager, kyverno, external-dns, external-secrets, alloy
+ #
+ # Usage:
+ #   tofu init && tofu plan && tofu apply
+diff --git a/tofu/gcp/workload/main.tf b/tofu/gcp/workload/main.tf
+index 1355e39..9ee9b0a 100644
+--- a/tofu/gcp/workload/main.tf
++++ b/tofu/gcp/workload/main.tf
+@@ -6,7 +6,7 @@
+ # cluster) deploys apps to this cluster via the app-of-apps pattern.
+ #
+ # Platform components deployed by deploy-workload.sh:
+-#   nginx-ingress, cert-manager, external-dns, external-secrets, alloy
++#   envoy-gateway, cert-manager, kyverno, external-dns, external-secrets, alloy
+ #
+ # Usage:
+ #   tofu init && tofu plan && tofu apply
+diff --git a/tofu/scripts/.env.example b/tofu/scripts/.env.example
+deleted file mode 100644
+index 43952a2..0000000
+--- a/tofu/scripts/.env.example
++++ /dev/null
+@@ -1,5 +0,0 @@
+-# UpCloud credentials - copy to .env and fill in values
+-# NEVER commit .env to git!
+-
+-UPCLOUD_TOKEN=your-upcloud-api-token
+-UPCLOUD_CLUSTER_ID=your-kubernetes-cluster-uuid
+diff --git a/tofu/scripts/setup-cluster.sh b/tofu/scripts/setup-cluster.sh
+deleted file mode 100755
+index a088ed5..0000000
+--- a/tofu/scripts/setup-cluster.sh
++++ /dev/null
+@@ -1,72 +0,0 @@
+-#!/bin/bash
+-set -e
+-
+-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+-PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+-
+-echo "========================================="
+-echo "  Kubernetes Cluster Setup Script"
+-echo "========================================="
+-echo ""
+-
+-# Check prerequisites
+-echo "=== Checking Prerequisites ==="
+-command -v tofu >/dev/null 2>&1 || { echo "Error: tofu is not installed. Please install OpenTofu first."; exit 1; }
+-command -v kubectl >/dev/null 2>&1 || { echo "Error: kubectl is not installed."; exit 1; }
+-command -v helm >/dev/null 2>&1 || { echo "Error: helm is not installed."; exit 1; }
+-echo "✓ All prerequisites are installed"
+-echo ""
+-
+-# Deploy infrastructure
+-echo "=== Step 1: Deploying Infrastructure with OpenTofu ==="
+-cd "$PROJECT_ROOT/tofu"
+-
+-if [ ! -f "terraform.tfvars" ]; then
+-    echo "Warning: terraform.tfvars not found. Using default values."
+-    echo "Consider copying terraform.tfvars.example to terraform.tfvars and customizing it."
+-    read -p "Continue with defaults? (y/n) " -n 1 -r
+-    echo
+-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+-        exit 1
+-    fi
+-fi
+-
+-echo "Initializing OpenTofu..."
+-tofu init
+-
+-echo "Planning infrastructure..."
+-tofu plan -out=tfplan
+-
+-read -p "Apply this plan? (y/n) " -n 1 -r
+-echo
+-if [[ $REPLY =~ ^[Yy]$ ]]; then
+-    echo "Applying infrastructure..."
+-    tofu apply tfplan
+-    
+-    echo "Saving kubeconfig..."
+-    tofu output -raw kubeconfig > "$PROJECT_ROOT/kubeconfig"
+-    chmod 600 "$PROJECT_ROOT/kubeconfig"
+-    export KUBECONFIG="$PROJECT_ROOT/kubeconfig"
+-    
+-    echo "✓ Infrastructure deployed successfully"
+-else
+-    echo "Infrastructure deployment cancelled."
+-    exit 1
+-fi
+-
+-echo ""
+-echo "=== Step 2: Waiting for Cluster to be Ready ==="
+-echo "Waiting for nodes to be ready..."
+-kubectl wait --for=condition=Ready nodes --all --timeout=300s
+-
+-echo ""
+-echo "=== Cluster Setup Complete ==="
+-echo "Kubeconfig saved to: $PROJECT_ROOT/kubeconfig"
+-echo ""
+-echo "To use this cluster, run:"
+-echo "  export KUBECONFIG=$PROJECT_ROOT/kubeconfig"
+-echo ""
+-echo "Next steps:"
+-echo "  1. Run ./scripts/deploy-all.sh to install all services"
+-echo "  2. Or deploy services individually from helm/<service>/deploy.sh"
+-echo ""
+diff --git a/tofu/scripts/upcloud-login.sh b/tofu/scripts/upcloud-login.sh
+deleted file mode 100755
+index a711f7f..0000000
+--- a/tofu/scripts/upcloud-login.sh
++++ /dev/null
+@@ -1,62 +0,0 @@
+-#!/bin/bash
+-
+-# UpCloud Environment Setup
+-# 
+-# USAGE: Source this script to load environment variables into your current shell:
+-#   source upcloud-login.sh
+-#   OR
+-#   . upcloud-login.sh
+-#
+-# DO NOT run with ./upcloud-login.sh (variables won't persist)
+-#
+-# SETUP: Create a .env file in this directory with:
+-#   UPCLOUD_TOKEN=your-token-here
+-#   UPCLOUD_CLUSTER_ID=your-cluster-id
+-
+-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+-ENV_FILE="${SCRIPT_DIR}/.env"
+-
+-echo "🔧 Setting up UpCloud environment..."
+-
+-# Load from .env file if it exists
+-if [ -f "$ENV_FILE" ]; then
+-    set -a
+-    source "$ENV_FILE"
+-    set +a
+-    echo "✓ Loaded credentials from .env"
+-elif [ -z "$UPCLOUD_TOKEN" ]; then
+-    echo "❌ Error: No .env file found and UPCLOUD_TOKEN not set"
+-    echo "   Create ${ENV_FILE} with UPCLOUD_TOKEN and UPCLOUD_CLUSTER_ID"
+-    return 1
+-fi
+-
+-KUBECONFIG_FILE="upcloud_kubeconfig_${UPCLOUD_CLUSTER_ID}.yaml"
+-
+-# Validate token is set
+-if [ -z "$UPCLOUD_TOKEN" ]; then
+-    echo "❌ Error: UPCLOUD_TOKEN is not set"
+-    return 1
+-fi
+-export UPCLOUD_TOKEN
+-echo "✓ UpCloud token configured"
+-
+-# if cluster ID is not set, return with a message and return
+-if [ -z "$UPCLOUD_CLUSTER_ID" ]; then
+-    echo "⚠️  UPCLOUD_CLUSTER_ID is not set. Please set it in the script before running."
+-    echo "Example: UPCLOUD_CLUSTER_ID=\"your-cluster-id\""
+-    return 1
+-fi
+-
+-# Get Kubernetes cluster config if not already present
+-if [ ! -f "$KUBECONFIG_FILE" ]; then
+-    echo "📥 Downloading Kubernetes config..."
+-    upctl kubernetes config "$UPCLOUD_CLUSTER_ID" --write "$KUBECONFIG_FILE"
+-    echo "✓ Kubeconfig downloaded: $KUBECONFIG_FILE"
+-else
+-    echo "✓ Using existing kubeconfig: $KUBECONFIG_FILE"
+-fi
+-
+-# Set KUBECONFIG environment variable
+-export KUBECONFIG="$(pwd)/$KUBECONFIG_FILE"
+-echo "✓ KUBECONFIG environment variable set"
+-echo "✅ Setup complete! Ready to use kubectl and k9s"
+diff --git a/tofu/upcloud/dev/outputs.tf b/tofu/upcloud/dev/outputs.tf
+index 6d8504c..bc55f7c 100644
+--- a/tofu/upcloud/dev/outputs.tf
++++ b/tofu/upcloud/dev/outputs.tf
+@@ -56,3 +56,31 @@ output "s3_endpoint" {
+ output "s3_region" {
+   value = module.cluster.s3_region
+ }
++
++output "loki_bucket" {
++  value = module.cluster.loki_bucket
++}
++
++output "velero_bucket" {
++  value = module.cluster.velero_bucket
++}
++
++output "loki_s3_access_key_id" {
++  value     = module.cluster.loki_s3_access_key_id
++  sensitive = true
++}
++
++output "loki_s3_secret_access_key" {
++  value     = module.cluster.loki_s3_secret_access_key
++  sensitive = true
++}
++
++output "velero_s3_access_key_id" {
++  value     = module.cluster.velero_s3_access_key_id
++  sensitive = true
++}
++
++output "velero_s3_secret_access_key" {
++  value     = module.cluster.velero_s3_secret_access_key
++  sensitive = true
++}
+diff --git a/tofu/upcloud/modules/cluster/main.tf b/tofu/upcloud/modules/cluster/main.tf
+index 9f205e7..dfc57f3 100644
+--- a/tofu/upcloud/modules/cluster/main.tf
++++ b/tofu/upcloud/modules/cluster/main.tf
+@@ -172,3 +172,76 @@ resource "upcloud_managed_object_storage" "main" {
+ # storage models, every cloud uses the volume, and Velero backs it up alongside
+ # the managed PostgreSQL PITR.
+ 
++# Buckets and scoped credentials for the platform services that use object
++# storage: Loki (log chunks) and Velero (backups). UpCloud has no workload
++# identity for Managed Object Storage, so each service gets its own user, a
++# policy limited to its bucket, and an access key. The keys land in the
++# gitignored secrets.env via sync-tofu-outputs.sh and become Kubernetes
++# Secrets; they never enter values files or git.
++locals {
++  objsto_services = toset(["loki", "velero"])
++}
++
++resource "upcloud_managed_object_storage_bucket" "platform" {
++  for_each = local.objsto_services
++
++  service_uuid = upcloud_managed_object_storage.main.id
++  name         = "${var.prefix}-${each.key}"
++}
++
++resource "upcloud_managed_object_storage_user" "platform" {
++  for_each = local.objsto_services
++
++  service_uuid = upcloud_managed_object_storage.main.id
++  username     = each.key
++}
++
++resource "upcloud_managed_object_storage_policy" "platform" {
++  for_each = local.objsto_services
++
++  service_uuid = upcloud_managed_object_storage.main.id
++  name         = "${each.key}-bucket-rw"
++  description  = "Read/write limited to the ${each.key} bucket"
++  document = urlencode(jsonencode({
++    Version = "2012-10-17"
++    Statement = [
++      {
++        Effect = "Allow"
++        Action = [
++          "s3:ListBucket",
++          "s3:GetBucketLocation",
++          "s3:ListBucketMultipartUploads",
++        ]
++        Resource = "arn:aws:s3:::${upcloud_managed_object_storage_bucket.platform[each.key].name}"
++      },
++      {
++        Effect = "Allow"
++        Action = [
++          "s3:GetObject",
++          "s3:PutObject",
++          "s3:DeleteObject",
++          "s3:AbortMultipartUpload",
++          "s3:ListMultipartUploadParts",
++        ]
++        Resource = "arn:aws:s3:::${upcloud_managed_object_storage_bucket.platform[each.key].name}/*"
++      },
++    ]
++  }))
++}
++
++resource "upcloud_managed_object_storage_user_policy" "platform" {
++  for_each = local.objsto_services
++
++  service_uuid = upcloud_managed_object_storage.main.id
++  username     = upcloud_managed_object_storage_user.platform[each.key].username
++  name         = upcloud_managed_object_storage_policy.platform[each.key].name
++}
++
++resource "upcloud_managed_object_storage_user_access_key" "platform" {
++  for_each = local.objsto_services
++
++  service_uuid = upcloud_managed_object_storage.main.id
++  username     = upcloud_managed_object_storage_user.platform[each.key].username
++  status       = "Active"
++}
++
+diff --git a/tofu/upcloud/modules/cluster/outputs.tf b/tofu/upcloud/modules/cluster/outputs.tf
+index db9aada..17afa0f 100644
+--- a/tofu/upcloud/modules/cluster/outputs.tf
++++ b/tofu/upcloud/modules/cluster/outputs.tf
+@@ -87,3 +87,35 @@ output "s3_region" {
+   value       = var.objstore_region
+ }
+ 
++
++output "loki_bucket" {
++  description = "Object storage bucket for Loki log chunks"
++  value       = upcloud_managed_object_storage_bucket.platform["loki"].name
++}
++
++output "velero_bucket" {
++  description = "Object storage bucket for Velero backups"
++  value       = upcloud_managed_object_storage_bucket.platform["velero"].name
++}
++
++output "loki_s3_access_key_id" {
++  description = "Access key for the loki object-storage user (bucket-scoped)"
++  value       = upcloud_managed_object_storage_user_access_key.platform["loki"].access_key_id
++  sensitive   = true
++}
++
++output "loki_s3_secret_access_key" {
++  value     = upcloud_managed_object_storage_user_access_key.platform["loki"].secret_access_key
++  sensitive = true
++}
++
++output "velero_s3_access_key_id" {
++  description = "Access key for the velero object-storage user (bucket-scoped)"
++  value       = upcloud_managed_object_storage_user_access_key.platform["velero"].access_key_id
++  sensitive   = true
++}
++
++output "velero_s3_secret_access_key" {
++  value     = upcloud_managed_object_storage_user_access_key.platform["velero"].secret_access_key
++  sensitive = true
++}
+diff --git a/tofu/upcloud/prod/outputs.tf b/tofu/upcloud/prod/outputs.tf
+index 6d8504c..bc55f7c 100644
+--- a/tofu/upcloud/prod/outputs.tf
++++ b/tofu/upcloud/prod/outputs.tf
+@@ -56,3 +56,31 @@ output "s3_endpoint" {
+ output "s3_region" {
+   value = module.cluster.s3_region
+ }
++
++output "loki_bucket" {
++  value = module.cluster.loki_bucket
++}
++
++output "velero_bucket" {
++  value = module.cluster.velero_bucket
++}
++
++output "loki_s3_access_key_id" {
++  value     = module.cluster.loki_s3_access_key_id
++  sensitive = true
++}
++
++output "loki_s3_secret_access_key" {
++  value     = module.cluster.loki_s3_secret_access_key
++  sensitive = true
++}
++
++output "velero_s3_access_key_id" {
++  value     = module.cluster.velero_s3_access_key_id
++  sensitive = true
++}
++
++output "velero_s3_secret_access_key" {
++  value     = module.cluster.velero_s3_secret_access_key
++  sensitive = true
++}
+diff --git a/tofu/upcloud/workload/main.tf b/tofu/upcloud/workload/main.tf
+index 0c71c44..c941e89 100644
+--- a/tofu/upcloud/workload/main.tf
++++ b/tofu/upcloud/workload/main.tf
+@@ -6,7 +6,7 @@
+ # cluster) deploys apps to this cluster via the app-of-apps pattern.
+ #
+ # Platform components deployed by deploy-workload.sh:
+-#   nginx-ingress, cert-manager, external-dns, external-secrets, alloy
++#   envoy-gateway, cert-manager, kyverno, external-dns, external-secrets, alloy
+ #
+ # Usage:
+ #   tofu init && tofu plan && tofu apply

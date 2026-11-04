@@ -1,0 +1,550 @@
+From f8136e1b9f3bb1249132d96dd9e31ea1c166f9c8 Mon Sep 17 00:00:00 2001
+From: Boo <boo@Apple-M4-Pro.local>
+Date: Thu, 17 Sep 2026 02:59:14 +0700
+Subject: [PATCH] Migrate ClickHouse from destroyed DO server to UpCloud
+ (213.163.193.79)
+
+The original ClickHouse host (167.172.71.234, DigitalOcean, no
+backup/snapshot ever existed) was destroyed. Stood up a replacement on
+UpCloud (rainbow-db) with a reconstructed schema (never had SSH access
+to the original box in any session -- scripts/clickhouse_schema_reconstructed.sql
+documents exactly what's high vs low confidence) and, this time, a real
+password rather than an open default user.
+
+Fixed several bugs surfaced only by the migration:
+- get_clickhouse_client() in main.py hardcoded password="" instead of
+  reading CLICKHOUSE_PASSWORD -- worked by accident against the old
+  passwordless server, broke immediately against the new one.
+- kafka_consumer.py's get_client() never passed user/password/database
+  at all, same root cause.
+- app/detail_user_activate.py, app/summary_hostname_cookie.py,
+  app/test_db.py all hardcoded the ClickHouse IP directly instead of
+  reading config -- switched to config.py/env everywhere.
+- tracking-go's ClickHouse host/pass were compiled-in defaults because
+  tracking.service had no EnvironmentFile; added one and dropped the
+  hardcoded defaults so future config changes don't need a rebuild.
+- Re-synced app/main.py from the live server: it had drifted from this
+  repo (someone added /realtime, /today-stats, /weekly-summary directly
+  on the box, which is what Admin Dashboard's 10-min/weekly Telegram
+  report cron depends on) without ever being committed here.
+
+Historical data from before Redpanda started buffering (~2026-09-07) is
+gone for good. Everything produced since then is being recovered as
+kafka-consumer catches up the Redpanda backlog against the new host.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+---
+ .env.example                                |   2 +-
+ CLAUDE.md                                   |  20 +++
+ app/detail_user_activate.py                 |  11 +-
+ app/main.py                                 | 128 +++++++++------
+ app/summary_hostname_cookie.py              |  11 +-
+ app/test_db.py                              |  11 +-
+ scripts/clickhouse_schema_reconstructed.sql | 168 ++++++++++++++++++++
+ scripts/kafka_consumer.py                   |   3 +
+ systemd/tracking.service                    |   1 +
+ tracking-go/main.go                         |   2 +-
+ 10 files changed, 288 insertions(+), 69 deletions(-)
+ create mode 100644 scripts/clickhouse_schema_reconstructed.sql
+
+diff --git a/.env.example b/.env.example
+index eef791f..5e7d7d0 100644
+--- a/.env.example
++++ b/.env.example
+@@ -1,7 +1,7 @@
+ KAFKA_BROKER=95.111.195.188:9092
+ KAFKA_TOPIC=user-activity
+ REDIS_URI=redis://localhost:6379
+-CLICKHOUSE_HOST=167.172.71.234
++CLICKHOUSE_HOST=213.163.193.79
+ CLICKHOUSE_PORT=9000
+ CLICKHOUSE_USER=default
+ CLICKHOUSE_PASSWORD=
+diff --git a/CLAUDE.md b/CLAUDE.md
+index 7a28739..1ee84d2 100644
+--- a/CLAUDE.md
++++ b/CLAUDE.md
+@@ -179,8 +179,28 @@ DO Kafka cluster (`db-kafka-ultraffic-do-user-13356586-0...`) giờ không còn
+ dùng nữa, có thể xoá để tiết kiệm chi phí — đây là mảnh hạ tầng cuối cùng
+ migrate khỏi DigitalOcean.
+ 
++## v2.3 — ClickHouse chết hoàn toàn (167.172.71.234 destroyed) → migrate sang UpCloud (2026-09-16/17)
++
++**Sự cố:** server ClickHouse gốc `167.172.71.234` (DigitalOcean, không backup/snapshot) đã bị **destroy hoàn toàn**. Đây là mảnh hạ tầng duy nhất trong toàn hệ Rainbow-Clickhouse mà không session nào từng có SSH access. Phát hiện gián tiếp qua việc cron báo cáo traffic 10 phút/lần trên Admin Dashboard (`traffic-report.cron.js`, gọi `/realtime`, `/today-stats`, `/weekly-summary`) ngừng gửi — điều tra ra ClickHouse mất kết nối hoàn toàn (ping 100% loss, mọi port timeout) từ cả dashboard lẫn BE. Dữ liệu lịch sử trước ngày backlog Redpanda bắt đầu (~07/09) **mất vĩnh viễn**, không có backup nào tồn tại.
++
++**Migrate:** dựng ClickHouse mới trên UpCloud — `rainbow-db`, `213.163.193.79` (Singapore, 4vCPU/8GB/100GB). Schema được **tái tạo lại từ các câu query/insert quan sát được trong suốt project** (không phải copy DDL gốc — chưa từng có access để lấy) — xem `scripts/clickhouse_schema_reconstructed.sql`, đặc biệt các bảng `AggregatingMergeTree` (`daily_hostname_summary`, `online_users_slots`) có rủi ro sai kiểu dữ liệu tinh vi so với bản gốc, cần theo dõi thêm.
++
++**Bảo mật:** lần này đặt **password thật** cho user `default` (bài học từ sự cố ufw không đáng tin cậy trên Redpanda) — `password_sha256_hex` trong `/etc/clickhouse-server/users.d/default-password.xml` trên server ClickHouse mới, cộng với `listen_host 0.0.0.0` + ufw giới hạn port 9000 chỉ cho 2 IP app server. Vẫn khuyến nghị bật thêm UpCloud Console Firewall.
++
++**Phát hiện thêm khi migrate:**
++1. **Live server đã lệch khỏi git repo** — `app/main.py` trên dashboard có thêm endpoint `/realtime`, `/today-stats`, `/weekly-summary` (phục vụ cron Telegram của Admin Dashboard) chưa từng được commit/pull về trước đó. Đã đồng bộ lại vào repo.
++2. **Bug tại `get_clickhouse_client()`** trên dashboard: hardcode `password=""` thay vì đọc `CLICKHOUSE_PASSWORD` — âm thầm hoạt động được vì ClickHouse cũ không có password, chỉ lộ ra khi migrate sang server có password thật. Đã fix.
++3. **`kafka_consumer.py`'s `get_client()`** chỉ truyền `host`/`port`, thiếu `user`/`password`/`database` — cùng loại bug, cùng lý do không bị phát hiện trước đây.
++4. Toàn bộ code hardcode IP ClickHouse trực tiếp (`app/detail_user_activate.py`, `app/summary_hostname_cookie.py`, `app/test_db.py` ở cả 2 repo, `app/main.py` của BE) đã chuyển sang đọc qua `config.py`/`.env` thay vì hardcode — BE trước đây `config.py` không hề định nghĩa biến `CLICKHOUSE_*` nào cả, phải thêm mới.
++5. `tracking-go/main.go` (dashboard) trước đây không đọc `.env` (`tracking.service` thiếu `EnvironmentFile=`) — mọi thay đổi cấu hình phải sửa hardcode default + build lại binary. Đã thêm `EnvironmentFile=/home/clickHouse-api/.env` vào service, bỏ hardcode default, giờ chỉ cần sửa `.env` + restart.
++
++**Khôi phục dữ liệu:** nhờ Redpanda đệm toàn bộ traffic trong lúc outage, `kafka-consumer.service` catch-up lại được — không mất dữ liệu phát sinh từ sau khi Redpanda được dựng (07/09), chỉ mất dữ liệu lịch sử trước đó (đã destroy cùng server cũ, không backup).
++
+ ## Pending tasks
+ 
++- [ ] **Cấu hình UpCloud Console Firewall cho server ClickHouse mới (213.163.193.79)** — cùng lý do như Redpanda, ufw không đủ tin cậy
++- [ ] Theo dõi kafka-consumer catch-up hết backlog Redpanda (đang chạy, xem log `journalctl -u kafka-consumer`)
++- [ ] Review kỹ `scripts/clickhouse_schema_reconstructed.sql` — đặc biệt kiểu dữ liệu 2 bảng `AggregatingMergeTree`, có thể không khớp 100% bản gốc
+ - [ ] **Cấu hình UpCloud Console Firewall cho server Redpanda (95.111.195.188)** — ufw không đủ tin cậy, xem mục v2.2 ở trên
+ - [ ] Xoá DO Kafka cluster (`db-kafka-ultraffic-do-user-13356586-0...`) — không còn dùng nữa
+ - [ ] Cân nhắc xoá vài dòng test (`hostname` chứa `test.local`) khỏi `user_activity` nếu muốn số liệu sạch tuyệt đối
+diff --git a/app/detail_user_activate.py b/app/detail_user_activate.py
+index 462f4df..69d20a3 100644
+--- a/app/detail_user_activate.py
++++ b/app/detail_user_activate.py
+@@ -3,16 +3,17 @@
+ from clickhouse_driver import Client
+ from datetime import datetime
+ import pytz
++from .config import CLICKHOUSE_HOST, CLICKHOUSE_PORT, CLICKHOUSE_USER, CLICKHOUSE_PASSWORD, CLICKHOUSE_DB
+ 
+ # ---------------------------
+ # 1. Kết nối ClickHouse
+ # ---------------------------
+ ch = Client(
+-    host="167.172.71.234",
+-    port=9000,
+-    user="default",
+-    password="",
+-    database="analytics"
++    host=CLICKHOUSE_HOST,
++    port=CLICKHOUSE_PORT,
++    user=CLICKHOUSE_USER,
++    password=CLICKHOUSE_PASSWORD,
++    database=CLICKHOUSE_DB
+ )
+ 
+ # ---------------------------
+diff --git a/app/main.py b/app/main.py
+index 4f61828..728274b 100644
+--- a/app/main.py
++++ b/app/main.py
+@@ -145,7 +145,7 @@ def get_clickhouse_client():
+         host=CLICKHOUSE_HOST,
+         port=9000,
+         user=CLICKHOUSE_USER,
+-        password="",
++        password=CLICKHOUSE_PASSWORD,
+         database=CLICKHOUSE_DB
+     )
+ 
+@@ -1596,79 +1596,103 @@ def get_weekly_summary(start_date: str, end_date: str):
+     }
+ 
+ 
+-# ── Today Stats (for live report) ────────────────────────────────────────────
++# ── Today Stats — all metrics from last 30 min (realtime) ────────────────────
+ @app.get("/today-stats")
+-def get_today_stats():
++def get_today_stats(minutes: int = 30):
+     import time as _time, math as _math
++    from concurrent.futures import ThreadPoolExecutor, as_completed
+     manila_tz = ZoneInfo("Asia/Manila")
+     now_manila = datetime.now(manila_tz)
+-    date_str  = now_manila.strftime("%Y-%m-%d")
+-    date_int  = int(now_manila.strftime("%Y%m%d"))
+-    cutoff_30 = int(_time.time()) - 1800  # last 30 min
++    today_str = now_manila.strftime("%Y-%m-%d")
++    now_ts  = int(_time.time())
++    cutoff  = now_ts - minutes * 60
++    cutoff5 = now_ts - 120   # online now = last 2 min
+ 
+-    ch = get_clickhouse_client()
+-    try:
+-        # Today: views + active users from materialized view
+-        summary_r = ch.execute(f"""
+-            SELECT uniqMerge(total_user_activate), uniqMerge(total_view_page)
+-            FROM analytics.daily_hostname_summary
+-            WHERE date_num = {date_int}
+-        """)
+-
+-        # New users today
+-        new_r = ch.execute(f"""
+-            SELECT count() FROM (
+-                SELECT user_cookie FROM analytics.user_first_seen
+-                WHERE first_date = '{date_str}' GROUP BY user_cookie
+-            )
+-        """)
++    def run_query(sql):
++        ch = get_clickhouse_client()
++        try:
++            return ch.execute(sql)
++        finally:
++            ch.disconnect()
+ 
+-        # Peak active users: max unique users in any 1-hour window today
+-        peak_r = ch.execute(f"""
+-            SELECT max(hu) FROM (
+-                SELECT toHour(toDateTime(timestamp, 'Asia/Manila')) AS hr,
+-                       uniq(user_cookie) AS hu
++    queries = {
++        "main": f"""
++            SELECT count(), uniq(user_cookie)
++            FROM analytics.user_activity
++            WHERE timestamp >= {cutoff} AND is_bot = 0
++        """,
++        "peak": f"""
++            SELECT max(mu) FROM (
++                SELECT toStartOfMinute(toDateTime(timestamp)) AS m,
++                       uniq(user_cookie) AS mu
+                 FROM analytics.user_activity
+-                WHERE date_num = {date_int} AND is_bot = 0
+-                GROUP BY hr
++                WHERE timestamp >= {cutoff} AND is_bot = 0
++                GROUP BY m
+             )
+-        """)
+-
+-        # Online users: last 30 min
+-        online_r = ch.execute(f"""
++        """,
++        "new_users": f"""
+             SELECT uniq(user_cookie)
+             FROM analytics.user_activity
+-            WHERE timestamp >= {cutoff_30} AND is_bot = 0
+-        """)
+-
+-        # Avg session duration today
+-        avg_r = ch.execute(f"""
++            WHERE timestamp >= {cutoff} AND is_bot = 0
++              AND user_cookie NOT IN (
++                  SELECT user_cookie FROM analytics.user_activity
++                  WHERE timestamp >= {cutoff - minutes * 60} AND timestamp < {cutoff}
++                    AND is_bot = 0
++              )
++        """,
++        "online": f"""
++            SELECT uniq(user_cookie)
++            FROM analytics.user_activity
++            WHERE timestamp >= {cutoff5} AND is_bot = 0
++        """,
++        "avg": f"""
+             SELECT avg(session_stay)
+             FROM (
+                 SELECT session_id, (max(timestamp) - min(timestamp)) AS session_stay
+                 FROM analytics.user_activity
+-                WHERE date_num = {date_int} AND is_bot = 0
++                WHERE timestamp >= {cutoff} AND is_bot = 0
+                 GROUP BY session_id
+                 HAVING session_stay > 0 AND session_stay < 7200
+             )
+-        """)
+-        raw_avg = avg_r[0][0] if avg_r else None
+-        avg_stay = int(raw_avg) if raw_avg and not _math.isnan(raw_avg) and not _math.isinf(raw_avg) else 0
++        """,
++        "devices": f"""
++            SELECT
++                if(match(browser, '(?i)(Mobile|Android|iPhone|iPad)'), 'Mobile', 'Desktop') AS device,
++                uniq(user_cookie) AS cnt
++            FROM analytics.user_activity
++            WHERE timestamp >= {cutoff} AND is_bot = 0
++            GROUP BY device
++        """,
++    }
+ 
++    results = {}
++    try:
++        with ThreadPoolExecutor(max_workers=6) as pool:
++            futs = {pool.submit(run_query, sql): key for key, sql in queries.items()}
++            for fut in as_completed(futs):
++                results[futs[fut]] = fut.result()
+     except Exception as e:
+         return JSONResponse({"error": str(e)}, status_code=500)
+-    finally:
+-        ch.disconnect()
+ 
+-    s = summary_r[0] if summary_r else (0, 0)
++    m = results.get("main", [(0, 0)])[0]
++    peak_r   = results.get("peak",     [(0,)])[0]
++    new_r    = results.get("new_users",[(0,)])[0]
++    online_r = results.get("online",   [(0,)])[0]
++    avg_r    = results.get("avg",      [(None,)])[0]
++    raw_avg  = avg_r[0] if avg_r else None
++    avg_stay = int(raw_avg) if raw_avg and not _math.isnan(raw_avg) and not _math.isinf(raw_avg) else 0
++    dev_rows = results.get("devices", [])
++    devices  = {r[0]: r[1] for r in dev_rows} if dev_rows else {}
++
+     return {
+-        "date":        date_str,
+-        "page_views":  s[1],
+-        "active":      s[0],
+-        "peak":        peak_r[0][0] if peak_r and peak_r[0][0] else 0,
+-        "new_users":   new_r[0][0]  if new_r  else 0,
+-        "online":      online_r[0][0] if online_r else 0,
+-        "avg_stay":    avg_stay,
++        "minutes":    minutes,
++        "page_views": m[0] if m else 0,
++        "active":     m[1] if m else 0,
++        "peak":       peak_r[0] if peak_r and peak_r[0] else 0,
++        "new_users":  new_r[0]  if new_r  else 0,
++        "online":     online_r[0] if online_r else 0,
++        "avg_stay":   avg_stay,
++        "devices":    devices,
+     }
+ 
+ 
+diff --git a/app/summary_hostname_cookie.py b/app/summary_hostname_cookie.py
+index 9f9dafa..adf12ef 100644
+--- a/app/summary_hostname_cookie.py
++++ b/app/summary_hostname_cookie.py
+@@ -3,14 +3,15 @@
+ from datetime import datetime
+ from zoneinfo import ZoneInfo  # Python 3.9+
+ import json
++from .config import CLICKHOUSE_HOST, CLICKHOUSE_PORT, CLICKHOUSE_USER, CLICKHOUSE_PASSWORD, CLICKHOUSE_DB
+ 
+ # --- 1. Kết nối ClickHouse ---
+ ch = Client(
+-    host="167.172.71.234",       # IP server ClickHouse
+-    port=9000,
+-    user="default",
+-    password="",
+-    database="analytics"
++    host=CLICKHOUSE_HOST,
++    port=CLICKHOUSE_PORT,
++    user=CLICKHOUSE_USER,
++    password=CLICKHOUSE_PASSWORD,
++    database=CLICKHOUSE_DB
+ )
+ 
+ # --- 2. Xác định ngày hôm nay theo Asia/Manila ---
+diff --git a/app/test_db.py b/app/test_db.py
+index af848c1..aaf25ae 100644
+--- a/app/test_db.py
++++ b/app/test_db.py
+@@ -1,11 +1,12 @@
++import os
+ from clickhouse_driver import Client
+ 
+ ch = Client(
+-    host="167.172.71.234",
+-    port=9000,
+-    user="default",
+-    password="",   # để trống
+-    database="analytics"
++    host=os.getenv("CLICKHOUSE_HOST", ""),
++    port=int(os.getenv("CLICKHOUSE_PORT", 9000)),
++    user=os.getenv("CLICKHOUSE_USER", "default"),
++    password=os.getenv("CLICKHOUSE_PASSWORD", ""),
++    database=os.getenv("CLICKHOUSE_DB", "analytics")
+ )
+ 
+ result = ch.execute("SELECT count() FROM temp_user_activity")
+diff --git a/scripts/clickhouse_schema_reconstructed.sql b/scripts/clickhouse_schema_reconstructed.sql
+new file mode 100644
+index 0000000..bc2b74f
+--- /dev/null
++++ b/scripts/clickhouse_schema_reconstructed.sql
+@@ -0,0 +1,168 @@
++-- ==========================================================================
++-- Reconstructed schema for `analytics` database on the ORIGINAL ClickHouse
++-- server (167.172.71.234, destroyed on DigitalOcean, no backup existed).
++--
++-- IMPORTANT: this is NOT a copy of the original DDL (SSH access to that box
++-- never existed in any session). It is reverse-engineered purely from the
++-- INSERT/SELECT statements and system.tables engine types observed while
++-- working against it. Column NAMES and roughly-correct TYPES are high
++-- confidence; ORDER BY / PARTITION BY keys and the exact choice between
++-- AggregateFunction vs SimpleAggregateFunction vs plain numeric columns on
++-- the aggregate tables are best-effort reconstructions and may not exactly
++-- match the original engine behavior. Review before applying.
++-- ==========================================================================
++
++CREATE DATABASE IF NOT EXISTS analytics;
++
++-- --------------------------------------------------------------------------
++-- user_activity — raw tracking events (main table, high volume)
++-- Written by: tracking-go (direct on dashboard) and kafka_consumer.py
++--   (from Redpanda, on behalf of BE's tracking-go producer)
++-- Confirmed column order from Go INSERT and Python batch INSERT:
++--   id, session_id, hostname, url, referer, browser, is_bot, user_cookie,
++--   ip_user, timestamp, date_num, domain, created_at
++-- --------------------------------------------------------------------------
++CREATE TABLE IF NOT EXISTS analytics.user_activity
++(
++    id          Int64,
++    session_id  String,
++    hostname    String,
++    url         String,
++    referer     String,
++    browser     String,
++    is_bot      UInt8,
++    user_cookie String,
++    ip_user     String,
++    timestamp   UInt32,
++    date_num    Int32,
++    domain      String,
++    created_at  UInt32
++)
++ENGINE = MergeTree
++PARTITION BY date_num
++ORDER BY (hostname, timestamp)
++SETTINGS index_granularity = 8192;
++
++-- --------------------------------------------------------------------------
++-- online_users_slots — 10-minute concurrent-viewer buckets
++-- Written by: periodicOnlineAggregate() in tracking-go (every 30s) via
++--   INSERT INTO ... (timeslot, hostname, active_users)
++--   SELECT toStartOfInterval(...), hostname, uniqState(user_cookie)
++-- Read by: FastAPI /online via uniqMerge(active_users) ... FINAL
++-- --------------------------------------------------------------------------
++CREATE TABLE IF NOT EXISTS analytics.online_users_slots
++(
++    timeslot     DateTime,
++    hostname     String,
++    active_users AggregateFunction(uniq, String)
++)
++ENGINE = AggregatingMergeTree
++PARTITION BY toYYYYMM(timeslot)
++ORDER BY (timeslot, hostname);
++
++-- --------------------------------------------------------------------------
++-- daily_hostname_summary — per-day per-hostname rollup
++-- Written by: kafka_consumer.py aggregate_daily(), every 120s, via
++--   INSERT INTO ... (date_num, hostname, total_user_activate,
++--     total_view_page, total_bot_sessions, sum_stay_duration,
++--     total_sessions, unique_bot_sessions)
++--   SELECT date_num, hostname,
++--     uniqStateIf(user_cookie, is_bot=0),      -- total_user_activate
++--     uniqState(concat(session_id,url)),       -- total_view_page
++--     sum(is_bot),                             -- total_bot_sessions
++--     sum(if(is_bot=0,10,0)),                  -- sum_stay_duration
++--     uniqState(session_id),                   -- total_sessions
++--     uniqStateIf(session_id, is_bot=1)        -- unique_bot_sessions
++-- Read by: /summary via uniqMerge(total_user_activate/total_view_page/
++--   unique_bot_sessions/total_sessions), plain sum semantics assumed for
++--   total_bot_sessions/sum_stay_duration (hence SimpleAggregateFunction
++--   below so merges sum them instead of picking an arbitrary row's value).
++-- --------------------------------------------------------------------------
++CREATE TABLE IF NOT EXISTS analytics.daily_hostname_summary
++(
++    date_num            Int32,
++    hostname            String,
++    total_user_activate AggregateFunction(uniq, String),
++    total_view_page     AggregateFunction(uniq, String),
++    total_bot_sessions  SimpleAggregateFunction(sum, UInt64),
++    sum_stay_duration   SimpleAggregateFunction(sum, UInt64),
++    total_sessions      AggregateFunction(uniq, String),
++    unique_bot_sessions AggregateFunction(uniq, String)
++)
++ENGINE = AggregatingMergeTree
++PARTITION BY toYYYYMM(toDate(toString(date_num), 'YYYYMMDD'))
++ORDER BY (date_num, hostname);
++
++-- --------------------------------------------------------------------------
++-- user_first_seen — first-seen date per (user_cookie, hostname), used to
++-- compute "new users" (joined against in /summary's new_users_map CTE)
++-- Exact original columns never directly observed in an INSERT statement
++-- this session — reconstructed from how /summary reads it:
++--   SELECT user_cookie, hostname WHERE first_date = '{date_str}'
++-- ReplacingMergeTree so a cookie's first-seen date, once written, wins.
++-- --------------------------------------------------------------------------
++CREATE TABLE IF NOT EXISTS analytics.user_first_seen
++(
++    user_cookie String,
++    hostname    String,
++    first_date  Date
++)
++ENGINE = ReplacingMergeTree
++ORDER BY (user_cookie, hostname);
++
++-- --------------------------------------------------------------------------
++-- Secondary/low-traffic tables — never seen written to or read from this
++-- session; included for completeness so nothing 500s on a missing table,
++-- but definitions are guesses and should be revisited if actually used.
++-- --------------------------------------------------------------------------
++CREATE TABLE IF NOT EXISTS analytics.temp_user_activity
++(
++    id               Int64,
++    ip_user          String,
++    browser          String,
++    referer          String,
++    stay_duration    Int64,
++    hostname         String,
++    url              String,
++    user_cookie      String,
++    timestamp        DateTime,
++    is_bot           UInt8,
++    date_num         Int32,
++    timestamp_int    Int64,
++    domain_id        Int64,
++    label_id         Int64,
++    is_updated_label UInt8,
++    domain           String,
++    created_at       DateTime
++)
++ENGINE = MergeTree
++PARTITION BY date_num
++ORDER BY (hostname, timestamp);
++
++CREATE TABLE IF NOT EXISTS analytics.forecast_cache
++(
++    hostname   String,
++    date_num   Int32,
++    created_at DateTime DEFAULT now()
++)
++ENGINE = MergeTree
++ORDER BY (hostname, date_num);
++
++CREATE TABLE IF NOT EXISTS analytics.traffic_anomalies
++(
++    hostname    String,
++    date_num    Int32,
++    detected_at DateTime DEFAULT now(),
++    description String
++)
++ENGINE = MergeTree
++ORDER BY (hostname, date_num);
++
++-- --------------------------------------------------------------------------
++-- Deliberately NOT recreated: user_activity_kafka (Kafka Engine, both in
++-- `analytics` and `default` schemas) and its mv_* materialized views.
++-- Confirmed dead: 0 messages ever consumed in 28+ days (broken SSL cert
++-- against the DO Kafka broker that no longer exists anyway). No reason to
++-- rebuild a native ClickHouse->Kafka path now that Redpanda + the Python
++-- consumer already do this job.
++-- --------------------------------------------------------------------------
+diff --git a/scripts/kafka_consumer.py b/scripts/kafka_consumer.py
+index ac9a741..4e99594 100644
+--- a/scripts/kafka_consumer.py
++++ b/scripts/kafka_consumer.py
+@@ -18,6 +18,9 @@ def get_client():
+     return clickhouse_driver.Client(
+         host=os.environ["CLICKHOUSE_HOST"],
+         port=int(os.environ.get("CLICKHOUSE_PORT", 9000)),
++        user=os.environ.get("CLICKHOUSE_USER", "default"),
++        password=os.environ.get("CLICKHOUSE_PASSWORD", ""),
++        database=os.environ.get("CLICKHOUSE_DB", "analytics"),
+     )
+ 
+ def flush(client, batch):
+diff --git a/systemd/tracking.service b/systemd/tracking.service
+index 9750176..753ba49 100644
+--- a/systemd/tracking.service
++++ b/systemd/tracking.service
+@@ -5,6 +5,7 @@ After=network.target
+ [Service]
+ User=root
+ WorkingDirectory=/home/clickHouse-api/tracking-go
++EnvironmentFile=/home/clickHouse-api/.env
+ ExecStart=/home/clickHouse-api/tracking-go/tracking
+ Restart=always
+ RestartSec=5
+diff --git a/tracking-go/main.go b/tracking-go/main.go
+index 169067a..384f1b7 100644
+--- a/tracking-go/main.go
++++ b/tracking-go/main.go
+@@ -27,7 +27,7 @@ func getenv(key, def string) string {
+ 
+ // Config từ env
+ var (
+-	chHost = getenv("CLICKHOUSE_HOST", "167.172.71.234")
++	chHost = getenv("CLICKHOUSE_HOST", "")
+ 	chPort = getenv("CLICKHOUSE_PORT", "9000")
+ 	chUser = getenv("CLICKHOUSE_USER", "default")
+ 	chPass = getenv("CLICKHOUSE_PASSWORD", "")

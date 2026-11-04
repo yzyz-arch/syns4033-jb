@@ -1,0 +1,520 @@
+From 1f154e967833edd378a880d27dc843b476eebe39 Mon Sep 17 00:00:00 2001
+From: boxdot <dimitri@phnx.im>
+Date: Mon, 12 Oct 2026 10:33:19 +0000
+Subject: [PATCH] feat(app): send keep-alives on idle listen streams  (#1649)
+
+L7 proxies (UpCloud LB, Envoy) close streams without data after their
+idle timeout, 120s on the UpCloud LB. HTTP/2 PINGs don't count, they
+only keep the connection to the nearest proxy alive.
+
+Clients now send a KeepAlive request on the QS and username listen
+streams after 30s without other request. The server ignores it.
+
+Listen handlers on the server also ignore empty requests now, so a
+request variant unknown to the server no longer aborts the stream.
+---
+ apiclient/src/as_api.rs                       |  32 ++--
+ apiclient/src/lib.rs                          |   3 +
+ apiclient/src/qs_api.rs                       |  24 ++-
+ backend/src/auth_service/grpc.rs              |  24 ++-
+ backend/src/qs/grpc.rs                        |  10 +-
+ common/Cargo.toml                             |   3 +-
+ common/src/utils/keepalive_stream.rs          | 176 ++++++++++++++++++
+ common/src/utils/mod.rs                       |   2 +
+ protos/api/auth_service/v1/auth_service.proto |   3 +
+ .../api/queue_service/v1/queue_service.proto  |   3 +
+ 10 files changed, 246 insertions(+), 34 deletions(-)
+ create mode 100644 common/src/utils/keepalive_stream.rs
+
+diff --git a/apiclient/src/as_api.rs b/apiclient/src/as_api.rs
+index d6e52d451e..a8b3f75ca3 100644
+--- a/apiclient/src/as_api.rs
++++ b/apiclient/src/as_api.rs
+@@ -23,12 +23,11 @@ use aircommon::{
+             AsCredentialsResponseIn, EncryptedUserProfile, GetUserProfileResponse,
+             RegisterUserResponseIn, UsernameDeleteResponse,
+         },
+-        connection_package::ConnectionPackage,
+-        connection_package::VersionedConnectionPackageIn,
++        connection_package::{ConnectionPackage, VersionedConnectionPackageIn},
+         push_token::{PushToken, PushTokenOperator},
+     },
+     registration::{ChallengeKind, NewAdmissionSession, RegistrationChallenge, RegistrationInfo},
+-    time::Duration,
++    utils::KeepAliveStream,
+ };
+ use airprotos::{
+     auth_service::v1::{
+@@ -38,12 +37,13 @@ use airprotos::{
+         CreateUsernamePayload, DeleteUserPayload, DeleteUsernamePayload,
+         EnqueueConnectionOfferStep, FetchSignedConnectionPackageStep, GetInvitationCodesRequest,
+         GetRegistrationInfoRequest, GetUserProfileRequest, InitListenUsernamePayload,
+-        InvitationCode, IssueTokenBatchPayload, IssueTokenBatchResponse, ListenUsernameRequest,
+-        MergeUserProfilePayload, OperationType, PublishConnectionPackagesPayload, PushPlatform,
+-        RefreshUsernamePayload, RegisterUserRequest, RegisterUserResponse, ReportSpamPayload,
+-        SignedConnectionPackage, StageUserProfilePayload, UsernameQueueMessage,
+-        connect_username_request, connect_username_response, issue_token_batch_response,
+-        listen_username_request, register_user_response,
++        InvitationCode, IssueTokenBatchPayload, IssueTokenBatchResponse,
++        KeepAliveListenUsernameRequest, ListenUsernameRequest, MergeUserProfilePayload,
++        OperationType, PublishConnectionPackagesPayload, PushPlatform, RefreshUsernamePayload,
++        RegisterUserRequest, RegisterUserResponse, ReportSpamPayload, SignedConnectionPackage,
++        StageUserProfilePayload, UsernameQueueMessage, connect_username_request,
++        connect_username_response, issue_token_batch_response, listen_username_request,
++        register_user_response,
+     },
+     client::signed_connection_package::AnyConnectionPackageIn,
+     common::v1::{StatusDetails, StatusDetailsCode},
+@@ -56,7 +56,9 @@ use tonic::{Code, Request, Status};
+ use tracing::error;
+ use uuid::Uuid;
+ 
+-use crate::{ApiClient, ClassifyRequestError, RequestErrorKind, classify_status};
++use crate::{
++    ApiClient, ClassifyRequestError, LISTEN_KEEPALIVE_INTERVAL, RequestErrorKind, classify_status,
++};
+ 
+ /// Errors that can occur when sending requests to the AS.
+ #[derive(Error, Debug)]
+@@ -249,7 +251,7 @@ impl ApiClient {
+                     AsRequestError::UnexpectedResponse
+                 })?
+                 .into(),
+-            lifetime: Duration::seconds(response.lifetime_seconds.into()),
++            lifetime: aircommon::time::Duration::seconds(response.lifetime_seconds.into()),
+         })
+     }
+ 
+@@ -529,6 +531,7 @@ impl ApiClient {
+         let init_request = init_payload.sign(signing_key)?;
+ 
+         const ACK_CHANNEL_BUFFER_SIZE: usize = 16; // not too big for applying backpressure
++
+         let (ack_tx, ack_rx) = mpsc::channel::<Uuid>(ACK_CHANNEL_BUFFER_SIZE);
+ 
+         let requests = tokio_stream::once(ListenUsernameRequest {
+@@ -543,6 +546,13 @@ impl ApiClient {
+                 )),
+             }),
+         );
++        let requests = KeepAliveStream::new(requests, LISTEN_KEEPALIVE_INTERVAL, || {
++            ListenUsernameRequest {
++                request: Some(listen_username_request::Request::KeepAlive(
++                    KeepAliveListenUsernameRequest {},
++                )),
++            }
++        });
+ 
+         let responses = self
+             .as_grpc_client()
+diff --git a/apiclient/src/lib.rs b/apiclient/src/lib.rs
+index 8f58a6704e..e8ed21fb6a 100644
+--- a/apiclient/src/lib.rs
++++ b/apiclient/src/lib.rs
+@@ -30,6 +30,9 @@ mod metadata;
+ pub mod qs_api;
+ pub mod rs_api;
+ 
++/// Interval after which the client sends a keep-alive on an idle listen stream.
++pub(crate) const LISTEN_KEEPALIVE_INTERVAL: Duration = Duration::from_secs(30);
++
+ /// Waits for the server to close the response stream after the request stream was half-closed.
+ ///
+ /// The server closes the response stream with OK only after it has processed all requests sent
+diff --git a/apiclient/src/qs_api.rs b/apiclient/src/qs_api.rs
+index 12f40edb6a..dfb7473eb8 100644
+--- a/apiclient/src/qs_api.rs
++++ b/apiclient/src/qs_api.rs
+@@ -23,16 +23,17 @@ use aircommon::{
+         },
+         push_token::EncryptedPushToken,
+     },
+-    utils::{CancellableStream, CancellingStream},
++    utils::{CancellableStream, CancellingStream, KeepAliveStream},
+     virtual_client::KeyPackageBatchId,
+ };
+ use airprotos::{
+     common::v1::{StatusDetails, StatusDetailsCode},
+     queue_service::v1::{
+         AckListenRequest, ApqKeyPackageRequest, CreateClientPayload, DeleteClientPayload,
+-        DeleteUserPayload, FetchListenRequest, InitListenPayload, ListenResponse,
+-        PublishApqKeyPackagesPayload, PublishKeyPackagesPayload, ReportClientStateListenRequest,
+-        StageKeyPackagesPayload, UpdateClientPayload, UpdateUserPayload, listen_request,
++        DeleteUserPayload, FetchListenRequest, InitListenPayload, KeepAliveListenRequest,
++        ListenResponse, PublishApqKeyPackagesPayload, PublishKeyPackagesPayload,
++        ReportClientStateListenRequest, StageKeyPackagesPayload, UpdateClientPayload,
++        UpdateUserPayload, listen_request,
+     },
+ };
+ use airprotos::{
+@@ -50,7 +51,9 @@ use tokio_util::sync::CancellationToken;
+ use tonic::Status;
+ use tracing::{debug, error};
+ 
+-use crate::{ApiClient, ClassifyRequestError, RequestErrorKind, classify_status};
++use crate::{
++    ApiClient, ClassifyRequestError, LISTEN_KEEPALIVE_INTERVAL, RequestErrorKind, classify_status,
++};
+ 
+ #[derive(Error, Debug)]
+ pub enum QsRequestError {
+@@ -406,13 +409,22 @@ impl ApiClient {
+         };
+ 
+         const RESPONSE_CHANNEL_BUFFER_SIZE: usize = 16; // not too big for applying backpressure
++
+         let (tx, rx) = mpsc::channel::<ListenRequest>(RESPONSE_CHANNEL_BUFFER_SIZE);
+ 
+         // Cancels the requests stream when the responses stream is ended or was dropped
+         let cancel = CancellationToken::new();
+ 
+         let requests = CancellableStream::new(
+-            tokio_stream::once(init_request).chain(ReceiverStream::new(rx)),
++            KeepAliveStream::new(
++                tokio_stream::once(init_request).chain(ReceiverStream::new(rx)),
++                LISTEN_KEEPALIVE_INTERVAL,
++                || ListenRequest {
++                    request: Some(listen_request::Request::KeepAlive(
++                        KeepAliveListenRequest {},
++                    )),
++                },
++            ),
+             cancel.clone(),
+         );
+ 
+diff --git a/backend/src/auth_service/grpc.rs b/backend/src/auth_service/grpc.rs
+index c52737597d..9528bbe756 100644
+--- a/backend/src/auth_service/grpc.rs
++++ b/backend/src/auth_service/grpc.rs
+@@ -822,13 +822,19 @@ struct UsernameSessionHandler {
+ 
+ impl ListenRequestHandler<ListenUsernameRequest> for UsernameSessionHandler {
+     async fn handle(&mut self, request: ListenUsernameRequest) -> Result<(), Status> {
+-        let Some(listen_username_request::Request::Ack(ack_request)) = request.request else {
+-            return Err(ListenHandleProtocolViolation::OnlyAckRequestAllowed.into());
+-        };
+-        let Some(message_id) = ack_request.message_id else {
+-            return Err(ListenHandleProtocolViolation::MissingMessageId.into());
+-        };
+-        self.queues.ack(message_id.into()).await?;
++        match request.request {
++            Some(listen_username_request::Request::KeepAlive(_)) => {}
++            Some(listen_username_request::Request::Init(_)) => {
++                return Err(ListenHandleProtocolViolation::UnexpectedInitRequest.into());
++            }
++            Some(listen_username_request::Request::Ack(ack_request)) => {
++                let Some(message_id) = ack_request.message_id else {
++                    return Err(ListenHandleProtocolViolation::MissingMessageId.into());
++                };
++                self.queues.ack(message_id.into()).await?;
++            }
++            None => {}
++        }
+         Ok(())
+     }
+ }
+@@ -846,8 +852,8 @@ fn report_gate_reason(decision: GateDecision) {
+ enum ListenHandleProtocolViolation {
+     /// Missing initial request
+     MissingInitRequest,
+-    /// Only ack request allowed
+-    OnlyAckRequestAllowed,
++    /// Unexpected init request
++    UnexpectedInitRequest,
+     /// Missing message id in ack request
+     MissingMessageId,
+ }
+diff --git a/backend/src/qs/grpc.rs b/backend/src/qs/grpc.rs
+index bca7893cf2..b8f7379144 100644
+--- a/backend/src/qs/grpc.rs
++++ b/backend/src/qs/grpc.rs
+@@ -81,15 +81,12 @@ impl GrpcQs {
+ enum ProcessListenQueueRequestError {
+     /// Unexpected init request
+     UnexpectedInitRequest,
+-    /// Received empty request
+-    EmptyRequest,
+ }
+ 
+ impl From<ProcessListenQueueRequestError> for Status {
+     fn from(error: ProcessListenQueueRequestError) -> Self {
+         match error {
+-            ProcessListenQueueRequestError::UnexpectedInitRequest
+-            | ProcessListenQueueRequestError::EmptyRequest => {
++            ProcessListenQueueRequestError::UnexpectedInitRequest => {
+                 Status::invalid_argument(error.to_string())
+             }
+         }
+@@ -594,9 +591,8 @@ impl ListenRequestHandler<ListenRequest> for QueueSessionHandler {
+             Some(listen_request::Request::Init(_)) => {
+                 return Err(ProcessListenQueueRequestError::UnexpectedInitRequest.into());
+             }
+-            None => {
+-                return Err(ProcessListenQueueRequestError::EmptyRequest.into());
+-            }
++            Some(listen_request::Request::KeepAlive(_)) => {}
++            None => {}
+         }
+         Ok(())
+     }
+diff --git a/common/Cargo.toml b/common/Cargo.toml
+index 919dfff19b..6bc9efb6dc 100644
+--- a/common/Cargo.toml
++++ b/common/Cargo.toml
+@@ -38,6 +38,7 @@ sha2 = { workspace = true, features = ["zeroize"] }
+ sqlx = { workspace = true, features = ["sqlite", "postgres"] }
+ thiserror.workspace = true
+ tls_codec.workspace = true
++tokio = { workspace = true, features = ["time"] }
+ tokio-stream.workspace = true
+ tokio-util.workspace = true
+ tracing.workspace = true
+@@ -53,7 +54,7 @@ cbor-diag.workspace = true
+ criterion.workspace = true
+ insta.workspace = true
+ serde_json.workspace = true
+-tokio.workspace = true
++tokio = { workspace = true, features = ["test-util"] }
+ 
+ [features]
+ test_utils = []
+diff --git a/common/src/utils/keepalive_stream.rs b/common/src/utils/keepalive_stream.rs
+new file mode 100644
+index 0000000000..86fcdd1175
+--- /dev/null
++++ b/common/src/utils/keepalive_stream.rs
+@@ -0,0 +1,176 @@
++// SPDX-FileCopyrightText: 2026 Phoenix R&D GmbH <hello@phnx.im>
++//
++// SPDX-License-Identifier: AGPL-3.0-or-later
++
++use std::{
++    pin::Pin,
++    task::{Context, Poll, ready},
++    time::Duration,
++};
++
++use pin_project::pin_project;
++use tokio::time::{Instant, Sleep, sleep};
++use tokio_stream::Stream;
++
++/// Yields `make_keepalive()` whenever the inner stream has been idle for `interval`.
++///
++/// Ends when the inner stream ends. The stream is fused even if the inner stream is not.
++///
++/// Used to keep alive h2 streams through proxies that close idle streams. HTTP/2 PINGs don't help
++/// there: they only keep the connection to nearest proxy alive.
++//
++// Implementation detail: no jitter -- keepalive streams created together should fire together, so
++// their keepalives share one h2 connection write (and one radio wake-up on mobile).
++#[pin_project]
++pub struct KeepAliveStream<S, F> {
++    #[pin]
++    inner: S,
++    #[pin]
++    sleep: Sleep,
++    interval: Duration,
++    make_keepalive: F,
++    /// Makes this stream fused without assuming that the underlying stream is fused.
++    done: bool,
++}
++
++impl<S, F> KeepAliveStream<S, F> {
++    /// # Panics
++    ///
++    /// Requires a running tokio runtime with support for time.
++    pub fn new(inner: S, interval: Duration, make_keepalive: F) -> Self {
++        Self {
++            inner,
++            sleep: sleep(interval),
++            interval,
++            make_keepalive,
++            done: false,
++        }
++    }
++}
++
++impl<S, F> Stream for KeepAliveStream<S, F>
++where
++    S: Stream,
++    F: FnMut() -> S::Item,
++{
++    type Item = S::Item;
++
++    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
++        let mut this = self.project();
++        if *this.done {
++            return Poll::Ready(None);
++        }
++        match this.inner.poll_next(cx) {
++            Poll::Ready(Some(item)) => {
++                this.sleep.as_mut().reset(Instant::now() + *this.interval);
++                return Poll::Ready(Some(item));
++            }
++            Poll::Ready(None) => {
++                *this.done = true;
++                return Poll::Ready(None);
++            }
++            Poll::Pending => {}
++        }
++        ready!(this.sleep.as_mut().poll(cx));
++        this.sleep.as_mut().reset(Instant::now() + *this.interval);
++        Poll::Ready(Some((this.make_keepalive)()))
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use std::pin::pin;
++
++    use super::*;
++
++    use futures_util::FutureExt;
++    use tokio::{sync::mpsc, time::advance};
++    use tokio_stream::{StreamExt, wrappers::ReceiverStream};
++
++    const INTERVAL: Duration = Duration::from_secs(30);
++
++    fn keepalive_stream(
++        rx: mpsc::Receiver<u32>,
++    ) -> KeepAliveStream<ReceiverStream<u32>, impl FnMut() -> u32> {
++        KeepAliveStream::new(ReceiverStream::new(rx), INTERVAL, || 0)
++    }
++
++    #[tokio::test(start_paused = true)]
++    async fn passes_items_through() {
++        let (tx, rx) = mpsc::channel(10);
++        let mut stream = pin!(keepalive_stream(rx));
++
++        for i in 1..=3 {
++            advance(INTERVAL / 2).await;
++            tx.send(i).await.unwrap();
++            assert_eq!(stream.next().await, Some(i));
++        }
++        assert_eq!(stream.next().now_or_never(), None);
++    }
++
++    #[tokio::test(start_paused = true)]
++    async fn yields_keepalive_periodically_when_idle() {
++        let start = Instant::now();
++        let (_tx, rx) = mpsc::channel(10);
++        let mut stream = pin!(keepalive_stream(rx));
++
++        advance(INTERVAL - Duration::from_millis(1)).await;
++        assert_eq!(stream.next().now_or_never(), None);
++
++        advance(Duration::from_millis(1)).await;
++        assert_eq!(stream.next().await, Some(0));
++        assert_eq!(Instant::now(), start + INTERVAL);
++
++        advance(INTERVAL - Duration::from_millis(1)).await;
++        assert_eq!(stream.next().now_or_never(), None);
++
++        advance(Duration::from_millis(1)).await;
++        assert_eq!(stream.next().await, Some(0));
++        assert_eq!(Instant::now(), start + 2 * INTERVAL);
++    }
++
++    #[tokio::test(start_paused = true)]
++    async fn item_resets_timer() {
++        let start = Instant::now();
++        let (tx, rx) = mpsc::channel(10);
++        let mut stream = pin!(keepalive_stream(rx));
++
++        let one_sec = Duration::from_secs(1);
++        advance(INTERVAL - one_sec).await;
++        tx.send(1).await.unwrap();
++        assert_eq!(stream.next().await, Some(1));
++
++        // The original deadline passes without a keepalive
++        advance(one_sec).await;
++        assert_eq!(stream.next().now_or_never(), None);
++
++        advance(INTERVAL - one_sec).await;
++        assert_eq!(stream.next().await, Some(0));
++        assert_eq!(Instant::now(), start + 2 * INTERVAL - one_sec);
++    }
++
++    #[tokio::test(start_paused = true)]
++    async fn item_wins_over_expired_timer() {
++        let (tx, rx) = mpsc::channel(10);
++        let mut stream = pin!(keepalive_stream(rx));
++
++        advance(INTERVAL).await;
++        tx.send(1).await.unwrap();
++
++        assert_eq!(stream.next().await, Some(1));
++        assert_eq!(stream.next().now_or_never(), None);
++    }
++
++    #[tokio::test(start_paused = true)]
++    async fn ends_with_inner_and_stays_ended() {
++        let (tx, rx) = mpsc::channel(10);
++        let mut stream = pin!(keepalive_stream(rx));
++
++        advance(INTERVAL).await;
++        drop(tx);
++        assert_eq!(stream.next().await, None);
++
++        advance(INTERVAL).await;
++        assert_eq!(stream.next().await, None);
++    }
++}
+diff --git a/common/src/utils/mod.rs b/common/src/utils/mod.rs
+index a9ee565209..ad530638b2 100644
+--- a/common/src/utils/mod.rs
++++ b/common/src/utils/mod.rs
+@@ -11,9 +11,11 @@ use mls_assist::openmls::{
+ 
+ mod cancellable_stream;
+ mod fibonacci_backoff;
++mod keepalive_stream;
+ 
+ pub use cancellable_stream::{CancellableStream, CancellingStream};
+ pub use fibonacci_backoff::FibonacciBackoff;
++pub use keepalive_stream::KeepAliveStream;
+ 
+ /// Returns the removed client indices from a staged commit.
+ pub fn removed_clients(staged_commit: &StagedCommit) -> Vec<LeafNodeIndex> {
+diff --git a/protos/api/auth_service/v1/auth_service.proto b/protos/api/auth_service/v1/auth_service.proto
+index 5ece9c595c..2973fdefde 100644
+--- a/protos/api/auth_service/v1/auth_service.proto
++++ b/protos/api/auth_service/v1/auth_service.proto
+@@ -627,6 +627,7 @@ message ListenUsernameRequest {
+   oneof request {
+     InitListenUsernameRequest init = 1;
+     AckListenUsernameRequest ack = 2;
++    KeepAliveListenUsernameRequest keep_alive = 3;
+   }
+ }
+ 
+@@ -648,6 +649,8 @@ message AckListenUsernameRequest {
+   common.v1.Uuid message_id = 1;
+ }
+ 
++message KeepAliveListenUsernameRequest {}
++
+ message ListenUsernameResponse {
+   // Optional message
+   //
+diff --git a/protos/api/queue_service/v1/queue_service.proto b/protos/api/queue_service/v1/queue_service.proto
+index a99b12393b..c9d8a3c4ad 100644
+--- a/protos/api/queue_service/v1/queue_service.proto
++++ b/protos/api/queue_service/v1/queue_service.proto
+@@ -304,6 +304,7 @@ message ListenRequest {
+     AckListenRequest ack = 2;
+     FetchListenRequest fetch = 3;
+     ReportClientStateListenRequest client_state = 4;
++    KeepAliveListenRequest keep_alive = 5;
+   }
+ }
+ 
+@@ -339,6 +340,8 @@ message ReportClientStateListenRequest {
+   bytes encrypted_blob = 1;
+ }
+ 
++message KeepAliveListenRequest {}
++
+ message ListenResponse {
+   oneof event {
+     QueueEmpty empty = 1;
