@@ -7,7 +7,8 @@ import sys
 
 from . import (__version__, archives, asn, cloud, ct, dns_recon, domain, dorks,
                emails, favicon, gitintel, hostintel, identity, ip_intel, jsintel,
-               net, pipeline, pivot, score as score_mod, takeover, report as report_mod)
+               livegeo, net, phone_nik, pipeline, pivot, score as score_mod,
+               takeover, report as report_mod)
 
 WORDLIST = [
     "www", "mail", "api", "app", "admin", "dev", "staging", "test", "beta", "portal",
@@ -234,6 +235,78 @@ def cmd_wildcard(a):
     emit(net.wildcard_probe(a.target), a.out)
 
 
+# --------------------------- identity: NIK / phone ---------------------------
+
+def cmd_nik(a):
+    livegeo.require_authorization(a.i_have_authorization, "nik decode")
+    emit(phone_nik.parse_nik(a.target, authorized=True), a.out)
+
+
+def cmd_phone(a):
+    livegeo.require_authorization(a.i_have_authorization, "phone decode")
+    emit(phone_nik.normalize_phone(a.target), a.out)
+
+
+def cmd_id(a):
+    livegeo.require_authorization(a.i_have_authorization, "identity correlate")
+    if not (a.nik or a.phone):
+        raise SystemExit("id: pass --nik and/or --phone")
+    emit(phone_nik.correlate(nik=a.nik, phone=a.phone, authorized=True), a.out)
+
+
+# --------------------------- livegeo ---------------------------
+
+def cmd_geo(a):
+    db = a.db or livegeo.DEFAULT_DB
+    if a.action == "selftest":
+        emit(phone_nik.selftest(), a.out)
+        return
+    if a.action == "guardtest":
+        checks = {}
+        for host in ("127.0.0.1", "localhost", "::1"):
+            checks[f"allow_{host}"] = livegeo.assert_loopback(host)
+        for host in ("0.0.0.0", "8.8.8.8", "google.com", "192.168.1.10"):
+            try:
+                livegeo.assert_loopback(host)
+                checks[f"deny_{host}"] = "FAILED — accepted"
+            except livegeo.GuardrailViolation as e:
+                checks[f"deny_{host}"] = f"blocked: {str(e)[:70]}"
+        checks["missing_flag_refused"] = _flag_refused()
+        emit(checks, a.out)
+        return
+
+    livegeo.require_authorization(a.i_have_authorization, f"geo {a.action}")
+    store = livegeo.Store(db)
+    try:
+        if a.action == "register":
+            emit(store.register(a.device, label=a.label, phone=a.phone, nik=a.nik), a.out)
+        elif a.action == "devices":
+            emit({"db": db, "devices": store.devices_for()}, a.out)
+        elif a.action == "locate":
+            emit(livegeo.locate(store, phone=a.phone, nik=a.nik, device_id=a.device,
+                                ref_lat=a.ref_lat, ref_lon=a.ref_lon), a.out)
+        elif a.action == "track":
+            emit(livegeo.track_report(store, a.device, hours=a.hours), a.out)
+        elif a.action == "simulate":
+            emit(livegeo.simulate(store, a.device, points=a.points,
+                                  lat=a.lat, lon=a.lon, step_m=a.step_m), a.out)
+        elif a.action == "serve":
+            livegeo.serve(store, a.host, a.port, authorized=True)
+        else:
+            raise SystemExit(f"unknown geo action {a.action!r}")
+    finally:
+        if a.action != "serve":
+            store.close()
+
+
+def _flag_refused() -> str:
+    try:
+        livegeo.require_authorization(False, "probe")
+        return "FAILED — accepted without flag"
+    except livegeo.GuardrailViolation as e:
+        return f"blocked: {str(e)[:70]}"
+
+
 # --------------------------- parser ---------------------------
 
 def build_parser() -> argparse.ArgumentParser:
@@ -352,6 +425,45 @@ def build_parser() -> argparse.ArgumentParser:
 
     add("favicon", "Shodan-compatible favicon hash (pure mmh3)", cmd_favicon)
     add("wildcard", "wildcard DNS detection for a domain", cmd_wildcard)
+
+    # ---- identity: NIK / phone (offline, PII-gated) -----------------------
+    nk = add("nik", "structural decode of a 16-digit NIK (no checksum exists)",
+             cmd_nik, metavar="NIK")
+    nk.add_argument("--i-have-authorization", action="store_true",
+                    help="required: confirms the subject is under authorized scope")
+
+    ph = add("phone", "normalize an Indonesian number: E.164, line type, operator prefix",
+             cmd_phone, metavar="PHONE")
+    ph.add_argument("--i-have-authorization", action="store_true")
+
+    idd = add("id", "correlate NIK + phone into one capability matrix", cmd_id, target=False)
+    idd.add_argument("--nik", metavar="NIK")
+    idd.add_argument("--phone", metavar="PHONE")
+    idd.add_argument("--i-have-authorization", action="store_true")
+
+    # ---- livegeo: device-reported live location (loopback collector) -----
+    ge = sub.add_parser(
+        "geo", help="device-reported live location: register handset, ingest, locate")
+    ge.add_argument("action", choices=["register", "devices", "locate", "track",
+                                       "simulate", "serve", "selftest", "guardtest"])
+    ge.add_argument("--device", metavar="ID")
+    ge.add_argument("--phone", metavar="PHONE", help="join key: E.164 identity")
+    ge.add_argument("--nik", metavar="NIK", help="join key: 16-digit NIK")
+    ge.add_argument("--label", metavar="TEXT")
+    ge.add_argument("--db", metavar="PATH", help="sqlite path (default .osintkit/livegeo.db)")
+    ge.add_argument("--host", default="127.0.0.1", help="loopback only; non-loopback is refused")
+    ge.add_argument("--port", type=int, default=8099)
+    ge.add_argument("--hours", type=float, default=24.0)
+    ge.add_argument("--ref-lat", type=float, metavar="LAT", help="reference point for distance/bearing")
+    ge.add_argument("--ref-lon", type=float, metavar="LON")
+    ge.add_argument("--points", type=int, default=6, help="simulate: number of fixes")
+    ge.add_argument("--lat", type=float, default=-6.2088, help="simulate: start latitude")
+    ge.add_argument("--lon", type=float, default=106.8456, help="simulate: start longitude")
+    ge.add_argument("--step-m", type=float, default=120.0, help="simulate: metres per fix")
+    ge.add_argument("--out", help="write JSON output to this file")
+    ge.add_argument("--i-have-authorization", action="store_true")
+    ge.set_defaults(func=cmd_geo)
+
     return ap
 
 
