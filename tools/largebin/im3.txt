@@ -1,0 +1,3726 @@
+Temporary breakpoint 1 at 0x1251: file largebin_attack.c, line 61.
+[Thread debugging using libthread_db enabled]
+Using host libthread_db library "/usr/lib/x86_64-linux-gnu/libthread_db.so.1".
+
+Temporary breakpoint 1, main () at largebin_attack.c:61
+61	    setvbuf(stdout, NULL, _IONBF, 0);
+Dump of assembler code for function _int_malloc:
+./malloc/malloc.c:
+3791	in ./malloc/malloc.c
+3792	in ./malloc/malloc.c
+3793	in ./malloc/malloc.c
+3794	in ./malloc/malloc.c
+3795	in ./malloc/malloc.c
+3796	in ./malloc/malloc.c
+3797	in ./malloc/malloc.c
+3798	in ./malloc/malloc.c
+3799	in ./malloc/malloc.c
+3800	in ./malloc/malloc.c
+3801	in ./malloc/malloc.c
+3802	in ./malloc/malloc.c
+3803	in ./malloc/malloc.c
+3804	in ./malloc/malloc.c
+3805	in ./malloc/malloc.c
+3806	in ./malloc/malloc.c
+3807	in ./malloc/malloc.c
+3808	in ./malloc/malloc.c
+3809	in ./malloc/malloc.c
+3810	in ./malloc/malloc.c
+3811	in ./malloc/malloc.c
+3812	in ./malloc/malloc.c
+3813	in ./malloc/malloc.c
+3814	in ./malloc/malloc.c
+3815	in ./malloc/malloc.c
+3816	in ./malloc/malloc.c
+3817	in ./malloc/malloc.c
+3818	in ./malloc/malloc.c
+3819	in ./malloc/malloc.c
+3820	in ./malloc/malloc.c
+3821	in ./malloc/malloc.c
+3822	in ./malloc/malloc.c
+   0x00007ffff7cb2400 <+0>:	push   %rbp
+   0x00007ffff7cb2401 <+1>:	mov    %rsp,%rbp
+   0x00007ffff7cb2404 <+4>:	push   %r15
+   0x00007ffff7cb2406 <+6>:	push   %r14
+   0x00007ffff7cb2408 <+8>:	push   %r13
+   0x00007ffff7cb240a <+10>:	push   %r12
+   0x00007ffff7cb240c <+12>:	push   %rbx
+   0x00007ffff7cb240d <+13>:	sub    $0x48,%rsp
+   0x00007ffff7cb2411 <+17>:	test   %rsi,%rsi
+   0x00007ffff7cb2414 <+20>:	js     0x7ffff7cb2970 <_int_malloc+1392>
+
+1288	in ./malloc/malloc.c
+   0x00007ffff7cb241a <+26>:	lea    0x17(%rsi),%r10
+   0x00007ffff7cb241e <+30>:	mov    %rsi,%rbx
+   0x00007ffff7cb2421 <+33>:	mov    %rdi,%r11
+   0x00007ffff7cb2424 <+36>:	cmp    $0x1f,%r10
+   0x00007ffff7cb2428 <+40>:	jbe    0x7ffff7cb2648 <_int_malloc+584>
+   0x00007ffff7cb242e <+46>:	and    $0xfffffffffffffff0,%r10
+
+3826	in ./malloc/malloc.c
+3827	in ./malloc/malloc.c
+3828	in ./malloc/malloc.c
+3829	in ./malloc/malloc.c
+3830	in ./malloc/malloc.c
+3831	in ./malloc/malloc.c
+   0x00007ffff7cb2432 <+50>:	test   %rdi,%rdi
+   0x00007ffff7cb2435 <+53>:	je     0x7ffff7cb2a76 <_int_malloc+1654>
+
+3832	in ./malloc/malloc.c
+3833	in ./malloc/malloc.c
+3834	in ./malloc/malloc.c
+3835	in ./malloc/malloc.c
+3836	in ./malloc/malloc.c
+3837	in ./malloc/malloc.c
+3838	in ./malloc/malloc.c
+3839	in ./malloc/malloc.c
+3840	in ./malloc/malloc.c
+3841	in ./malloc/malloc.c
+3842	in ./malloc/malloc.c
+3843	in ./malloc/malloc.c
+3844	in ./malloc/malloc.c
+3845	in ./malloc/malloc.c
+3846	in ./malloc/malloc.c
+3847	in ./malloc/malloc.c
+   0x00007ffff7cb243b <+59>:	cmp    $0x3ff,%r10
+   0x00007ffff7cb2442 <+66>:	jbe    0x7ffff7cb27e8 <_int_malloc+1000>
+
+3894	in ./malloc/malloc.c
+3895	in ./malloc/malloc.c
+3896	in ./malloc/malloc.c
+3897	in ./malloc/malloc.c
+3898	in ./malloc/malloc.c
+3899	in ./malloc/malloc.c
+3900	in ./malloc/malloc.c
+3901	in ./malloc/malloc.c
+   0x00007ffff7cb2448 <+72>:	mov    %r10,%rax
+   0x00007ffff7cb244b <+75>:	shr    $0x6,%rax
+   0x00007ffff7cb244f <+79>:	lea    0x30(%rax),%edi
+   0x00007ffff7cb2452 <+82>:	cmp    $0xc3f,%r10
+   0x00007ffff7cb2459 <+89>:	ja     0x7ffff7cb2788 <_int_malloc+904>
+
+3919	in ./malloc/malloc.c
+   0x00007ffff7cb245f <+95>:	mov    %r10,%r8
+
+3918	in ./malloc/malloc.c
+   0x00007ffff7cb2462 <+98>:	xor    %eax,%eax
+
+3930	in ./malloc/malloc.c
+   0x00007ffff7cb2464 <+100>:	mov    0x20(%r11),%rdx
+   0x00007ffff7cb2468 <+104>:	lea    0x8(%r11),%r9
+
+3919	in ./malloc/malloc.c
+   0x00007ffff7cb246c <+108>:	shr    $0x4,%r8
+   0x00007ffff7cb2470 <+112>:	sub    $0x2,%r8
+
+3920	in ./malloc/malloc.c
+   0x00007ffff7cb2474 <+116>:	cmp    0x15fd75(%rip),%r8        # 0x7ffff7e121f0 <mp_+112>
+   0x00007ffff7cb247b <+123>:	cmovb  %r10,%rax
+   0x00007ffff7cb247f <+127>:	mov    %rax,-0x38(%rbp)
+
+3930	in ./malloc/malloc.c
+   0x00007ffff7cb2483 <+131>:	cmp    %rdx,%r9
+   0x00007ffff7cb2486 <+134>:	je     0x7ffff7cb2832 <_int_malloc+1074>
+
+3924	in ./malloc/malloc.c
+   0x00007ffff7cb248c <+140>:	mov    %edi,-0x48(%rbp)
+
+3925	in ./malloc/malloc.c
+3926	in ./malloc/malloc.c
+3927	in ./malloc/malloc.c
+3928	in ./malloc/malloc.c
+3929	in ./malloc/malloc.c
+   0x00007ffff7cb248f <+143>:	xor    %r12d,%r12d
+
+3922	in ./malloc/malloc.c
+   0x00007ffff7cb2492 <+146>:	xor    %r15d,%r15d
+
+3923	in ./malloc/malloc.c
+3924	in ./malloc/malloc.c
+   0x00007ffff7cb2495 <+149>:	xor    %r13d,%r13d
+   0x00007ffff7cb2498 <+152>:	mov    %rbx,-0x40(%rbp)
+
+3933	in ./malloc/malloc.c
+   0x00007ffff7cb249c <+156>:	mov    0x8(%rdx),%rax
+   0x00007ffff7cb24a0 <+160>:	and    $0xfffffffffffffff8,%rax
+
+3935	in ./malloc/malloc.c
+3936	in ./malloc/malloc.c
+   0x00007ffff7cb24a4 <+164>:	cmp    $0x10,%rax
+   0x00007ffff7cb24a8 <+168>:	jbe    0x7ffff7cb2960 <_int_malloc+1376>
+
+3937	in ./malloc/malloc.c
+   0x00007ffff7cb24ae <+174>:	mov    0x830(%r11),%rdi
+   0x00007ffff7cb24b5 <+181>:	cmp    %rax,%rdi
+   0x00007ffff7cb24b8 <+184>:	jb     0x7ffff7cb2960 <_int_malloc+1376>
+
+3934	in ./malloc/malloc.c
+   0x00007ffff7cb24be <+190>:	lea    (%rdx,%rax,1),%rsi
+
+3939	in ./malloc/malloc.c
+   0x00007ffff7cb24c2 <+194>:	mov    0x8(%rsi),%rcx
+
+3940	in ./malloc/malloc.c
+   0x00007ffff7cb24c6 <+198>:	cmp    $0xf,%rcx
+   0x00007ffff7cb24ca <+202>:	jbe    0x7ffff7cb2990 <_int_malloc+1424>
+   0x00007ffff7cb24d0 <+208>:	cmp    %rcx,%rdi
+   0x00007ffff7cb24d3 <+211>:	jb     0x7ffff7cb2990 <_int_malloc+1424>
+
+3942	in ./malloc/malloc.c
+   0x00007ffff7cb24d9 <+217>:	mov    (%rsi),%rdi
+   0x00007ffff7cb24dc <+220>:	and    $0xfffffffffffffff8,%rdi
+   0x00007ffff7cb24e0 <+224>:	cmp    %rax,%rdi
+   0x00007ffff7cb24e3 <+227>:	jne    0x7ffff7cb2b90 <_int_malloc+1936>
+
+3932	in ./malloc/malloc.c
+   0x00007ffff7cb24e9 <+233>:	mov    0x18(%rdx),%rdi
+
+3944	in ./malloc/malloc.c
+   0x00007ffff7cb24ed <+237>:	cmp    %rdx,0x10(%rdi)
+   0x00007ffff7cb24f1 <+241>:	jne    0x7ffff7cb2ad8 <_int_malloc+1752>
+
+3945	in ./malloc/malloc.c
+   0x00007ffff7cb24f7 <+247>:	cmp    %r9,0x10(%rdx)
+   0x00007ffff7cb24fb <+251>:	jne    0x7ffff7cb2ad8 <_int_malloc+1752>
+
+3947	in ./malloc/malloc.c
+   0x00007ffff7cb2501 <+257>:	test   $0x1,%cl
+   0x00007ffff7cb2504 <+260>:	jne    0x7ffff7cb2c30 <_int_malloc+2096>
+
+3949	in ./malloc/malloc.c
+3950	in ./malloc/malloc.c
+3951	in ./malloc/malloc.c
+3952	in ./malloc/malloc.c
+3953	in ./malloc/malloc.c
+3954	in ./malloc/malloc.c
+3955	in ./malloc/malloc.c
+3956	in ./malloc/malloc.c
+3957	in ./malloc/malloc.c
+3958	in ./malloc/malloc.c
+   0x00007ffff7cb250a <+266>:	cmp    $0x3ff,%r10
+   0x00007ffff7cb2511 <+273>:	ja     0x7ffff7cb251c <_int_malloc+284>
+   0x00007ffff7cb2513 <+275>:	cmp    %rdi,%r9
+   0x00007ffff7cb2516 <+278>:	je     0x7ffff7cb2b10 <_int_malloc+1808>
+
+3984	in ./malloc/malloc.c
+3985	in ./malloc/malloc.c
+3986	in ./malloc/malloc.c
+3987	in ./malloc/malloc.c
+   0x00007ffff7cb251c <+284>:	mov    %rdi,0x20(%r11)
+
+3988	in ./malloc/malloc.c
+   0x00007ffff7cb2520 <+288>:	mov    %r9,0x10(%rdi)
+
+3989	in ./malloc/malloc.c
+3990	in ./malloc/malloc.c
+3991	in ./malloc/malloc.c
+3992	in ./malloc/malloc.c
+   0x00007ffff7cb2524 <+292>:	cmp    %rax,%r10
+   0x00007ffff7cb2527 <+295>:	je     0x7ffff7cb29a0 <_int_malloc+1440>
+
+4014	in ./malloc/malloc.c
+4015	in ./malloc/malloc.c
+4016	in ./malloc/malloc.c
+4017	in ./malloc/malloc.c
+4018	in ./malloc/malloc.c
+4019	in ./malloc/malloc.c
+4020	in ./malloc/malloc.c
+4021	in ./malloc/malloc.c
+4022	in ./malloc/malloc.c
+4023	in ./malloc/malloc.c
+   0x00007ffff7cb252d <+301>:	cmp    $0x3ff,%rax
+   0x00007ffff7cb2533 <+307>:	jbe    0x7ffff7cb2b50 <_int_malloc+1872>
+
+4028	in ./malloc/malloc.c
+4029	in ./malloc/malloc.c
+4030	in ./malloc/malloc.c
+4031	in ./malloc/malloc.c
+   0x00007ffff7cb2539 <+313>:	mov    %rax,%rsi
+   0x00007ffff7cb253c <+316>:	shr    $0x6,%rsi
+   0x00007ffff7cb2540 <+320>:	cmp    $0xc3f,%rax
+   0x00007ffff7cb2546 <+326>:	ja     0x7ffff7cb2a30 <_int_malloc+1584>
+   0x00007ffff7cb254c <+332>:	lea    0x30(%rsi),%ecx
+   0x00007ffff7cb254f <+335>:	lea    0x61(%rsi,%rsi,1),%esi
+   0x00007ffff7cb2553 <+339>:	movslq %esi,%rsi
+   0x00007ffff7cb2556 <+342>:	shl    $0x3,%rsi
+
+4032	in ./malloc/malloc.c
+   0x00007ffff7cb255a <+346>:	lea    (%r11,%rsi,1),%rbx
+
+4033	in ./malloc/malloc.c
+   0x00007ffff7cb255e <+350>:	mov    (%rbx),%rsi
+
+4032	in ./malloc/malloc.c
+   0x00007ffff7cb2561 <+353>:	lea    -0x10(%rbx),%rdi
+
+4034	in ./malloc/malloc.c
+4035	in ./malloc/malloc.c
+4036	in ./malloc/malloc.c
+   0x00007ffff7cb2565 <+357>:	cmp    %rsi,%rdi
+   0x00007ffff7cb2568 <+360>:	je     0x7ffff7cb2ae8 <_int_malloc+1768>
+
+4040	in ./malloc/malloc.c
+4041	in ./malloc/malloc.c
+   0x00007ffff7cb256e <+366>:	mov    0x8(%rbx),%rbx
+   0x00007ffff7cb2572 <+370>:	mov    0x8(%rbx),%r14
+   0x00007ffff7cb2576 <+374>:	test   $0x4,%r14b
+   0x00007ffff7cb257a <+378>:	jne    0x7ffff7cb3aa9 <_int_malloc+5801>
+
+4039	in ./malloc/malloc.c
+   0x00007ffff7cb2580 <+384>:	or     $0x1,%rax
+
+4042	in ./malloc/malloc.c
+   0x00007ffff7cb2584 <+388>:	cmp    %r14,%rax
+   0x00007ffff7cb2587 <+391>:	jae    0x7ffff7cb2ba0 <_int_malloc+1952>
+
+4043	in ./malloc/malloc.c
+4044	in ./malloc/malloc.c
+4045	in ./malloc/malloc.c
+4046	in ./malloc/malloc.c
+4047	in ./malloc/malloc.c
+4048	in ./malloc/malloc.c
+   0x00007ffff7cb258d <+397>:	mov    0x28(%rsi),%rax
+   0x00007ffff7cb2591 <+401>:	cmp    %rsi,0x20(%rax)
+   0x00007ffff7cb2595 <+405>:	jne    0x7ffff7cb2d9a <_int_malloc+2458>
+
+4050	in ./malloc/malloc.c
+4051	in ./malloc/malloc.c
+4052	in ./malloc/malloc.c
+   0x00007ffff7cb259b <+411>:	movq   %rsi,%xmm0
+   0x00007ffff7cb25a0 <+416>:	movq   %rax,%xmm1
+   0x00007ffff7cb25a5 <+421>:	punpcklqdq %xmm1,%xmm0
+   0x00007ffff7cb25a9 <+425>:	movups %xmm0,0x20(%rdx)
+
+4053	in ./malloc/malloc.c
+   0x00007ffff7cb25ad <+429>:	mov    %rdx,0x20(%rax)
+   0x00007ffff7cb25b1 <+433>:	mov    %rdx,0x28(%rsi)
+
+4084	in ./malloc/malloc.c
+4085	in ./malloc/malloc.c
+4086	in ./malloc/malloc.c
+   0x00007ffff7cb25b5 <+437>:	mov    %ecx,%eax
+   0x00007ffff7cb25b7 <+439>:	mov    $0x1,%esi
+
+4091	in ./malloc/malloc.c
+4092	in ./malloc/malloc.c
+4093	in ./malloc/malloc.c
+4094	in ./malloc/malloc.c
+4095	in ./malloc/malloc.c
+   0x00007ffff7cb25bc <+444>:	add    $0x1,%r13
+
+4086	in ./malloc/malloc.c
+   0x00007ffff7cb25c0 <+448>:	sar    $0x5,%eax
+   0x00007ffff7cb25c3 <+451>:	shl    %cl,%esi
+   0x00007ffff7cb25c5 <+453>:	cltq
+   0x00007ffff7cb25c7 <+455>:	or     %esi,0x808(%r11,%rax,4)
+
+4087	in ./malloc/malloc.c
+   0x00007ffff7cb25cf <+463>:	mov    %rbx,0x18(%rdx)
+
+4088	in ./malloc/malloc.c
+   0x00007ffff7cb25d3 <+467>:	mov    %rdi,0x10(%rdx)
+
+4089	in ./malloc/malloc.c
+   0x00007ffff7cb25d7 <+471>:	mov    %rdx,0x18(%rdi)
+
+4090	in ./malloc/malloc.c
+   0x00007ffff7cb25db <+475>:	mov    %rdx,0x10(%rbx)
+
+4096	in ./malloc/malloc.c
+   0x00007ffff7cb25df <+479>:	test   %r15d,%r15d
+   0x00007ffff7cb25e2 <+482>:	je     0x7ffff7cb2808 <_int_malloc+1032>
+
+4097	in ./malloc/malloc.c
+   0x00007ffff7cb25e8 <+488>:	mov    0x15fc19(%rip),%rax        # 0x7ffff7e12208 <mp_+136>
+
+4098	in ./malloc/malloc.c
+   0x00007ffff7cb25ef <+495>:	test   %rax,%rax
+   0x00007ffff7cb25f2 <+498>:	je     0x7ffff7cb2808 <_int_malloc+1032>
+   0x00007ffff7cb25f8 <+504>:	cmp    %r13,%rax
+   0x00007ffff7cb25fb <+507>:	jae    0x7ffff7cb2808 <_int_malloc+1032>
+
+3053	in ./malloc/malloc.c
+   0x00007ffff7cb2601 <+513>:	mov    0x15f788(%rip),%rax        # 0x7ffff7e11d90
+
+3026	in ./malloc/malloc.c
+   0x00007ffff7cb2608 <+520>:	lea    0x12(%r8),%rcx
+
+3048	in ./malloc/malloc.c
+3049	in ./malloc/malloc.c
+3050	in ./malloc/malloc.c
+3051	in ./malloc/malloc.c
+3052	in ./malloc/malloc.c
+3053	in ./malloc/malloc.c
+   0x00007ffff7cb260c <+524>:	mov    %fs:(%rax),%rax
+
+3026	in ./malloc/malloc.c
+   0x00007ffff7cb2610 <+528>:	mov    0x8(%rax,%rcx,8),%r12
+
+3027	in ./malloc/malloc.c
+3028	in ./malloc/malloc.c
+3029	in ./malloc/malloc.c
+3030	in ./malloc/malloc.c
+   0x00007ffff7cb2615 <+533>:	test   $0xf,%r12b
+   0x00007ffff7cb2619 <+537>:	jne    0x7ffff7cb332a <_int_malloc+3882>
+
+3032	in ./malloc/malloc.c
+3033	in ./malloc/malloc.c
+3034	in ./malloc/malloc.c
+   0x00007ffff7cb261f <+543>:	mov    %r12,%rdx
+   0x00007ffff7cb2622 <+546>:	shr    $0xc,%rdx
+   0x00007ffff7cb2626 <+550>:	xor    (%r12),%rdx
+   0x00007ffff7cb262a <+554>:	mov    %rdx,0x8(%rax,%rcx,8)
+
+3035	in ./malloc/malloc.c
+3036	in ./malloc/malloc.c
+3037	in ./malloc/malloc.c
+3038	in ./malloc/malloc.c
+   0x00007ffff7cb262f <+559>:	addw   $0x1,(%rax,%r8,2)
+
+3039	in ./malloc/malloc.c
+   0x00007ffff7cb2635 <+565>:	movq   $0x0,0x8(%r12)
+
+3040	in ./malloc/malloc.c
+   0x00007ffff7cb263e <+574>:	jmp    0x7ffff7cb2772 <_int_malloc+882>
+   0x00007ffff7cb2643 <+579>:	nopl   0x0(%rax,%rax,1)
+
+3826	in ./malloc/malloc.c
+3827	in ./malloc/malloc.c
+3828	in ./malloc/malloc.c
+3829	in ./malloc/malloc.c
+3830	in ./malloc/malloc.c
+3831	in ./malloc/malloc.c
+   0x00007ffff7cb2648 <+584>:	test   %rdi,%rdi
+   0x00007ffff7cb264b <+587>:	je     0x7ffff7cb2a70 <_int_malloc+1648>
+   0x00007ffff7cb2651 <+593>:	mov    $0x28,%r9d
+   0x00007ffff7cb2657 <+599>:	mov    $0x2,%edi
+
+1288	in ./malloc/malloc.c
+   0x00007ffff7cb265c <+604>:	mov    $0x20,%r10d
+
+3850	in ./malloc/malloc.c
+   0x00007ffff7cb2662 <+610>:	lea    (%r11,%r9,1),%r13
+
+3851	in ./malloc/malloc.c
+3852	in ./malloc/malloc.c
+   0x00007ffff7cb2666 <+614>:	mov    0x8(%r13),%r12
+
+3850	in ./malloc/malloc.c
+   0x00007ffff7cb266a <+618>:	lea    -0x10(%r13),%r8
+
+3851	in ./malloc/malloc.c
+3852	in ./malloc/malloc.c
+   0x00007ffff7cb266e <+622>:	cmp    %r12,%r8
+   0x00007ffff7cb2671 <+625>:	je     0x7ffff7cb245f <_int_malloc+95>
+
+3853	in ./malloc/malloc.c
+3854	in ./malloc/malloc.c
+   0x00007ffff7cb2677 <+631>:	mov    0x18(%r12),%rax
+
+3855	in ./malloc/malloc.c
+   0x00007ffff7cb267c <+636>:	cmp    %r12,0x10(%rax)
+   0x00007ffff7cb2680 <+640>:	jne    0x7ffff7cb2c40 <_int_malloc+2112>
+
+3857	in ./malloc/malloc.c
+   0x00007ffff7cb2686 <+646>:	orq    $0x1,0x8(%r12,%r10,1)
+
+3858	in ./malloc/malloc.c
+   0x00007ffff7cb268c <+652>:	mov    %rax,0x8(%r13)
+
+3859	in ./malloc/malloc.c
+   0x00007ffff7cb2690 <+656>:	mov    %r8,0x10(%rax)
+
+3860	in ./malloc/malloc.c
+3861	in ./malloc/malloc.c
+   0x00007ffff7cb2694 <+660>:	lea    0x160425(%rip),%rax        # 0x7ffff7e12ac0 <main_arena>
+   0x00007ffff7cb269b <+667>:	mov    %rax,%r15
+   0x00007ffff7cb269e <+670>:	cmp    %rax,%r11
+   0x00007ffff7cb26a1 <+673>:	je     0x7ffff7cb26a9 <_int_malloc+681>
+
+3862	in ./malloc/malloc.c
+   0x00007ffff7cb26a3 <+675>:	orq    $0x4,0x8(%r12)
+
+3863	in ./malloc/malloc.c
+3864	in ./malloc/malloc.c
+3865	in ./malloc/malloc.c
+3866	in ./malloc/malloc.c
+3867	in ./malloc/malloc.c
+   0x00007ffff7cb26a9 <+681>:	mov    %r10,%rdx
+   0x00007ffff7cb26ac <+684>:	shr    $0x4,%rdx
+   0x00007ffff7cb26b0 <+688>:	sub    $0x2,%rdx
+
+3868	in ./malloc/malloc.c
+   0x00007ffff7cb26b4 <+692>:	cmp    0x15fb35(%rip),%rdx        # 0x7ffff7e121f0 <mp_+112>
+   0x00007ffff7cb26bb <+699>:	jae    0x7ffff7cb2760 <_int_malloc+864>
+
+2919	in ./malloc/malloc.c
+   0x00007ffff7cb26c1 <+705>:	mov    0x15f6c8(%rip),%rax        # 0x7ffff7e11d90
+   0x00007ffff7cb26c8 <+712>:	mov    %fs:(%rax),%rsi
+
+3869	in ./malloc/malloc.c
+3870	in ./malloc/malloc.c
+3871	in ./malloc/malloc.c
+3872	in ./malloc/malloc.c
+   0x00007ffff7cb26cc <+716>:	lea    0x123b0d(%rip),%rax        # 0x7ffff7dd61e0 <__tcache_dummy>
+   0x00007ffff7cb26d3 <+723>:	cmp    %rax,%rsi
+   0x00007ffff7cb26d6 <+726>:	je     0x7ffff7cb2ca8 <_int_malloc+2216>
+
+3873	in ./malloc/malloc.c
+3874	in ./malloc/malloc.c
+3875	in ./malloc/malloc.c
+3876	in ./malloc/malloc.c
+   0x00007ffff7cb26dc <+732>:	mov    %rbx,%rax
+   0x00007ffff7cb26df <+735>:	movzwl (%rsi,%rdx,2),%ecx
+   0x00007ffff7cb26e3 <+739>:	mov    %r13,%rbx
+   0x00007ffff7cb26e6 <+742>:	mov    %r10,%r13
+   0x00007ffff7cb26e9 <+745>:	mov    %rax,%r10
+   0x00007ffff7cb26ec <+748>:	test   %cx,%cx
+   0x00007ffff7cb26ef <+751>:	je     0x7ffff7cb2753 <_int_malloc+851>
+   0x00007ffff7cb26f1 <+753>:	mov    0x8(%r11,%r9,1),%rax
+
+3877	in ./malloc/malloc.c
+   0x00007ffff7cb26f6 <+758>:	cmp    %rax,%r8
+   0x00007ffff7cb26f9 <+761>:	je     0x7ffff7cb2753 <_int_malloc+851>
+
+3878	in ./malloc/malloc.c
+3879	in ./malloc/malloc.c
+   0x00007ffff7cb26fb <+763>:	test   %rax,%rax
+   0x00007ffff7cb26fe <+766>:	je     0x7ffff7cb2801 <_int_malloc+1025>
+
+3880	in ./malloc/malloc.c
+3881	in ./malloc/malloc.c
+   0x00007ffff7cb2704 <+772>:	mov    0x18(%rax),%rdi
+
+3882	in ./malloc/malloc.c
+   0x00007ffff7cb2708 <+776>:	orq    $0x1,0x8(%rax,%r13,1)
+
+3883	in ./malloc/malloc.c
+   0x00007ffff7cb270e <+782>:	cmp    %r15,%r11
+   0x00007ffff7cb2711 <+785>:	je     0x7ffff7cb2718 <_int_malloc+792>
+
+3884	in ./malloc/malloc.c
+   0x00007ffff7cb2713 <+787>:	orq    $0x4,0x8(%rax)
+
+3885	in ./malloc/malloc.c
+   0x00007ffff7cb2718 <+792>:	mov    %rdi,0x8(%rbx)
+
+3886	in ./malloc/malloc.c
+   0x00007ffff7cb271c <+796>:	lea    0x10(%rax),%r14
+
+3015	in ./malloc/malloc.c
+   0x00007ffff7cb2720 <+800>:	sub    $0x1,%ecx
+
+3886	in ./malloc/malloc.c
+   0x00007ffff7cb2723 <+803>:	mov    %r8,0x10(%rdi)
+
+3003	in ./malloc/malloc.c
+   0x00007ffff7cb2727 <+807>:	mov    0x166a92(%rip),%rdi        # 0x7ffff7e191c0 <tcache_key>
+   0x00007ffff7cb272e <+814>:	mov    %rdi,0x18(%rax)
+
+3004	in ./malloc/malloc.c
+3005	in ./malloc/malloc.c
+3006	in ./malloc/malloc.c
+3007	in ./malloc/malloc.c
+   0x00007ffff7cb2732 <+818>:	mov    %r14,%rdi
+   0x00007ffff7cb2735 <+821>:	shr    $0xc,%rdi
+   0x00007ffff7cb2739 <+825>:	xor    0x98(%rsi,%rdx,8),%rdi
+   0x00007ffff7cb2741 <+833>:	mov    %rdi,0x10(%rax)
+
+3008	in ./malloc/malloc.c
+   0x00007ffff7cb2745 <+837>:	mov    %r14,0x98(%rsi,%rdx,8)
+
+3009	in ./malloc/malloc.c
+3010	in ./malloc/malloc.c
+3011	in ./malloc/malloc.c
+3012	in ./malloc/malloc.c
+3013	in ./malloc/malloc.c
+3014	in ./malloc/malloc.c
+3015	in ./malloc/malloc.c
+   0x00007ffff7cb274d <+845>:	mov    %cx,(%rsi,%rdx,2)
+
+3041	in ./malloc/malloc.c
+3042	in ./malloc/malloc.c
+3043	in ./malloc/malloc.c
+3044	in ./malloc/malloc.c
+3045	in ./malloc/malloc.c
+3046	in ./malloc/malloc.c
+3047	in ./malloc/malloc.c
+   0x00007ffff7cb2751 <+849>:	jmp    0x7ffff7cb26ec <_int_malloc+748>
+   0x00007ffff7cb2753 <+851>:	mov    %r10,%rbx
+   0x00007ffff7cb2756 <+854>:	cs nopw 0x0(%rax,%rax,1)
+
+3887	in ./malloc/malloc.c
+3888	in ./malloc/malloc.c
+3889	in ./malloc/malloc.c
+3890	in ./malloc/malloc.c
+3891	in ./malloc/malloc.c
+3892	in ./malloc/malloc.c
+3893	in ./malloc/malloc.c
+   0x00007ffff7cb2760 <+864>:	mov    0x166a7e(%rip),%esi        # 0x7ffff7e191e4 <perturb_byte>
+   0x00007ffff7cb2766 <+870>:	add    $0x10,%r12
+
+1888	in ./malloc/malloc.c
+   0x00007ffff7cb276a <+874>:	test   %esi,%esi
+   0x00007ffff7cb276c <+876>:	jne    0x7ffff7cb2abd <_int_malloc+1725>
+
+4337	in ./malloc/malloc.c
+4338	in ./malloc/malloc.c
+4339	in ./malloc/malloc.c
+4340	in ./malloc/malloc.c
+   0x00007ffff7cb2772 <+882>:	add    $0x48,%rsp
+   0x00007ffff7cb2776 <+886>:	mov    %r12,%rax
+   0x00007ffff7cb2779 <+889>:	pop    %rbx
+   0x00007ffff7cb277a <+890>:	pop    %r12
+   0x00007ffff7cb277c <+892>:	pop    %r13
+   0x00007ffff7cb277e <+894>:	pop    %r14
+   0x00007ffff7cb2780 <+896>:	pop    %r15
+   0x00007ffff7cb2782 <+898>:	pop    %rbp
+   0x00007ffff7cb2783 <+899>:	ret
+   0x00007ffff7cb2784 <+900>:	nopl   0x0(%rax)
+
+3901	in ./malloc/malloc.c
+   0x00007ffff7cb2788 <+904>:	mov    %r10,%rax
+   0x00007ffff7cb278b <+907>:	shr    $0x9,%rax
+   0x00007ffff7cb278f <+911>:	lea    0x5b(%rax),%edi
+   0x00007ffff7cb2792 <+914>:	cmp    $0x29ff,%r10
+   0x00007ffff7cb2799 <+921>:	jbe    0x7ffff7cb245f <_int_malloc+95>
+   0x00007ffff7cb279f <+927>:	mov    %r10,%rax
+   0x00007ffff7cb27a2 <+930>:	shr    $0xc,%rax
+   0x00007ffff7cb27a6 <+934>:	lea    0x6e(%rax),%edi
+   0x00007ffff7cb27a9 <+937>:	cmp    $0xafff,%r10
+   0x00007ffff7cb27b0 <+944>:	jbe    0x7ffff7cb245f <_int_malloc+95>
+   0x00007ffff7cb27b6 <+950>:	mov    %r10,%rax
+   0x00007ffff7cb27b9 <+953>:	mov    $0x2,%ecx
+   0x00007ffff7cb27be <+958>:	mov    %r10,%rdx
+   0x00007ffff7cb27c1 <+961>:	shr    $0x12,%rax
+   0x00007ffff7cb27c5 <+965>:	shr    $0xf,%rdx
+   0x00007ffff7cb27c9 <+969>:	cmp    %rcx,%rax
+   0x00007ffff7cb27cc <+972>:	lea    0x77(%rdx),%esi
+   0x00007ffff7cb27cf <+975>:	cmova  %rcx,%rax
+   0x00007ffff7cb27d3 <+979>:	add    $0x7c,%eax
+   0x00007ffff7cb27d6 <+982>:	cmp    $0x4,%rdx
+   0x00007ffff7cb27da <+986>:	cmova  %eax,%esi
+   0x00007ffff7cb27dd <+989>:	mov    %esi,%edi
+   0x00007ffff7cb27df <+991>:	jmp    0x7ffff7cb245f <_int_malloc+95>
+   0x00007ffff7cb27e4 <+996>:	nopl   0x0(%rax)
+   0x00007ffff7cb27e8 <+1000>:	mov    %r10d,%eax
+
+3849	in ./malloc/malloc.c
+   0x00007ffff7cb27eb <+1003>:	mov    %r10d,%edi
+   0x00007ffff7cb27ee <+1006>:	shr    $0x3,%eax
+   0x00007ffff7cb27f1 <+1009>:	shr    $0x4,%edi
+   0x00007ffff7cb27f4 <+1012>:	lea    0x1(%rax),%r9d
+   0x00007ffff7cb27f8 <+1016>:	shl    $0x3,%r9
+   0x00007ffff7cb27fc <+1020>:	jmp    0x7ffff7cb2662 <_int_malloc+610>
+
+3877	in ./malloc/malloc.c
+   0x00007ffff7cb2801 <+1025>:	jmp    0x7ffff7cb2801 <_int_malloc+1025>
+   0x00007ffff7cb2803 <+1027>:	nopl   0x0(%rax,%rax,1)
+
+4099	in ./malloc/malloc.c
+4100	in ./malloc/malloc.c
+4101	in ./malloc/malloc.c
+4102	in ./malloc/malloc.c
+4103	in ./malloc/malloc.c
+4104	in ./malloc/malloc.c
+4105	in ./malloc/malloc.c
+   0x00007ffff7cb2808 <+1032>:	add    $0x1,%r12d
+   0x00007ffff7cb280c <+1036>:	cmp    $0x270f,%r12d
+   0x00007ffff7cb2813 <+1043>:	jg     0x7ffff7cb2822 <_int_malloc+1058>
+
+3930	in ./malloc/malloc.c
+   0x00007ffff7cb2815 <+1045>:	mov    0x20(%r11),%rdx
+   0x00007ffff7cb2819 <+1049>:	cmp    %rdx,%r9
+   0x00007ffff7cb281c <+1052>:	jne    0x7ffff7cb249c <_int_malloc+156>
+
+4106	in ./malloc/malloc.c
+4107	in ./malloc/malloc.c
+4108	in ./malloc/malloc.c
+4109	in ./malloc/malloc.c
+4110	in ./malloc/malloc.c
+4111	in ./malloc/malloc.c
+   0x00007ffff7cb2822 <+1058>:	mov    -0x48(%rbp),%edi
+   0x00007ffff7cb2825 <+1061>:	mov    -0x40(%rbp),%rbx
+   0x00007ffff7cb2829 <+1065>:	test   %r15d,%r15d
+   0x00007ffff7cb282c <+1068>:	jne    0x7ffff7cb2601 <_int_malloc+513>
+
+4112	in ./malloc/malloc.c
+4113	in ./malloc/malloc.c
+4114	in ./malloc/malloc.c
+4115	in ./malloc/malloc.c
+4116	in ./malloc/malloc.c
+4117	in ./malloc/malloc.c
+4118	in ./malloc/malloc.c
+4119	in ./malloc/malloc.c
+4120	in ./malloc/malloc.c
+4121	in ./malloc/malloc.c
+4122	in ./malloc/malloc.c
+   0x00007ffff7cb2832 <+1074>:	lea    (%rdi,%rdi,1),%eax
+   0x00007ffff7cb2835 <+1077>:	cmp    $0x3ff,%r10
+   0x00007ffff7cb283c <+1084>:	jbe    0x7ffff7cb2eb8 <_int_malloc+2744>
+
+4123	in ./malloc/malloc.c
+4124	in ./malloc/malloc.c
+   0x00007ffff7cb2842 <+1090>:	lea    0x1(%rax),%edx
+   0x00007ffff7cb2845 <+1093>:	lea    (%r11,%rdx,8),%rdx
+
+4125	in ./malloc/malloc.c
+4126	in ./malloc/malloc.c
+4127	in ./malloc/malloc.c
+   0x00007ffff7cb2849 <+1097>:	mov    (%rdx),%rcx
+
+4124	in ./malloc/malloc.c
+   0x00007ffff7cb284c <+1100>:	lea    -0x10(%rdx),%rsi
+
+4125	in ./malloc/malloc.c
+4126	in ./malloc/malloc.c
+4127	in ./malloc/malloc.c
+   0x00007ffff7cb2850 <+1104>:	cmp    %rsi,%rcx
+   0x00007ffff7cb2853 <+1107>:	je     0x7ffff7cb2eb8 <_int_malloc+2744>
+
+4128	in ./malloc/malloc.c
+   0x00007ffff7cb2859 <+1113>:	cmp    %r10,0x8(%rcx)
+   0x00007ffff7cb285d <+1117>:	jb     0x7ffff7cb2eb8 <_int_malloc+2744>
+
+4129	in ./malloc/malloc.c
+4130	in ./malloc/malloc.c
+4131	in ./malloc/malloc.c
+   0x00007ffff7cb2863 <+1123>:	mov    0x28(%rcx),%r12
+   0x00007ffff7cb2867 <+1127>:	jmp    0x7ffff7cb286e <_int_malloc+1134>
+
+4133	in ./malloc/malloc.c
+4134	in ./malloc/malloc.c
+   0x00007ffff7cb2869 <+1129>:	mov    0x28(%r12),%r12
+
+4132	in ./malloc/malloc.c
+   0x00007ffff7cb286e <+1134>:	mov    0x8(%r12),%rax
+   0x00007ffff7cb2873 <+1139>:	mov    %rax,%r13
+   0x00007ffff7cb2876 <+1142>:	and    $0xfffffffffffffff8,%r13
+   0x00007ffff7cb287a <+1146>:	cmp    %r10,%r13
+   0x00007ffff7cb287d <+1149>:	jb     0x7ffff7cb2869 <_int_malloc+1129>
+
+4135	in ./malloc/malloc.c
+4136	in ./malloc/malloc.c
+4137	in ./malloc/malloc.c
+4138	in ./malloc/malloc.c
+   0x00007ffff7cb287f <+1151>:	cmp    %r12,0x8(%rdx)
+   0x00007ffff7cb2883 <+1155>:	je     0x7ffff7cb2892 <_int_malloc+1170>
+
+4139	in ./malloc/malloc.c
+4140	in ./malloc/malloc.c
+   0x00007ffff7cb2885 <+1157>:	mov    0x10(%r12),%rdx
+
+4141	in ./malloc/malloc.c
+   0x00007ffff7cb288a <+1162>:	cmp    %rax,0x8(%rdx)
+   0x00007ffff7cb288e <+1166>:	cmove  %rdx,%r12
+
+4142	in ./malloc/malloc.c
+4143	in ./malloc/malloc.c
+   0x00007ffff7cb2892 <+1170>:	mov    %r13,%rcx
+
+4144	in ./malloc/malloc.c
+   0x00007ffff7cb2895 <+1173>:	mov    %r12,%rdi
+   0x00007ffff7cb2898 <+1176>:	mov    %r11,-0x50(%rbp)
+
+4143	in ./malloc/malloc.c
+   0x00007ffff7cb289c <+1180>:	sub    %r10,%rcx
+   0x00007ffff7cb289f <+1183>:	mov    %r9,-0x48(%rbp)
+   0x00007ffff7cb28a3 <+1187>:	mov    %r10,-0x40(%rbp)
+   0x00007ffff7cb28a7 <+1191>:	mov    %rcx,-0x38(%rbp)
+
+4144	in ./malloc/malloc.c
+   0x00007ffff7cb28ab <+1195>:	call   0x7ffff7cb0f70 <unlink_chunk>
+
+4145	in ./malloc/malloc.c
+4146	in ./malloc/malloc.c
+4147	in ./malloc/malloc.c
+   0x00007ffff7cb28b0 <+1200>:	mov    -0x38(%rbp),%rcx
+   0x00007ffff7cb28b4 <+1204>:	mov    -0x40(%rbp),%r10
+   0x00007ffff7cb28b8 <+1208>:	mov    -0x48(%rbp),%r9
+   0x00007ffff7cb28bc <+1212>:	mov    -0x50(%rbp),%r11
+   0x00007ffff7cb28c0 <+1216>:	cmp    $0x1f,%rcx
+   0x00007ffff7cb28c4 <+1220>:	jbe    0x7ffff7cb3309 <_int_malloc+3849>
+
+4157	in ./malloc/malloc.c
+4158	in ./malloc/malloc.c
+4159	in ./malloc/malloc.c
+4160	in ./malloc/malloc.c
+   0x00007ffff7cb28ca <+1226>:	mov    0x18(%r11),%rax
+
+4161	in ./malloc/malloc.c
+   0x00007ffff7cb28ce <+1230>:	cmp    %r9,0x18(%rax)
+   0x00007ffff7cb28d2 <+1234>:	jne    0x7ffff7cb399d <_int_malloc+5533>
+
+4163	in ./malloc/malloc.c
+4164	in ./malloc/malloc.c
+   0x00007ffff7cb28d8 <+1240>:	movq   %rax,%xmm0
+   0x00007ffff7cb28dd <+1245>:	movq   %r9,%xmm5
+
+4156	in ./malloc/malloc.c
+   0x00007ffff7cb28e2 <+1250>:	lea    (%r12,%r10,1),%rdx
+
+4163	in ./malloc/malloc.c
+4164	in ./malloc/malloc.c
+   0x00007ffff7cb28e6 <+1254>:	punpcklqdq %xmm5,%xmm0
+   0x00007ffff7cb28ea <+1258>:	movups %xmm0,0x10(%rdx)
+
+4165	in ./malloc/malloc.c
+   0x00007ffff7cb28ee <+1262>:	mov    %rdx,0x18(%r11)
+
+4166	in ./malloc/malloc.c
+   0x00007ffff7cb28f2 <+1266>:	mov    %rdx,0x18(%rax)
+
+4167	in ./malloc/malloc.c
+   0x00007ffff7cb28f6 <+1270>:	cmp    $0x3ff,%rcx
+   0x00007ffff7cb28fd <+1277>:	jbe    0x7ffff7cb2907 <_int_malloc+1287>
+
+4276	in ./malloc/malloc.c
+4277	in ./malloc/malloc.c
+4278	in ./malloc/malloc.c
+   0x00007ffff7cb28ff <+1279>:	pxor   %xmm0,%xmm0
+   0x00007ffff7cb2903 <+1283>:	movups %xmm0,0x20(%rdx)
+
+4279	in ./malloc/malloc.c
+4280	in ./malloc/malloc.c
+   0x00007ffff7cb2907 <+1287>:	lea    0x1601b2(%rip),%rax        # 0x7ffff7e12ac0 <main_arena>
+   0x00007ffff7cb290e <+1294>:	cmp    %rax,%r11
+   0x00007ffff7cb2911 <+1297>:	setne  %al
+   0x00007ffff7cb2914 <+1300>:	movzbl %al,%eax
+   0x00007ffff7cb2917 <+1303>:	shl    $0x2,%rax
+   0x00007ffff7cb291b <+1307>:	or     %r10,%rax
+   0x00007ffff7cb291e <+1310>:	or     $0x1,%rax
+   0x00007ffff7cb2922 <+1314>:	mov    %rax,0x8(%r12)
+
+4281	in ./malloc/malloc.c
+4282	in ./malloc/malloc.c
+   0x00007ffff7cb2927 <+1319>:	mov    %rcx,%rax
+   0x00007ffff7cb292a <+1322>:	or     $0x1,%rax
+   0x00007ffff7cb292e <+1326>:	mov    %rax,0x8(%rdx)
+
+4283	in ./malloc/malloc.c
+   0x00007ffff7cb2932 <+1330>:	mov    %rcx,(%r12,%r13,1)
+
+4284	in ./malloc/malloc.c
+4285	in ./malloc/malloc.c
+4286	in ./malloc/malloc.c
+   0x00007ffff7cb2936 <+1334>:	mov    0x1668a8(%rip),%eax        # 0x7ffff7e191e4 <perturb_byte>
+   0x00007ffff7cb293c <+1340>:	add    $0x10,%r12
+
+1888	in ./malloc/malloc.c
+   0x00007ffff7cb2940 <+1344>:	test   %eax,%eax
+   0x00007ffff7cb2942 <+1346>:	je     0x7ffff7cb2772 <_int_malloc+882>
+
+../string/bits/string_fortified.h:
+   0x00007ffff7cb2948 <+1352>:	xor    $0xff,%al
+   0x00007ffff7cb294a <+1354>:	mov    %rbx,%rdx
+   0x00007ffff7cb294d <+1357>:	mov    %r12,%rdi
+
+./malloc/malloc.c:
+   0x00007ffff7cb2950 <+1360>:	mov    %eax,%esi
+
+../string/bits/string_fortified.h:
+   0x00007ffff7cb2952 <+1362>:	call   0x7ffff7c28730 <*ABS*+0xb98a0@plt>
+   0x00007ffff7cb2957 <+1367>:	jmp    0x7ffff7cb2772 <_int_malloc+882>
+   0x00007ffff7cb295c <+1372>:	nopl   0x0(%rax)
+
+./malloc/malloc.c:
+   0x00007ffff7cb2960 <+1376>:	lea    0x12edc1(%rip),%rdi        # 0x7ffff7de1728
+   0x00007ffff7cb2967 <+1383>:	call   0x7ffff7cb0890 <malloc_printerr>
+   0x00007ffff7cb296c <+1388>:	nopl   0x0(%rax)
+
+3824	in ./malloc/malloc.c
+   0x00007ffff7cb2970 <+1392>:	mov    0x15f471(%rip),%rax        # 0x7ffff7e11de8
+   0x00007ffff7cb2977 <+1399>:	movl   $0xc,%fs:(%rax)
+
+3825	in ./malloc/malloc.c
+   0x00007ffff7cb297e <+1406>:	xor    %r12d,%r12d
+   0x00007ffff7cb2981 <+1409>:	jmp    0x7ffff7cb2772 <_int_malloc+882>
+   0x00007ffff7cb2986 <+1414>:	cs nopw 0x0(%rax,%rax,1)
+
+3941	in ./malloc/malloc.c
+   0x00007ffff7cb2990 <+1424>:	lea    0x12edb9(%rip),%rdi        # 0x7ffff7de1750
+   0x00007ffff7cb2997 <+1431>:	call   0x7ffff7cb0890 <malloc_printerr>
+   0x00007ffff7cb299c <+1436>:	nopl   0x0(%rax)
+
+3993	in ./malloc/malloc.c
+3994	in ./malloc/malloc.c
+   0x00007ffff7cb29a0 <+1440>:	or     $0x1,%rcx
+
+3995	in ./malloc/malloc.c
+   0x00007ffff7cb29a4 <+1444>:	lea    0x160115(%rip),%rax        # 0x7ffff7e12ac0 <main_arena>
+
+3994	in ./malloc/malloc.c
+   0x00007ffff7cb29ab <+1451>:	mov    %rcx,0x8(%rsi)
+
+3995	in ./malloc/malloc.c
+   0x00007ffff7cb29af <+1455>:	cmp    %rax,%r11
+   0x00007ffff7cb29b2 <+1458>:	je     0x7ffff7cb29b9 <_int_malloc+1465>
+
+3996	in ./malloc/malloc.c
+   0x00007ffff7cb29b4 <+1460>:	orq    $0x4,0x8(%rdx)
+
+2919	in ./malloc/malloc.c
+   0x00007ffff7cb29b9 <+1465>:	mov    0x15f3d0(%rip),%rax        # 0x7ffff7e11d90
+   0x00007ffff7cb29c0 <+1472>:	mov    %fs:(%rax),%rsi
+
+3997	in ./malloc/malloc.c
+3998	in ./malloc/malloc.c
+   0x00007ffff7cb29c4 <+1476>:	lea    0x123815(%rip),%rax        # 0x7ffff7dd61e0 <__tcache_dummy>
+   0x00007ffff7cb29cb <+1483>:	cmp    %rax,%rsi
+   0x00007ffff7cb29ce <+1486>:	je     0x7ffff7cb2dcf <_int_malloc+2511>
+
+3999	in ./malloc/malloc.c
+4000	in ./malloc/malloc.c
+4001	in ./malloc/malloc.c
+4002	in ./malloc/malloc.c
+   0x00007ffff7cb29d4 <+1492>:	cmpq   $0x0,-0x38(%rbp)
+   0x00007ffff7cb29d9 <+1497>:	je     0x7ffff7cb2b00 <_int_malloc+1792>
+
+4003	in ./malloc/malloc.c
+   0x00007ffff7cb29df <+1503>:	movzwl (%rsi,%r8,2),%eax
+   0x00007ffff7cb29e4 <+1508>:	test   %ax,%ax
+   0x00007ffff7cb29e7 <+1511>:	je     0x7ffff7cb2b00 <_int_malloc+1792>
+
+3003	in ./malloc/malloc.c
+   0x00007ffff7cb29ed <+1517>:	mov    0x1667cc(%rip),%rcx        # 0x7ffff7e191c0 <tcache_key>
+
+3979	in ./malloc/malloc.c
+3980	in ./malloc/malloc.c
+3981	in ./malloc/malloc.c
+   0x00007ffff7cb29f4 <+1524>:	lea    0x10(%rdx),%rdi
+
+3003	in ./malloc/malloc.c
+   0x00007ffff7cb29f8 <+1528>:	sub    $0x1,%eax
+
+4004	in ./malloc/malloc.c
+4005	in ./malloc/malloc.c
+4006	in ./malloc/malloc.c
+   0x00007ffff7cb29fb <+1531>:	mov    $0x1,%r15d
+
+3003	in ./malloc/malloc.c
+   0x00007ffff7cb2a01 <+1537>:	mov    %rcx,0x18(%rdx)
+
+3004	in ./malloc/malloc.c
+3005	in ./malloc/malloc.c
+3006	in ./malloc/malloc.c
+3007	in ./malloc/malloc.c
+   0x00007ffff7cb2a05 <+1541>:	mov    %rdi,%rcx
+   0x00007ffff7cb2a08 <+1544>:	shr    $0xc,%rcx
+   0x00007ffff7cb2a0c <+1548>:	xor    0x98(%rsi,%r8,8),%rcx
+   0x00007ffff7cb2a14 <+1556>:	mov    %rcx,0x10(%rdx)
+
+3008	in ./malloc/malloc.c
+   0x00007ffff7cb2a18 <+1560>:	mov    %rdi,0x98(%rsi,%r8,8)
+
+3009	in ./malloc/malloc.c
+3010	in ./malloc/malloc.c
+3011	in ./malloc/malloc.c
+3012	in ./malloc/malloc.c
+3013	in ./malloc/malloc.c
+3014	in ./malloc/malloc.c
+3015	in ./malloc/malloc.c
+   0x00007ffff7cb2a20 <+1568>:	mov    %ax,(%rsi,%r8,2)
+
+4007	in ./malloc/malloc.c
+   0x00007ffff7cb2a25 <+1573>:	jmp    0x7ffff7cb2815 <_int_malloc+1045>
+   0x00007ffff7cb2a2a <+1578>:	nopw   0x0(%rax,%rax,1)
+
+4028	in ./malloc/malloc.c
+4029	in ./malloc/malloc.c
+4030	in ./malloc/malloc.c
+4031	in ./malloc/malloc.c
+   0x00007ffff7cb2a30 <+1584>:	mov    %rax,%rsi
+   0x00007ffff7cb2a33 <+1587>:	shr    $0x9,%rsi
+   0x00007ffff7cb2a37 <+1591>:	cmp    $0x29ff,%rax
+   0x00007ffff7cb2a3d <+1597>:	jbe    0x7ffff7cb2b70 <_int_malloc+1904>
+   0x00007ffff7cb2a43 <+1603>:	mov    %rax,%rsi
+   0x00007ffff7cb2a46 <+1606>:	shr    $0xc,%rsi
+   0x00007ffff7cb2a4a <+1610>:	cmp    $0xafff,%rax
+   0x00007ffff7cb2a50 <+1616>:	ja     0x7ffff7cb2c50 <_int_malloc+2128>
+   0x00007ffff7cb2a56 <+1622>:	lea    0x6e(%rsi),%ecx
+   0x00007ffff7cb2a59 <+1625>:	lea    0xdd(%rsi,%rsi,1),%esi
+   0x00007ffff7cb2a60 <+1632>:	movslq %esi,%rsi
+   0x00007ffff7cb2a63 <+1635>:	shl    $0x3,%rsi
+   0x00007ffff7cb2a67 <+1639>:	jmp    0x7ffff7cb255a <_int_malloc+346>
+   0x00007ffff7cb2a6c <+1644>:	nopl   0x0(%rax)
+
+1288	in ./malloc/malloc.c
+   0x00007ffff7cb2a70 <+1648>:	mov    $0x20,%r10d
+
+2296	in ./malloc/malloc.c
+2297	in ./malloc/malloc.c
+2298	in ./malloc/malloc.c
+2299	in ./malloc/malloc.c
+2300	in ./malloc/malloc.c
+2301	in ./malloc/malloc.c
+2302	in ./malloc/malloc.c
+2303	in ./malloc/malloc.c
+2304	in ./malloc/malloc.c
+2305	in ./malloc/malloc.c
+2306	in ./malloc/malloc.c
+2307	in ./malloc/malloc.c
+2308	in ./malloc/malloc.c
+2309	in ./malloc/malloc.c
+2310	in ./malloc/malloc.c
+2311	in ./malloc/malloc.c
+2312	in ./malloc/malloc.c
+2313	in ./malloc/malloc.c
+2314	in ./malloc/malloc.c
+2315	in ./malloc/malloc.c
+2316	in ./malloc/malloc.c
+2317	in ./malloc/malloc.c
+2318	in ./malloc/malloc.c
+2319	in ./malloc/malloc.c
+2320	in ./malloc/malloc.c
+2321	in ./malloc/malloc.c
+2322	in ./malloc/malloc.c
+2323	in ./malloc/malloc.c
+2324	in ./malloc/malloc.c
+   0x00007ffff7cb2a76 <+1654>:	mov    0x15f43b(%rip),%rax        # 0x7ffff7e11eb8
+
+2338	in ./malloc/malloc.c
+2339	in ./malloc/malloc.c
+2340	in ./malloc/malloc.c
+   0x00007ffff7cb2a7d <+1661>:	mov    0x15f734(%rip),%rsi        # 0x7ffff7e121b8 <mp_+56>
+
+2324	in ./malloc/malloc.c
+   0x00007ffff7cb2a84 <+1668>:	mov    0x18(%rax),%r13
+
+2338	in ./malloc/malloc.c
+2339	in ./malloc/malloc.c
+2340	in ./malloc/malloc.c
+   0x00007ffff7cb2a88 <+1672>:	lea    -0x1(%rsi),%rax
+   0x00007ffff7cb2a8c <+1676>:	cmp    %r10,%rax
+   0x00007ffff7cb2a8f <+1679>:	jb     0x7ffff7cb2c80 <_int_malloc+2176>
+
+2346	in ./malloc/malloc.c
+2347	in ./malloc/malloc.c
+2348	in ./malloc/malloc.c
+   0x00007ffff7cb2a95 <+1685>:	xor    %edx,%edx
+   0x00007ffff7cb2a97 <+1687>:	mov    %r13,%rsi
+   0x00007ffff7cb2a9a <+1690>:	mov    %r10,%rdi
+   0x00007ffff7cb2a9d <+1693>:	call   0x7ffff7cb1040 <sysmalloc_mmap>
+   0x00007ffff7cb2aa2 <+1698>:	mov    %rax,%r12
+
+2349	in ./malloc/malloc.c
+   0x00007ffff7cb2aa5 <+1701>:	cmp    $0xffffffffffffffff,%rax
+   0x00007ffff7cb2aa9 <+1705>:	je     0x7ffff7cb297e <_int_malloc+1406>
+
+1888	in ./malloc/malloc.c
+   0x00007ffff7cb2aaf <+1711>:	mov    0x16672f(%rip),%esi        # 0x7ffff7e191e4 <perturb_byte>
+   0x00007ffff7cb2ab5 <+1717>:	test   %esi,%esi
+   0x00007ffff7cb2ab7 <+1719>:	je     0x7ffff7cb2772 <_int_malloc+882>
+
+../string/bits/string_fortified.h:
+   0x00007ffff7cb2abd <+1725>:	xor    $0xff,%sil
+   0x00007ffff7cb2ac1 <+1729>:	mov    %rbx,%rdx
+   0x00007ffff7cb2ac4 <+1732>:	mov    %r12,%rdi
+   0x00007ffff7cb2ac7 <+1735>:	call   0x7ffff7c28730 <*ABS*+0xb98a0@plt>
+   0x00007ffff7cb2acc <+1740>:	jmp    0x7ffff7cb2772 <_int_malloc+882>
+   0x00007ffff7cb2ad1 <+1745>:	nopl   0x0(%rax)
+
+./malloc/malloc.c:
+   0x00007ffff7cb2ad8 <+1752>:	lea    0x12ecd1(%rip),%rdi        # 0x7ffff7de17b0
+   0x00007ffff7cb2adf <+1759>:	call   0x7ffff7cb0890 <malloc_printerr>
+   0x00007ffff7cb2ae4 <+1764>:	nopl   0x0(%rax)
+
+4080	in ./malloc/malloc.c
+4081	in ./malloc/malloc.c
+4082	in ./malloc/malloc.c
+4083	in ./malloc/malloc.c
+   0x00007ffff7cb2ae8 <+1768>:	movq   %rdx,%xmm0
+
+4032	in ./malloc/malloc.c
+   0x00007ffff7cb2aed <+1773>:	mov    %rdi,%rbx
+
+4080	in ./malloc/malloc.c
+4081	in ./malloc/malloc.c
+4082	in ./malloc/malloc.c
+4083	in ./malloc/malloc.c
+   0x00007ffff7cb2af0 <+1776>:	punpcklqdq %xmm0,%xmm0
+   0x00007ffff7cb2af4 <+1780>:	movups %xmm0,0x20(%rdx)
+   0x00007ffff7cb2af8 <+1784>:	jmp    0x7ffff7cb25b5 <_int_malloc+437>
+   0x00007ffff7cb2afd <+1789>:	nopl   (%rax)
+   0x00007ffff7cb2b00 <+1792>:	mov    -0x40(%rbp),%rbx
+
+4013	in ./malloc/malloc.c
+   0x00007ffff7cb2b04 <+1796>:	lea    0x10(%rdx),%r12
+   0x00007ffff7cb2b08 <+1800>:	jmp    0x7ffff7cb2aaf <_int_malloc+1711>
+   0x00007ffff7cb2b0a <+1802>:	nopw   0x0(%rax,%rax,1)
+
+3959	in ./malloc/malloc.c
+   0x00007ffff7cb2b10 <+1808>:	cmp    %rdx,0x10(%r11)
+   0x00007ffff7cb2b14 <+1812>:	jne    0x7ffff7cb251c <_int_malloc+284>
+
+3961	in ./malloc/malloc.c
+   0x00007ffff7cb2b1a <+1818>:	lea    0x20(%r10),%rbx
+
+3960	in ./malloc/malloc.c
+   0x00007ffff7cb2b1e <+1822>:	cmp    %rax,%rbx
+   0x00007ffff7cb2b21 <+1825>:	jb     0x7ffff7cb3779 <_int_malloc+4985>
+
+3984	in ./malloc/malloc.c
+3985	in ./malloc/malloc.c
+3986	in ./malloc/malloc.c
+3987	in ./malloc/malloc.c
+   0x00007ffff7cb2b27 <+1831>:	mov    %rdi,0x20(%r11)
+
+3988	in ./malloc/malloc.c
+   0x00007ffff7cb2b2b <+1835>:	mov    %r9,0x10(%rdi)
+
+3989	in ./malloc/malloc.c
+3990	in ./malloc/malloc.c
+3991	in ./malloc/malloc.c
+3992	in ./malloc/malloc.c
+   0x00007ffff7cb2b2f <+1839>:	cmp    %rax,%r10
+   0x00007ffff7cb2b32 <+1842>:	je     0x7ffff7cb29a0 <_int_malloc+1440>
+
+4014	in ./malloc/malloc.c
+4015	in ./malloc/malloc.c
+4016	in ./malloc/malloc.c
+4017	in ./malloc/malloc.c
+4018	in ./malloc/malloc.c
+4019	in ./malloc/malloc.c
+4020	in ./malloc/malloc.c
+4021	in ./malloc/malloc.c
+4022	in ./malloc/malloc.c
+4023	in ./malloc/malloc.c
+   0x00007ffff7cb2b38 <+1848>:	mov    $0x408,%esi
+   0x00007ffff7cb2b3d <+1853>:	mov    $0x40,%ecx
+   0x00007ffff7cb2b42 <+1858>:	cmp    $0x3ff,%rax
+   0x00007ffff7cb2b48 <+1864>:	ja     0x7ffff7cb255a <_int_malloc+346>
+   0x00007ffff7cb2b4e <+1870>:	xchg   %ax,%ax
+
+4024	in ./malloc/malloc.c
+4025	in ./malloc/malloc.c
+   0x00007ffff7cb2b50 <+1872>:	mov    %eax,%ecx
+   0x00007ffff7cb2b52 <+1874>:	shr    $0x4,%ecx
+
+4026	in ./malloc/malloc.c
+   0x00007ffff7cb2b55 <+1877>:	lea    0x1(%rcx,%rcx,1),%eax
+   0x00007ffff7cb2b59 <+1881>:	cltq
+   0x00007ffff7cb2b5b <+1883>:	lea    (%r11,%rax,8),%rax
+
+4027	in ./malloc/malloc.c
+   0x00007ffff7cb2b5f <+1887>:	mov    (%rax),%rdi
+
+4026	in ./malloc/malloc.c
+   0x00007ffff7cb2b62 <+1890>:	lea    -0x10(%rax),%rbx
+
+4027	in ./malloc/malloc.c
+   0x00007ffff7cb2b66 <+1894>:	jmp    0x7ffff7cb25b5 <_int_malloc+437>
+   0x00007ffff7cb2b6b <+1899>:	nopl   0x0(%rax,%rax,1)
+
+4028	in ./malloc/malloc.c
+4029	in ./malloc/malloc.c
+4030	in ./malloc/malloc.c
+4031	in ./malloc/malloc.c
+   0x00007ffff7cb2b70 <+1904>:	lea    0x5b(%rsi),%ecx
+   0x00007ffff7cb2b73 <+1907>:	lea    0xb7(%rsi,%rsi,1),%esi
+   0x00007ffff7cb2b7a <+1914>:	movslq %esi,%rsi
+   0x00007ffff7cb2b7d <+1917>:	shl    $0x3,%rsi
+   0x00007ffff7cb2b81 <+1921>:	jmp    0x7ffff7cb255a <_int_malloc+346>
+   0x00007ffff7cb2b86 <+1926>:	cs nopw 0x0(%rax,%rax,1)
+
+3943	in ./malloc/malloc.c
+   0x00007ffff7cb2b90 <+1936>:	lea    0x12ebe1(%rip),%rdi        # 0x7ffff7de1778
+   0x00007ffff7cb2b97 <+1943>:	call   0x7ffff7cb0890 <malloc_printerr>
+   0x00007ffff7cb2b9c <+1948>:	nopl   0x0(%rax)
+
+4054	in ./malloc/malloc.c
+4055	in ./malloc/malloc.c
+4056	in ./malloc/malloc.c
+4057	in ./malloc/malloc.c
+   0x00007ffff7cb2ba0 <+1952>:	mov    0x8(%rsi),%rdi
+   0x00007ffff7cb2ba4 <+1956>:	test   $0x4,%dil
+   0x00007ffff7cb2ba8 <+1960>:	je     0x7ffff7cb2bd2 <_int_malloc+2002>
+   0x00007ffff7cb2baa <+1962>:	jmp    0x7ffff7cb3ac8 <_int_malloc+5832>
+   0x00007ffff7cb2baf <+1967>:	nopw   0x0(%rax,%rax,1)
+   0x00007ffff7cb2bb5 <+1973>:	data16 cs nopw 0x0(%rax,%rax,1)
+
+4059	in ./malloc/malloc.c
+4060	in ./malloc/malloc.c
+   0x00007ffff7cb2bc0 <+1984>:	mov    0x20(%rsi),%rsi
+
+4061	in ./malloc/malloc.c
+   0x00007ffff7cb2bc4 <+1988>:	mov    0x8(%rsi),%rdi
+   0x00007ffff7cb2bc8 <+1992>:	test   $0x4,%dil
+   0x00007ffff7cb2bcc <+1996>:	jne    0x7ffff7cb39a9 <_int_malloc+5545>
+
+4058	in ./malloc/malloc.c
+   0x00007ffff7cb2bd2 <+2002>:	cmp    %rdi,%rax
+   0x00007ffff7cb2bd5 <+2005>:	jb     0x7ffff7cb2bc0 <_int_malloc+1984>
+
+4062	in ./malloc/malloc.c
+4063	in ./malloc/malloc.c
+4064	in ./malloc/malloc.c
+   0x00007ffff7cb2bd7 <+2007>:	je     0x7ffff7cb2d91 <_int_malloc+2449>
+
+4071	in ./malloc/malloc.c
+   0x00007ffff7cb2bdd <+2013>:	mov    0x28(%rsi),%rax
+
+4070	in ./malloc/malloc.c
+   0x00007ffff7cb2be1 <+2017>:	movq   %rsi,%xmm0
+   0x00007ffff7cb2be6 <+2022>:	movq   %rax,%xmm2
+   0x00007ffff7cb2beb <+2027>:	punpcklqdq %xmm2,%xmm0
+   0x00007ffff7cb2bef <+2031>:	movups %xmm0,0x20(%rdx)
+
+4072	in ./malloc/malloc.c
+   0x00007ffff7cb2bf3 <+2035>:	cmp    %rsi,0x20(%rax)
+   0x00007ffff7cb2bf7 <+2039>:	jne    0x7ffff7cb2d9a <_int_malloc+2458>
+
+4073	in ./malloc/malloc.c
+4074	in ./malloc/malloc.c
+   0x00007ffff7cb2bfd <+2045>:	mov    %rdx,0x28(%rsi)
+
+4075	in ./malloc/malloc.c
+   0x00007ffff7cb2c01 <+2049>:	mov    0x28(%rdx),%rax
+   0x00007ffff7cb2c05 <+2053>:	mov    %rsi,%rdi
+   0x00007ffff7cb2c08 <+2056>:	mov    %rdx,0x20(%rax)
+
+4076	in ./malloc/malloc.c
+4077	in ./malloc/malloc.c
+   0x00007ffff7cb2c0c <+2060>:	mov    0x18(%rdi),%rbx
+
+4078	in ./malloc/malloc.c
+   0x00007ffff7cb2c10 <+2064>:	cmp    %rdi,0x10(%rbx)
+   0x00007ffff7cb2c14 <+2068>:	je     0x7ffff7cb25b5 <_int_malloc+437>
+
+4079	in ./malloc/malloc.c
+   0x00007ffff7cb2c1a <+2074>:	lea    0x12ec2f(%rip),%rdi        # 0x7ffff7de1850
+   0x00007ffff7cb2c21 <+2081>:	call   0x7ffff7cb0890 <malloc_printerr>
+   0x00007ffff7cb2c26 <+2086>:	cs nopw 0x0(%rax,%rax,1)
+
+3948	in ./malloc/malloc.c
+   0x00007ffff7cb2c30 <+2096>:	lea    0x12eba9(%rip),%rdi        # 0x7ffff7de17e0
+   0x00007ffff7cb2c37 <+2103>:	call   0x7ffff7cb0890 <malloc_printerr>
+   0x00007ffff7cb2c3c <+2108>:	nopl   0x0(%rax)
+
+3856	in ./malloc/malloc.c
+   0x00007ffff7cb2c40 <+2112>:	lea    0x12eab1(%rip),%rdi        # 0x7ffff7de16f8
+   0x00007ffff7cb2c47 <+2119>:	call   0x7ffff7cb0890 <malloc_printerr>
+   0x00007ffff7cb2c4c <+2124>:	nopl   0x0(%rax)
+
+4028	in ./malloc/malloc.c
+4029	in ./malloc/malloc.c
+4030	in ./malloc/malloc.c
+4031	in ./malloc/malloc.c
+   0x00007ffff7cb2c50 <+2128>:	mov    %rax,%rsi
+   0x00007ffff7cb2c53 <+2131>:	shr    $0xf,%rsi
+   0x00007ffff7cb2c57 <+2135>:	cmp    $0x27fff,%rax
+   0x00007ffff7cb2c5d <+2141>:	ja     0x7ffff7cb2da6 <_int_malloc+2470>
+   0x00007ffff7cb2c63 <+2147>:	lea    0x77(%rsi),%ecx
+   0x00007ffff7cb2c66 <+2150>:	lea    0xef(%rsi,%rsi,1),%esi
+   0x00007ffff7cb2c6d <+2157>:	movslq %esi,%rsi
+   0x00007ffff7cb2c70 <+2160>:	shl    $0x3,%rsi
+   0x00007ffff7cb2c74 <+2164>:	jmp    0x7ffff7cb255a <_int_malloc+346>
+   0x00007ffff7cb2c79 <+2169>:	nopl   0x0(%rax)
+
+2344	in ./malloc/malloc.c
+   0x00007ffff7cb2c80 <+2176>:	mov    0x15f53a(%rip),%edx        # 0x7ffff7e121c0 <mp_+64>
+   0x00007ffff7cb2c86 <+2182>:	mov    %r10,%rdi
+   0x00007ffff7cb2c89 <+2185>:	mov    %r10,-0x38(%rbp)
+   0x00007ffff7cb2c8d <+2189>:	call   0x7ffff7cb1040 <sysmalloc_mmap>
+
+2345	in ./malloc/malloc.c
+   0x00007ffff7cb2c92 <+2194>:	mov    -0x38(%rbp),%r10
+   0x00007ffff7cb2c96 <+2198>:	cmp    $0xffffffffffffffff,%rax
+
+2344	in ./malloc/malloc.c
+   0x00007ffff7cb2c9a <+2202>:	mov    %rax,%r12
+
+2345	in ./malloc/malloc.c
+   0x00007ffff7cb2c9d <+2205>:	jne    0x7ffff7cb2aaf <_int_malloc+1711>
+   0x00007ffff7cb2ca3 <+2211>:	jmp    0x7ffff7cb2a95 <_int_malloc+1685>
+
+2920	in ./malloc/malloc.c
+2921	in ./malloc/malloc.c
+2922	in ./malloc/malloc.c
+2923	in ./malloc/malloc.c
+2924	in ./malloc/malloc.c
+2925	in ./malloc/malloc.c
+2926	in ./malloc/malloc.c
+2927	in ./malloc/malloc.c
+2928	in ./malloc/malloc.c
+2929	in ./malloc/malloc.c
+2930	in ./malloc/malloc.c
+2931	in ./malloc/malloc.c
+2932	in ./malloc/malloc.c
+2933	in ./malloc/malloc.c
+2934	in ./malloc/malloc.c
+2935	in ./malloc/malloc.c
+2936	in ./malloc/malloc.c
+2937	in ./malloc/malloc.c
+2938	in ./malloc/malloc.c
+2939	in ./malloc/malloc.c
+2940	in ./malloc/malloc.c
+2941	in ./malloc/malloc.c
+   0x00007ffff7cb2ca8 <+2216>:	mov    0x15f0e1(%rip),%rax        # 0x7ffff7e11d90
+   0x00007ffff7cb2caf <+2223>:	lea    0x8(%rsi),%rcx
+   0x00007ffff7cb2cb3 <+2227>:	mov    %rcx,%fs:(%rax)
+
+3054	in ./malloc/malloc.c
+3055	in ./malloc/malloc.c
+3056	in ./malloc/malloc.c
+3057	in ./malloc/malloc.c
+3058	in ./malloc/malloc.c
+3059	in ./malloc/malloc.c
+3060	in ./malloc/malloc.c
+3061	in ./malloc/malloc.c
+3062	in ./malloc/malloc.c
+3063	in ./malloc/malloc.c
+3064	in ./malloc/malloc.c
+3065	in ./malloc/malloc.c
+3066	in ./malloc/malloc.c
+3067	in ./malloc/malloc.c
+3068	in ./malloc/malloc.c
+3069	in ./malloc/malloc.c
+3070	in ./malloc/malloc.c
+3071	in ./malloc/malloc.c
+3072	in ./malloc/malloc.c
+3073	in ./malloc/malloc.c
+3074	in ./malloc/malloc.c
+3075	in ./malloc/malloc.c
+3076	in ./malloc/malloc.c
+3077	in ./malloc/malloc.c
+3078	in ./malloc/malloc.c
+3079	in ./malloc/malloc.c
+3080	in ./malloc/malloc.c
+3081	in ./malloc/malloc.c
+3082	in ./malloc/malloc.c
+3083	in ./malloc/malloc.c
+3084	in ./malloc/malloc.c
+3085	in ./malloc/malloc.c
+3086	in ./malloc/malloc.c
+3087	in ./malloc/malloc.c
+3088	in ./malloc/malloc.c
+3089	in ./malloc/malloc.c
+3090	in ./malloc/malloc.c
+3091	in ./malloc/malloc.c
+3092	in ./malloc/malloc.c
+3093	in ./malloc/malloc.c
+3094	in ./malloc/malloc.c
+3095	in ./malloc/malloc.c
+3096	in ./malloc/malloc.c
+3097	in ./malloc/malloc.c
+3098	in ./malloc/malloc.c
+3099	in ./malloc/malloc.c
+3100	in ./malloc/malloc.c
+3101	in ./malloc/malloc.c
+3102	in ./malloc/malloc.c
+3103	in ./malloc/malloc.c
+3104	in ./malloc/malloc.c
+3105	in ./malloc/malloc.c
+3106	in ./malloc/malloc.c
+3107	in ./malloc/malloc.c
+3108	in ./malloc/malloc.c
+3109	in ./malloc/malloc.c
+3110	in ./malloc/malloc.c
+3111	in ./malloc/malloc.c
+3112	in ./malloc/malloc.c
+3113	in ./malloc/malloc.c
+3114	in ./malloc/malloc.c
+3115	in ./malloc/malloc.c
+3116	in ./malloc/malloc.c
+3117	in ./malloc/malloc.c
+3118	in ./malloc/malloc.c
+3119	in ./malloc/malloc.c
+3120	in ./malloc/malloc.c
+3121	in ./malloc/malloc.c
+3122	in ./malloc/malloc.c
+3123	in ./malloc/malloc.c
+3124	in ./malloc/malloc.c
+3125	in ./malloc/malloc.c
+3126	in ./malloc/malloc.c
+3127	in ./malloc/malloc.c
+3128	in ./malloc/malloc.c
+3129	in ./malloc/malloc.c
+3130	in ./malloc/malloc.c
+3131	in ./malloc/malloc.c
+3132	in ./malloc/malloc.c
+3133	in ./malloc/malloc.c
+3134	in ./malloc/malloc.c
+3135	in ./malloc/malloc.c
+3136	in ./malloc/malloc.c
+3137	in ./malloc/malloc.c
+3138	in ./malloc/malloc.c
+3139	in ./malloc/malloc.c
+3140	in ./malloc/malloc.c
+3141	in ./malloc/malloc.c
+3142	in ./malloc/malloc.c
+3143	in ./malloc/malloc.c
+3144	in ./malloc/malloc.c
+3145	in ./malloc/malloc.c
+3146	in ./malloc/malloc.c
+3147	in ./malloc/malloc.c
+3148	in ./malloc/malloc.c
+3149	in ./malloc/malloc.c
+3150	in ./malloc/malloc.c
+3151	in ./malloc/malloc.c
+3152	in ./malloc/malloc.c
+3153	in ./malloc/malloc.c
+3154	in ./malloc/malloc.c
+3155	in ./malloc/malloc.c
+3156	in ./malloc/malloc.c
+3157	in ./malloc/malloc.c
+3158	in ./malloc/malloc.c
+3159	in ./malloc/malloc.c
+3160	in ./malloc/malloc.c
+3161	in ./malloc/malloc.c
+3162	in ./malloc/malloc.c
+3163	in ./malloc/malloc.c
+3164	in ./malloc/malloc.c
+3165	in ./malloc/malloc.c
+3166	in ./malloc/malloc.c
+3167	in ./malloc/malloc.c
+3168	in ./malloc/malloc.c
+3169	in ./malloc/malloc.c
+3170	in ./malloc/malloc.c
+3171	in ./malloc/malloc.c
+3172	in ./malloc/malloc.c
+3173	in ./malloc/malloc.c
+3174	in ./malloc/malloc.c
+3175	in ./malloc/malloc.c
+3176	in ./malloc/malloc.c
+3177	in ./malloc/malloc.c
+3178	in ./malloc/malloc.c
+3179	in ./malloc/malloc.c
+3180	in ./malloc/malloc.c
+3181	in ./malloc/malloc.c
+3182	in ./malloc/malloc.c
+3183	in ./malloc/malloc.c
+3184	in ./malloc/malloc.c
+3185	in ./malloc/malloc.c
+3186	in ./malloc/malloc.c
+3187	in ./malloc/malloc.c
+3188	in ./malloc/malloc.c
+3189	in ./malloc/malloc.c
+3190	in ./malloc/malloc.c
+3191	in ./malloc/malloc.c
+3192	in ./malloc/malloc.c
+3193	in ./malloc/malloc.c
+3194	in ./malloc/malloc.c
+3195	in ./malloc/malloc.c
+3196	in ./malloc/malloc.c
+3197	in ./malloc/malloc.c
+3198	in ./malloc/malloc.c
+3199	in ./malloc/malloc.c
+3200	in ./malloc/malloc.c
+3201	in ./malloc/malloc.c
+3202	in ./malloc/malloc.c
+3203	in ./malloc/malloc.c
+3204	in ./malloc/malloc.c
+3205	in ./malloc/malloc.c
+3206	in ./malloc/malloc.c
+3207	in ./malloc/malloc.c
+3208	in ./malloc/malloc.c
+3209	in ./malloc/malloc.c
+3210	in ./malloc/malloc.c
+   0x00007ffff7cb2cb7 <+2231>:	cmpq   $0x0,0x15f541(%rip)        # 0x7ffff7e12200 <mp_+128>
+   0x00007ffff7cb2cbf <+2239>:	je     0x7ffff7cb301b <_int_malloc+3099>
+
+3216	in ./malloc/malloc.c
+   0x00007ffff7cb2cc5 <+2245>:	mov    $0x300,%esi
+   0x00007ffff7cb2cca <+2250>:	mov    %r11,%rdi
+   0x00007ffff7cb2ccd <+2253>:	mov    %r9,-0x58(%rbp)
+   0x00007ffff7cb2cd1 <+2257>:	mov    %rdx,-0x50(%rbp)
+   0x00007ffff7cb2cd5 <+2261>:	mov    %r8,-0x48(%rbp)
+   0x00007ffff7cb2cd9 <+2265>:	mov    %r10,-0x40(%rbp)
+
+3215	in ./malloc/malloc.c
+   0x00007ffff7cb2cdd <+2269>:	mov    %r11,-0x38(%rbp)
+   0x00007ffff7cb2ce1 <+2273>:	call   0x7ffff7cb2400 <_int_malloc>
+   0x00007ffff7cb2ce6 <+2278>:	mov    %rax,%rsi
+   0x00007ffff7cb2ce9 <+2281>:	mov    0x15f0a0(%rip),%rax        # 0x7ffff7e11d90
+
+3217	in ./malloc/malloc.c
+3218	in ./malloc/malloc.c
+3219	in ./malloc/malloc.c
+3220	in ./malloc/malloc.c
+   0x00007ffff7cb2cf0 <+2288>:	test   %rsi,%rsi
+
+3215	in ./malloc/malloc.c
+   0x00007ffff7cb2cf3 <+2291>:	mov    %rsi,%fs:(%rax)
+
+3217	in ./malloc/malloc.c
+3218	in ./malloc/malloc.c
+3219	in ./malloc/malloc.c
+3220	in ./malloc/malloc.c
+   0x00007ffff7cb2cf7 <+2295>:	mov    -0x38(%rbp),%r11
+   0x00007ffff7cb2cfb <+2299>:	mov    -0x40(%rbp),%r10
+   0x00007ffff7cb2cff <+2303>:	mov    -0x48(%rbp),%r8
+   0x00007ffff7cb2d03 <+2307>:	mov    -0x50(%rbp),%rdx
+   0x00007ffff7cb2d07 <+2311>:	mov    -0x58(%rbp),%r9
+   0x00007ffff7cb2d0b <+2315>:	je     0x7ffff7cb3010 <_int_malloc+3088>
+
+../string/bits/string_fortified.h:
+   0x00007ffff7cb2d11 <+2321>:	lea    0x8(%rsi),%rdi
+   0x00007ffff7cb2d15 <+2325>:	mov    %rsi,%rcx
+   0x00007ffff7cb2d18 <+2328>:	xor    %eax,%eax
+   0x00007ffff7cb2d1a <+2330>:	movq   $0x0,(%rsi)
+   0x00007ffff7cb2d21 <+2337>:	movq   $0x0,0x2f0(%rsi)
+   0x00007ffff7cb2d2c <+2348>:	and    $0xfffffffffffffff8,%rdi
+   0x00007ffff7cb2d30 <+2352>:	sub    %rdi,%rcx
+   0x00007ffff7cb2d33 <+2355>:	add    $0x2f8,%ecx
+   0x00007ffff7cb2d39 <+2361>:	shr    $0x3,%ecx
+   0x00007ffff7cb2d3c <+2364>:	rep stos %rax,(%rdi)
+
+./malloc/malloc.c:
+   0x00007ffff7cb2d3f <+2367>:	movd   0x15f4b9(%rip),%xmm0        # 0x7ffff7e12200 <mp_+128>
+   0x00007ffff7cb2d47 <+2375>:	punpcklwd %xmm0,%xmm0
+
+3229	in ./malloc/malloc.c
+   0x00007ffff7cb2d4b <+2379>:	pinsrw $0x0,0x15f4ac(%rip),%xmm3        # 0x7ffff7e12200 <mp_+128>
+   0x00007ffff7cb2d54 <+2388>:	pshufd $0x0,%xmm0,%xmm0
+   0x00007ffff7cb2d59 <+2393>:	movups %xmm0,(%rsi)
+   0x00007ffff7cb2d5c <+2396>:	movups %xmm0,0x10(%rsi)
+   0x00007ffff7cb2d60 <+2400>:	movups %xmm0,0x20(%rsi)
+   0x00007ffff7cb2d64 <+2404>:	movups %xmm0,0x30(%rsi)
+   0x00007ffff7cb2d68 <+2408>:	movups %xmm0,0x40(%rsi)
+   0x00007ffff7cb2d6c <+2412>:	movups %xmm0,0x50(%rsi)
+   0x00007ffff7cb2d70 <+2416>:	movups %xmm0,0x60(%rsi)
+   0x00007ffff7cb2d74 <+2420>:	movups %xmm0,0x70(%rsi)
+   0x00007ffff7cb2d78 <+2424>:	movups %xmm0,0x80(%rsi)
+   0x00007ffff7cb2d7f <+2431>:	pshuflw $0x0,%xmm3,%xmm0
+   0x00007ffff7cb2d84 <+2436>:	movq   %xmm0,0x90(%rsi)
+
+3228	in ./malloc/malloc.c
+   0x00007ffff7cb2d8c <+2444>:	jmp    0x7ffff7cb26dc <_int_malloc+732>
+
+4065	in ./malloc/malloc.c
+4066	in ./malloc/malloc.c
+4067	in ./malloc/malloc.c
+   0x00007ffff7cb2d91 <+2449>:	mov    0x10(%rsi),%rdi
+   0x00007ffff7cb2d95 <+2453>:	jmp    0x7ffff7cb2c0c <_int_malloc+2060>
+
+4049	in ./malloc/malloc.c
+   0x00007ffff7cb2d9a <+2458>:	lea    0x12ea6f(%rip),%rdi        # 0x7ffff7de1810
+   0x00007ffff7cb2da1 <+2465>:	call   0x7ffff7cb0890 <malloc_printerr>
+
+4031	in ./malloc/malloc.c
+   0x00007ffff7cb2da6 <+2470>:	mov    %rax,%rsi
+   0x00007ffff7cb2da9 <+2473>:	mov    $0x2,%ecx
+   0x00007ffff7cb2dae <+2478>:	shr    $0x12,%rsi
+   0x00007ffff7cb2db2 <+2482>:	cmp    %rcx,%rsi
+   0x00007ffff7cb2db5 <+2485>:	cmova  %rcx,%rsi
+   0x00007ffff7cb2db9 <+2489>:	lea    0x7c(%rsi),%ecx
+   0x00007ffff7cb2dbc <+2492>:	lea    0xf9(%rsi,%rsi,1),%esi
+   0x00007ffff7cb2dc3 <+2499>:	movslq %esi,%rsi
+   0x00007ffff7cb2dc6 <+2502>:	shl    $0x3,%rsi
+   0x00007ffff7cb2dca <+2506>:	jmp    0x7ffff7cb255a <_int_malloc+346>
+
+2941	in ./malloc/malloc.c
+   0x00007ffff7cb2dcf <+2511>:	mov    0x15efba(%rip),%rax        # 0x7ffff7e11d90
+   0x00007ffff7cb2dd6 <+2518>:	lea    0x8(%rsi),%rcx
+   0x00007ffff7cb2dda <+2522>:	mov    %rcx,%fs:(%rax)
+
+3054	in ./malloc/malloc.c
+3055	in ./malloc/malloc.c
+3056	in ./malloc/malloc.c
+3057	in ./malloc/malloc.c
+3058	in ./malloc/malloc.c
+3059	in ./malloc/malloc.c
+3060	in ./malloc/malloc.c
+3061	in ./malloc/malloc.c
+3062	in ./malloc/malloc.c
+3063	in ./malloc/malloc.c
+3064	in ./malloc/malloc.c
+3065	in ./malloc/malloc.c
+3066	in ./malloc/malloc.c
+3067	in ./malloc/malloc.c
+3068	in ./malloc/malloc.c
+3069	in ./malloc/malloc.c
+3070	in ./malloc/malloc.c
+3071	in ./malloc/malloc.c
+3072	in ./malloc/malloc.c
+3073	in ./malloc/malloc.c
+3074	in ./malloc/malloc.c
+3075	in ./malloc/malloc.c
+3076	in ./malloc/malloc.c
+3077	in ./malloc/malloc.c
+3078	in ./malloc/malloc.c
+3079	in ./malloc/malloc.c
+3080	in ./malloc/malloc.c
+3081	in ./malloc/malloc.c
+3082	in ./malloc/malloc.c
+3083	in ./malloc/malloc.c
+3084	in ./malloc/malloc.c
+3085	in ./malloc/malloc.c
+3086	in ./malloc/malloc.c
+3087	in ./malloc/malloc.c
+3088	in ./malloc/malloc.c
+3089	in ./malloc/malloc.c
+3090	in ./malloc/malloc.c
+3091	in ./malloc/malloc.c
+3092	in ./malloc/malloc.c
+3093	in ./malloc/malloc.c
+3094	in ./malloc/malloc.c
+3095	in ./malloc/malloc.c
+3096	in ./malloc/malloc.c
+3097	in ./malloc/malloc.c
+3098	in ./malloc/malloc.c
+3099	in ./malloc/malloc.c
+3100	in ./malloc/malloc.c
+3101	in ./malloc/malloc.c
+3102	in ./malloc/malloc.c
+3103	in ./malloc/malloc.c
+3104	in ./malloc/malloc.c
+3105	in ./malloc/malloc.c
+3106	in ./malloc/malloc.c
+3107	in ./malloc/malloc.c
+3108	in ./malloc/malloc.c
+3109	in ./malloc/malloc.c
+3110	in ./malloc/malloc.c
+3111	in ./malloc/malloc.c
+3112	in ./malloc/malloc.c
+3113	in ./malloc/malloc.c
+3114	in ./malloc/malloc.c
+3115	in ./malloc/malloc.c
+3116	in ./malloc/malloc.c
+3117	in ./malloc/malloc.c
+3118	in ./malloc/malloc.c
+3119	in ./malloc/malloc.c
+3120	in ./malloc/malloc.c
+3121	in ./malloc/malloc.c
+3122	in ./malloc/malloc.c
+3123	in ./malloc/malloc.c
+3124	in ./malloc/malloc.c
+3125	in ./malloc/malloc.c
+3126	in ./malloc/malloc.c
+3127	in ./malloc/malloc.c
+3128	in ./malloc/malloc.c
+3129	in ./malloc/malloc.c
+3130	in ./malloc/malloc.c
+3131	in ./malloc/malloc.c
+3132	in ./malloc/malloc.c
+3133	in ./malloc/malloc.c
+3134	in ./malloc/malloc.c
+3135	in ./malloc/malloc.c
+3136	in ./malloc/malloc.c
+3137	in ./malloc/malloc.c
+3138	in ./malloc/malloc.c
+3139	in ./malloc/malloc.c
+3140	in ./malloc/malloc.c
+3141	in ./malloc/malloc.c
+3142	in ./malloc/malloc.c
+3143	in ./malloc/malloc.c
+3144	in ./malloc/malloc.c
+3145	in ./malloc/malloc.c
+3146	in ./malloc/malloc.c
+3147	in ./malloc/malloc.c
+3148	in ./malloc/malloc.c
+3149	in ./malloc/malloc.c
+3150	in ./malloc/malloc.c
+3151	in ./malloc/malloc.c
+3152	in ./malloc/malloc.c
+3153	in ./malloc/malloc.c
+3154	in ./malloc/malloc.c
+3155	in ./malloc/malloc.c
+3156	in ./malloc/malloc.c
+3157	in ./malloc/malloc.c
+3158	in ./malloc/malloc.c
+3159	in ./malloc/malloc.c
+3160	in ./malloc/malloc.c
+3161	in ./malloc/malloc.c
+3162	in ./malloc/malloc.c
+3163	in ./malloc/malloc.c
+3164	in ./malloc/malloc.c
+3165	in ./malloc/malloc.c
+3166	in ./malloc/malloc.c
+3167	in ./malloc/malloc.c
+3168	in ./malloc/malloc.c
+3169	in ./malloc/malloc.c
+3170	in ./malloc/malloc.c
+3171	in ./malloc/malloc.c
+3172	in ./malloc/malloc.c
+3173	in ./malloc/malloc.c
+3174	in ./malloc/malloc.c
+3175	in ./malloc/malloc.c
+3176	in ./malloc/malloc.c
+3177	in ./malloc/malloc.c
+3178	in ./malloc/malloc.c
+3179	in ./malloc/malloc.c
+3180	in ./malloc/malloc.c
+3181	in ./malloc/malloc.c
+3182	in ./malloc/malloc.c
+3183	in ./malloc/malloc.c
+3184	in ./malloc/malloc.c
+3185	in ./malloc/malloc.c
+3186	in ./malloc/malloc.c
+3187	in ./malloc/malloc.c
+3188	in ./malloc/malloc.c
+3189	in ./malloc/malloc.c
+3190	in ./malloc/malloc.c
+3191	in ./malloc/malloc.c
+3192	in ./malloc/malloc.c
+3193	in ./malloc/malloc.c
+3194	in ./malloc/malloc.c
+3195	in ./malloc/malloc.c
+3196	in ./malloc/malloc.c
+3197	in ./malloc/malloc.c
+3198	in ./malloc/malloc.c
+3199	in ./malloc/malloc.c
+3200	in ./malloc/malloc.c
+3201	in ./malloc/malloc.c
+3202	in ./malloc/malloc.c
+3203	in ./malloc/malloc.c
+3204	in ./malloc/malloc.c
+3205	in ./malloc/malloc.c
+3206	in ./malloc/malloc.c
+3207	in ./malloc/malloc.c
+3208	in ./malloc/malloc.c
+3209	in ./malloc/malloc.c
+3210	in ./malloc/malloc.c
+   0x00007ffff7cb2dde <+2526>:	cmpq   $0x0,0x15f41a(%rip)        # 0x7ffff7e12200 <mp_+128>
+   0x00007ffff7cb2de6 <+2534>:	je     0x7ffff7cb2b00 <_int_malloc+1792>
+
+3216	in ./malloc/malloc.c
+   0x00007ffff7cb2dec <+2540>:	mov    $0x300,%esi
+   0x00007ffff7cb2df1 <+2545>:	mov    %r11,%rdi
+   0x00007ffff7cb2df4 <+2548>:	mov    %rdx,-0x58(%rbp)
+
+3215	in ./malloc/malloc.c
+   0x00007ffff7cb2df8 <+2552>:	mov    %r11,-0x50(%rbp)
+   0x00007ffff7cb2dfc <+2556>:	mov    %r10,-0x60(%rbp)
+   0x00007ffff7cb2e00 <+2560>:	mov    %r9,-0x68(%rbp)
+   0x00007ffff7cb2e04 <+2564>:	mov    %r8,-0x70(%rbp)
+   0x00007ffff7cb2e08 <+2568>:	call   0x7ffff7cb2400 <_int_malloc>
+   0x00007ffff7cb2e0d <+2573>:	mov    %rax,%rsi
+   0x00007ffff7cb2e10 <+2576>:	mov    0x15ef79(%rip),%rax        # 0x7ffff7e11d90
+
+3217	in ./malloc/malloc.c
+3218	in ./malloc/malloc.c
+3219	in ./malloc/malloc.c
+3220	in ./malloc/malloc.c
+   0x00007ffff7cb2e17 <+2583>:	test   %rsi,%rsi
+
+3215	in ./malloc/malloc.c
+   0x00007ffff7cb2e1a <+2586>:	mov    %rsi,%fs:(%rax)
+
+3217	in ./malloc/malloc.c
+3218	in ./malloc/malloc.c
+3219	in ./malloc/malloc.c
+3220	in ./malloc/malloc.c
+   0x00007ffff7cb2e1e <+2590>:	mov    -0x50(%rbp),%r11
+   0x00007ffff7cb2e22 <+2594>:	mov    -0x58(%rbp),%rdx
+   0x00007ffff7cb2e26 <+2598>:	mov    -0x60(%rbp),%r10
+   0x00007ffff7cb2e2a <+2602>:	mov    -0x68(%rbp),%r9
+   0x00007ffff7cb2e2e <+2606>:	mov    -0x70(%rbp),%r8
+   0x00007ffff7cb2e32 <+2610>:	je     0x7ffff7cb3027 <_int_malloc+3111>
+
+../string/bits/string_fortified.h:
+   0x00007ffff7cb2e38 <+2616>:	lea    0x8(%rsi),%rdi
+   0x00007ffff7cb2e3c <+2620>:	mov    %rsi,%rcx
+   0x00007ffff7cb2e3f <+2623>:	xor    %eax,%eax
+   0x00007ffff7cb2e41 <+2625>:	movq   $0x0,(%rsi)
+   0x00007ffff7cb2e48 <+2632>:	movq   $0x0,0x2f0(%rsi)
+   0x00007ffff7cb2e53 <+2643>:	and    $0xfffffffffffffff8,%rdi
+   0x00007ffff7cb2e57 <+2647>:	sub    %rdi,%rcx
+   0x00007ffff7cb2e5a <+2650>:	add    $0x2f8,%ecx
+   0x00007ffff7cb2e60 <+2656>:	shr    $0x3,%ecx
+   0x00007ffff7cb2e63 <+2659>:	rep stos %rax,(%rdi)
+
+./malloc/malloc.c:
+   0x00007ffff7cb2e66 <+2662>:	movd   0x15f392(%rip),%xmm0        # 0x7ffff7e12200 <mp_+128>
+   0x00007ffff7cb2e6e <+2670>:	punpcklwd %xmm0,%xmm0
+
+3229	in ./malloc/malloc.c
+   0x00007ffff7cb2e72 <+2674>:	pinsrw $0x0,0x15f385(%rip),%xmm4        # 0x7ffff7e12200 <mp_+128>
+   0x00007ffff7cb2e7b <+2683>:	pshufd $0x0,%xmm0,%xmm0
+   0x00007ffff7cb2e80 <+2688>:	movups %xmm0,(%rsi)
+   0x00007ffff7cb2e83 <+2691>:	movups %xmm0,0x10(%rsi)
+   0x00007ffff7cb2e87 <+2695>:	movups %xmm0,0x20(%rsi)
+   0x00007ffff7cb2e8b <+2699>:	movups %xmm0,0x30(%rsi)
+   0x00007ffff7cb2e8f <+2703>:	movups %xmm0,0x40(%rsi)
+   0x00007ffff7cb2e93 <+2707>:	movups %xmm0,0x50(%rsi)
+   0x00007ffff7cb2e97 <+2711>:	movups %xmm0,0x60(%rsi)
+   0x00007ffff7cb2e9b <+2715>:	movups %xmm0,0x70(%rsi)
+   0x00007ffff7cb2e9f <+2719>:	movups %xmm0,0x80(%rsi)
+   0x00007ffff7cb2ea6 <+2726>:	pshuflw $0x0,%xmm4,%xmm0
+   0x00007ffff7cb2eab <+2731>:	movq   %xmm0,0x90(%rsi)
+
+3228	in ./malloc/malloc.c
+   0x00007ffff7cb2eb3 <+2739>:	jmp    0x7ffff7cb29d4 <_int_malloc+1492>
+
+4168	in ./malloc/malloc.c
+4169	in ./malloc/malloc.c
+4170	in ./malloc/malloc.c
+4171	in ./malloc/malloc.c
+4172	in ./malloc/malloc.c
+4173	in ./malloc/malloc.c
+4174	in ./malloc/malloc.c
+4175	in ./malloc/malloc.c
+4176	in ./malloc/malloc.c
+4177	in ./malloc/malloc.c
+4178	in ./malloc/malloc.c
+4179	in ./malloc/malloc.c
+4180	in ./malloc/malloc.c
+4181	in ./malloc/malloc.c
+4182	in ./malloc/malloc.c
+4183	in ./malloc/malloc.c
+4184	in ./malloc/malloc.c
+4185	in ./malloc/malloc.c
+4186	in ./malloc/malloc.c
+4187	in ./malloc/malloc.c
+4188	in ./malloc/malloc.c
+4189	in ./malloc/malloc.c
+4190	in ./malloc/malloc.c
+4191	in ./malloc/malloc.c
+4192	in ./malloc/malloc.c
+4193	in ./malloc/malloc.c
+4194	in ./malloc/malloc.c
+4195	in ./malloc/malloc.c
+   0x00007ffff7cb2eb8 <+2744>:	lea    0x1(%rdi),%ecx
+
+4196	in ./malloc/malloc.c
+   0x00007ffff7cb2ebb <+2747>:	add    $0x3,%eax
+
+4197	in ./malloc/malloc.c
+   0x00007ffff7cb2ebe <+2750>:	mov    %ecx,%edi
+
+4196	in ./malloc/malloc.c
+   0x00007ffff7cb2ec0 <+2752>:	lea    -0x10(%r11,%rax,8),%rsi
+
+4197	in ./malloc/malloc.c
+   0x00007ffff7cb2ec5 <+2757>:	shr    $0x5,%edi
+
+4198	in ./malloc/malloc.c
+   0x00007ffff7cb2ec8 <+2760>:	mov    %edi,%eax
+   0x00007ffff7cb2eca <+2762>:	mov    0x808(%r11,%rax,4),%r8d
+
+4199	in ./malloc/malloc.c
+   0x00007ffff7cb2ed2 <+2770>:	mov    $0x1,%eax
+   0x00007ffff7cb2ed7 <+2775>:	shl    %cl,%eax
+   0x00007ffff7cb2ed9 <+2777>:	nopl   0x0(%rax)
+
+4202	in ./malloc/malloc.c
+4203	in ./malloc/malloc.c
+4204	in ./malloc/malloc.c
+   0x00007ffff7cb2ee0 <+2784>:	lea    -0x1(%rax),%edx
+   0x00007ffff7cb2ee3 <+2787>:	cmp    %r8d,%edx
+   0x00007ffff7cb2ee6 <+2790>:	jb     0x7ffff7cb2efc <_int_malloc+2812>
+   0x00007ffff7cb2ee8 <+2792>:	jmp    0x7ffff7cb2f27 <_int_malloc+2855>
+   0x00007ffff7cb2eea <+2794>:	nopw   0x0(%rax,%rax,1)
+
+4219	in ./malloc/malloc.c
+4220	in ./malloc/malloc.c
+   0x00007ffff7cb2ef0 <+2800>:	add    $0x10,%rsi
+
+4221	in ./malloc/malloc.c
+4222	in ./malloc/malloc.c
+   0x00007ffff7cb2ef4 <+2804>:	add    %eax,%eax
+   0x00007ffff7cb2ef6 <+2806>:	je     0x7ffff7cb373b <_int_malloc+4923>
+
+4218	in ./malloc/malloc.c
+   0x00007ffff7cb2efc <+2812>:	test   %r8d,%eax
+   0x00007ffff7cb2eff <+2815>:	je     0x7ffff7cb2ef0 <_int_malloc+2800>
+
+4223	in ./malloc/malloc.c
+4224	in ./malloc/malloc.c
+4225	in ./malloc/malloc.c
+4226	in ./malloc/malloc.c
+   0x00007ffff7cb2f01 <+2817>:	mov    0x18(%rsi),%r12
+
+4227	in ./malloc/malloc.c
+4228	in ./malloc/malloc.c
+4229	in ./malloc/malloc.c
+   0x00007ffff7cb2f05 <+2821>:	cmp    %r12,%rsi
+   0x00007ffff7cb2f08 <+2824>:	jne    0x7ffff7cb30cc <_int_malloc+3276>
+
+4230	in ./malloc/malloc.c
+4231	in ./malloc/malloc.c
+   0x00007ffff7cb2f0e <+2830>:	mov    %eax,%edx
+
+4232	in ./malloc/malloc.c
+   0x00007ffff7cb2f10 <+2832>:	add    $0x10,%rsi
+
+4233	in ./malloc/malloc.c
+   0x00007ffff7cb2f14 <+2836>:	add    %eax,%eax
+
+4231	in ./malloc/malloc.c
+   0x00007ffff7cb2f16 <+2838>:	not    %edx
+   0x00007ffff7cb2f18 <+2840>:	and    %edx,%r8d
+   0x00007ffff7cb2f1b <+2843>:	mov    %edi,%edx
+   0x00007ffff7cb2f1d <+2845>:	mov    %r8d,0x808(%r11,%rdx,4)
+
+4201	in ./malloc/malloc.c
+   0x00007ffff7cb2f25 <+2853>:	jmp    0x7ffff7cb2ee0 <_int_malloc+2784>
+
+4205	in ./malloc/malloc.c
+4206	in ./malloc/malloc.c
+4207	in ./malloc/malloc.c
+4208	in ./malloc/malloc.c
+   0x00007ffff7cb2f27 <+2855>:	lea    0x1(%rdi),%eax
+   0x00007ffff7cb2f2a <+2858>:	cmp    $0x3,%eax
+   0x00007ffff7cb2f2d <+2861>:	ja     0x7ffff7cb2f8c <_int_malloc+2956>
+
+4209	in ./malloc/malloc.c
+4210	in ./malloc/malloc.c
+4211	in ./malloc/malloc.c
+   0x00007ffff7cb2f2f <+2863>:	mov    %eax,%edx
+   0x00007ffff7cb2f31 <+2865>:	mov    0x808(%r11,%rdx,4),%r8d
+   0x00007ffff7cb2f39 <+2873>:	test   %r8d,%r8d
+   0x00007ffff7cb2f3c <+2876>:	jne    0x7ffff7cb30b4 <_int_malloc+3252>
+
+4208	in ./malloc/malloc.c
+   0x00007ffff7cb2f42 <+2882>:	lea    0x2(%rdi),%eax
+   0x00007ffff7cb2f45 <+2885>:	cmp    $0x2,%edi
+   0x00007ffff7cb2f48 <+2888>:	je     0x7ffff7cb2f8c <_int_malloc+2956>
+
+4209	in ./malloc/malloc.c
+4210	in ./malloc/malloc.c
+4211	in ./malloc/malloc.c
+   0x00007ffff7cb2f4a <+2890>:	mov    %eax,%edx
+   0x00007ffff7cb2f4c <+2892>:	mov    0x808(%r11,%rdx,4),%r8d
+   0x00007ffff7cb2f54 <+2900>:	test   %r8d,%r8d
+   0x00007ffff7cb2f57 <+2903>:	jne    0x7ffff7cb30b4 <_int_malloc+3252>
+
+4208	in ./malloc/malloc.c
+   0x00007ffff7cb2f5d <+2909>:	lea    0x3(%rdi),%eax
+   0x00007ffff7cb2f60 <+2912>:	cmp    $0x1,%edi
+   0x00007ffff7cb2f63 <+2915>:	je     0x7ffff7cb2f8c <_int_malloc+2956>
+
+4209	in ./malloc/malloc.c
+4210	in ./malloc/malloc.c
+4211	in ./malloc/malloc.c
+   0x00007ffff7cb2f65 <+2917>:	mov    %eax,%edx
+   0x00007ffff7cb2f67 <+2919>:	mov    0x808(%r11,%rdx,4),%r8d
+   0x00007ffff7cb2f6f <+2927>:	test   %r8d,%r8d
+   0x00007ffff7cb2f72 <+2930>:	jne    0x7ffff7cb30b4 <_int_malloc+3252>
+
+4208	in ./malloc/malloc.c
+   0x00007ffff7cb2f78 <+2936>:	test   %edi,%edi
+   0x00007ffff7cb2f7a <+2938>:	je     0x7ffff7cb2f8c <_int_malloc+2956>
+
+4209	in ./malloc/malloc.c
+4210	in ./malloc/malloc.c
+4211	in ./malloc/malloc.c
+   0x00007ffff7cb2f7c <+2940>:	mov    0x814(%r11),%r8d
+   0x00007ffff7cb2f83 <+2947>:	test   %r8d,%r8d
+   0x00007ffff7cb2f86 <+2950>:	jne    0x7ffff7cb3342 <_int_malloc+3906>
+
+4287	in ./malloc/malloc.c
+4288	in ./malloc/malloc.c
+4289	in ./malloc/malloc.c
+4290	in ./malloc/malloc.c
+4291	in ./malloc/malloc.c
+4292	in ./malloc/malloc.c
+4293	in ./malloc/malloc.c
+4294	in ./malloc/malloc.c
+4295	in ./malloc/malloc.c
+4296	in ./malloc/malloc.c
+4297	in ./malloc/malloc.c
+4298	in ./malloc/malloc.c
+4299	in ./malloc/malloc.c
+4300	in ./malloc/malloc.c
+4301	in ./malloc/malloc.c
+4302	in ./malloc/malloc.c
+4303	in ./malloc/malloc.c
+4304	in ./malloc/malloc.c
+4305	in ./malloc/malloc.c
+4306	in ./malloc/malloc.c
+4307	in ./malloc/malloc.c
+4308	in ./malloc/malloc.c
+   0x00007ffff7cb2f8c <+2956>:	mov    0x8(%r11),%rax
+   0x00007ffff7cb2f90 <+2960>:	mov    %rax,-0x38(%rbp)
+
+4309	in ./malloc/malloc.c
+   0x00007ffff7cb2f94 <+2964>:	mov    0x8(%rax),%rax
+   0x00007ffff7cb2f98 <+2968>:	mov    %rax,-0x40(%rbp)
+   0x00007ffff7cb2f9c <+2972>:	and    $0xfffffffffffffff8,%rax
+
+4310	in ./malloc/malloc.c
+4311	in ./malloc/malloc.c
+   0x00007ffff7cb2fa0 <+2976>:	cmp    %rax,0x830(%r11)
+   0x00007ffff7cb2fa7 <+2983>:	jb     0x7ffff7cb3336 <_int_malloc+3894>
+
+4313	in ./malloc/malloc.c
+4314	in ./malloc/malloc.c
+   0x00007ffff7cb2fad <+2989>:	lea    0x20(%r10),%rcx
+   0x00007ffff7cb2fb1 <+2993>:	mov    %rcx,-0x50(%rbp)
+   0x00007ffff7cb2fb5 <+2997>:	cmp    %rcx,%rax
+   0x00007ffff7cb2fb8 <+3000>:	jb     0x7ffff7cb303b <_int_malloc+3131>
+
+4317	in ./malloc/malloc.c
+   0x00007ffff7cb2fbe <+3006>:	lea    0x15fafb(%rip),%rdx        # 0x7ffff7e12ac0 <main_arena>
+   0x00007ffff7cb2fc5 <+3013>:	mov    -0x38(%rbp),%rdi
+
+4319	in ./malloc/malloc.c
+   0x00007ffff7cb2fc9 <+3017>:	cmp    %rdx,%r11
+   0x00007ffff7cb2fcc <+3020>:	setne  %dl
+
+4317	in ./malloc/malloc.c
+   0x00007ffff7cb2fcf <+3023>:	lea    (%rdi,%r10,1),%rcx
+
+4318	in ./malloc/malloc.c
+   0x00007ffff7cb2fd3 <+3027>:	lea    0x10(%rdi),%r12
+
+4316	in ./malloc/malloc.c
+   0x00007ffff7cb2fd7 <+3031>:	sub    %r10,%rax
+
+4319	in ./malloc/malloc.c
+   0x00007ffff7cb2fda <+3034>:	movzbl %dl,%edx
+
+4320	in ./malloc/malloc.c
+4321	in ./malloc/malloc.c
+   0x00007ffff7cb2fdd <+3037>:	or     $0x1,%rax
+
+4318	in ./malloc/malloc.c
+   0x00007ffff7cb2fe1 <+3041>:	mov    %rcx,0x8(%r11)
+
+4319	in ./malloc/malloc.c
+   0x00007ffff7cb2fe5 <+3045>:	shl    $0x2,%rdx
+   0x00007ffff7cb2fe9 <+3049>:	or     %r10,%rdx
+   0x00007ffff7cb2fec <+3052>:	or     $0x1,%rdx
+   0x00007ffff7cb2ff0 <+3056>:	mov    %rdx,0x8(%rdi)
+
+4320	in ./malloc/malloc.c
+4321	in ./malloc/malloc.c
+   0x00007ffff7cb2ff4 <+3060>:	mov    %rax,0x8(%rcx)
+
+1888	in ./malloc/malloc.c
+   0x00007ffff7cb2ff8 <+3064>:	mov    0x1661e6(%rip),%eax        # 0x7ffff7e191e4 <perturb_byte>
+   0x00007ffff7cb2ffe <+3070>:	test   %eax,%eax
+   0x00007ffff7cb3000 <+3072>:	je     0x7ffff7cb2772 <_int_malloc+882>
+   0x00007ffff7cb3006 <+3078>:	jmp    0x7ffff7cb2948 <_int_malloc+1352>
+   0x00007ffff7cb300b <+3083>:	nopl   0x0(%rax,%rax,1)
+
+2920	in ./malloc/malloc.c
+2921	in ./malloc/malloc.c
+2922	in ./malloc/malloc.c
+2923	in ./malloc/malloc.c
+2924	in ./malloc/malloc.c
+2925	in ./malloc/malloc.c
+2926	in ./malloc/malloc.c
+2927	in ./malloc/malloc.c
+2928	in ./malloc/malloc.c
+2929	in ./malloc/malloc.c
+2930	in ./malloc/malloc.c
+2931	in ./malloc/malloc.c
+2932	in ./malloc/malloc.c
+2933	in ./malloc/malloc.c
+2934	in ./malloc/malloc.c
+2935	in ./malloc/malloc.c
+2936	in ./malloc/malloc.c
+2937	in ./malloc/malloc.c
+2938	in ./malloc/malloc.c
+2939	in ./malloc/malloc.c
+2940	in ./malloc/malloc.c
+2941	in ./malloc/malloc.c
+   0x00007ffff7cb3010 <+3088>:	lea    0x1231d1(%rip),%rcx        # 0x7ffff7dd61e8 <__tcache_dummy+8>
+   0x00007ffff7cb3017 <+3095>:	mov    %rcx,%fs:(%rax)
+
+1288	in ./malloc/malloc.c
+   0x00007ffff7cb301b <+3099>:	lea    0x1231c6(%rip),%rsi        # 0x7ffff7dd61e8 <__tcache_dummy+8>
+   0x00007ffff7cb3022 <+3106>:	jmp    0x7ffff7cb26dc <_int_malloc+732>
+
+2920	in ./malloc/malloc.c
+2921	in ./malloc/malloc.c
+2922	in ./malloc/malloc.c
+2923	in ./malloc/malloc.c
+2924	in ./malloc/malloc.c
+2925	in ./malloc/malloc.c
+2926	in ./malloc/malloc.c
+2927	in ./malloc/malloc.c
+2928	in ./malloc/malloc.c
+2929	in ./malloc/malloc.c
+2930	in ./malloc/malloc.c
+2931	in ./malloc/malloc.c
+2932	in ./malloc/malloc.c
+2933	in ./malloc/malloc.c
+2934	in ./malloc/malloc.c
+2935	in ./malloc/malloc.c
+2936	in ./malloc/malloc.c
+2937	in ./malloc/malloc.c
+2938	in ./malloc/malloc.c
+2939	in ./malloc/malloc.c
+2940	in ./malloc/malloc.c
+2941	in ./malloc/malloc.c
+   0x00007ffff7cb3027 <+3111>:	lea    0x1231ba(%rip),%rcx        # 0x7ffff7dd61e8 <__tcache_dummy+8>
+   0x00007ffff7cb302e <+3118>:	mov    -0x40(%rbp),%rbx
+   0x00007ffff7cb3032 <+3122>:	mov    %rcx,%fs:(%rax)
+
+2942	in ./malloc/malloc.c
+   0x00007ffff7cb3036 <+3126>:	jmp    0x7ffff7cb2b04 <_int_malloc+1796>
+
+2324	in ./malloc/malloc.c
+   0x00007ffff7cb303b <+3131>:	mov    0x15ee76(%rip),%rax        # 0x7ffff7e11eb8
+
+2336	in ./malloc/malloc.c
+   0x00007ffff7cb3042 <+3138>:	cmp    0x15f147(%rip),%r10        # 0x7ffff7e12190 <mp_+16>
+
+2324	in ./malloc/malloc.c
+   0x00007ffff7cb3049 <+3145>:	mov    0x18(%rax),%rax
+   0x00007ffff7cb304d <+3149>:	mov    %rax,-0x40(%rbp)
+
+2326	in ./malloc/malloc.c
+2327	in ./malloc/malloc.c
+2328	in ./malloc/malloc.c
+2329	in ./malloc/malloc.c
+2330	in ./malloc/malloc.c
+2331	in ./malloc/malloc.c
+2332	in ./malloc/malloc.c
+2333	in ./malloc/malloc.c
+2334	in ./malloc/malloc.c
+2335	in ./malloc/malloc.c
+   0x00007ffff7cb3051 <+3153>:	jb     0x7ffff7cb3161 <_int_malloc+3425>
+
+2337	in ./malloc/malloc.c
+   0x00007ffff7cb3057 <+3159>:	mov    0x15f16b(%rip),%eax        # 0x7ffff7e121c8 <mp_+72>
+   0x00007ffff7cb305d <+3165>:	cmp    %eax,0x15f161(%rip)        # 0x7ffff7e121c4 <mp_+68>
+   0x00007ffff7cb3063 <+3171>:	jge    0x7ffff7cb3161 <_int_malloc+3425>
+
+2338	in ./malloc/malloc.c
+2339	in ./malloc/malloc.c
+2340	in ./malloc/malloc.c
+   0x00007ffff7cb3069 <+3177>:	mov    0x15f148(%rip),%rsi        # 0x7ffff7e121b8 <mp_+56>
+   0x00007ffff7cb3070 <+3184>:	lea    -0x1(%rsi),%rax
+   0x00007ffff7cb3074 <+3188>:	cmp    %r10,%rax
+   0x00007ffff7cb3077 <+3191>:	jb     0x7ffff7cb3a4b <_int_malloc+5707>
+
+2346	in ./malloc/malloc.c
+2347	in ./malloc/malloc.c
+2348	in ./malloc/malloc.c
+   0x00007ffff7cb307d <+3197>:	mov    -0x40(%rbp),%rsi
+   0x00007ffff7cb3081 <+3201>:	xor    %edx,%edx
+   0x00007ffff7cb3083 <+3203>:	mov    %r10,%rdi
+   0x00007ffff7cb3086 <+3206>:	mov    %r11,-0x38(%rbp)
+   0x00007ffff7cb308a <+3210>:	mov    %r9,-0x58(%rbp)
+   0x00007ffff7cb308e <+3214>:	mov    %r10,-0x48(%rbp)
+   0x00007ffff7cb3092 <+3218>:	call   0x7ffff7cb1040 <sysmalloc_mmap>
+   0x00007ffff7cb3097 <+3223>:	mov    %rax,%r12
+
+2349	in ./malloc/malloc.c
+   0x00007ffff7cb309a <+3226>:	cmp    $0xffffffffffffffff,%rax
+   0x00007ffff7cb309e <+3230>:	je     0x7ffff7cb375a <_int_malloc+4954>
+
+4336	in ./malloc/malloc.c
+   0x00007ffff7cb30a4 <+3236>:	mov    %rbx,%rsi
+   0x00007ffff7cb30a7 <+3239>:	mov    %r12,%rdi
+   0x00007ffff7cb30aa <+3242>:	call   0x7ffff7cb08d0 <alloc_perturb>
+   0x00007ffff7cb30af <+3247>:	jmp    0x7ffff7cb2772 <_int_malloc+882>
+
+4208	in ./malloc/malloc.c
+   0x00007ffff7cb30b4 <+3252>:	mov    %eax,%edi
+
+4212	in ./malloc/malloc.c
+4213	in ./malloc/malloc.c
+   0x00007ffff7cb30b6 <+3254>:	mov    %edi,%eax
+   0x00007ffff7cb30b8 <+3256>:	shl    $0x6,%eax
+   0x00007ffff7cb30bb <+3259>:	sub    $0x1,%eax
+   0x00007ffff7cb30be <+3262>:	lea    (%r11,%rax,8),%rsi
+
+4214	in ./malloc/malloc.c
+   0x00007ffff7cb30c2 <+3266>:	mov    $0x1,%eax
+   0x00007ffff7cb30c7 <+3271>:	jmp    0x7ffff7cb2efc <_int_malloc+2812>
+
+4234	in ./malloc/malloc.c
+4235	in ./malloc/malloc.c
+4236	in ./malloc/malloc.c
+4237	in ./malloc/malloc.c
+4238	in ./malloc/malloc.c
+   0x00007ffff7cb30cc <+3276>:	mov    0x8(%r12),%r13
+   0x00007ffff7cb30d1 <+3281>:	and    $0xfffffffffffffff8,%r13
+
+4239	in ./malloc/malloc.c
+4240	in ./malloc/malloc.c
+4241	in ./malloc/malloc.c
+   0x00007ffff7cb30d5 <+3285>:	cmp    %r10,%r13
+   0x00007ffff7cb30d8 <+3288>:	jb     0x7ffff7cb3a8a <_int_malloc+5770>
+
+4242	in ./malloc/malloc.c
+4243	in ./malloc/malloc.c
+   0x00007ffff7cb30de <+3294>:	mov    %r13,%rcx
+
+4244	in ./malloc/malloc.c
+4245	in ./malloc/malloc.c
+4246	in ./malloc/malloc.c
+   0x00007ffff7cb30e1 <+3297>:	mov    %r12,%rdi
+   0x00007ffff7cb30e4 <+3300>:	mov    %r11,-0x50(%rbp)
+
+4243	in ./malloc/malloc.c
+   0x00007ffff7cb30e8 <+3304>:	sub    %r10,%rcx
+   0x00007ffff7cb30eb <+3307>:	mov    %r9,-0x48(%rbp)
+   0x00007ffff7cb30ef <+3311>:	mov    %r10,-0x40(%rbp)
+   0x00007ffff7cb30f3 <+3315>:	mov    %rcx,-0x38(%rbp)
+
+4244	in ./malloc/malloc.c
+4245	in ./malloc/malloc.c
+4246	in ./malloc/malloc.c
+   0x00007ffff7cb30f7 <+3319>:	call   0x7ffff7cb0f70 <unlink_chunk>
+
+4247	in ./malloc/malloc.c
+4248	in ./malloc/malloc.c
+4249	in ./malloc/malloc.c
+   0x00007ffff7cb30fc <+3324>:	mov    -0x38(%rbp),%rcx
+   0x00007ffff7cb3100 <+3328>:	mov    -0x40(%rbp),%r10
+   0x00007ffff7cb3104 <+3332>:	mov    -0x48(%rbp),%r9
+   0x00007ffff7cb3108 <+3336>:	mov    -0x50(%rbp),%r11
+   0x00007ffff7cb310c <+3340>:	cmp    $0x1f,%rcx
+   0x00007ffff7cb3110 <+3344>:	jbe    0x7ffff7cb3309 <_int_malloc+3849>
+
+4260	in ./malloc/malloc.c
+4261	in ./malloc/malloc.c
+4262	in ./malloc/malloc.c
+4263	in ./malloc/malloc.c
+4264	in ./malloc/malloc.c
+   0x00007ffff7cb3116 <+3350>:	mov    0x18(%r11),%rax
+
+4265	in ./malloc/malloc.c
+   0x00007ffff7cb311a <+3354>:	cmp    %r9,0x18(%rax)
+   0x00007ffff7cb311e <+3358>:	jne    0x7ffff7cb3a3f <_int_malloc+5695>
+
+4267	in ./malloc/malloc.c
+4268	in ./malloc/malloc.c
+   0x00007ffff7cb3124 <+3364>:	movq   %rax,%xmm0
+   0x00007ffff7cb3129 <+3369>:	movq   %r9,%xmm6
+
+4259	in ./malloc/malloc.c
+   0x00007ffff7cb312e <+3374>:	lea    (%r12,%r10,1),%rdx
+
+4267	in ./malloc/malloc.c
+4268	in ./malloc/malloc.c
+   0x00007ffff7cb3132 <+3378>:	punpcklqdq %xmm6,%xmm0
+   0x00007ffff7cb3136 <+3382>:	movups %xmm0,0x10(%rdx)
+
+4269	in ./malloc/malloc.c
+   0x00007ffff7cb313a <+3386>:	mov    %rdx,0x18(%r11)
+
+4270	in ./malloc/malloc.c
+   0x00007ffff7cb313e <+3390>:	mov    %rdx,0x18(%rax)
+
+4271	in ./malloc/malloc.c
+4272	in ./malloc/malloc.c
+4273	in ./malloc/malloc.c
+   0x00007ffff7cb3142 <+3394>:	cmp    $0x3ff,%r10
+   0x00007ffff7cb3149 <+3401>:	ja     0x7ffff7cb314f <_int_malloc+3407>
+
+4274	in ./malloc/malloc.c
+   0x00007ffff7cb314b <+3403>:	mov    %rdx,0x10(%r11)
+
+4275	in ./malloc/malloc.c
+   0x00007ffff7cb314f <+3407>:	cmp    $0x3ff,%rcx
+   0x00007ffff7cb3156 <+3414>:	jbe    0x7ffff7cb2907 <_int_malloc+1287>
+   0x00007ffff7cb315c <+3420>:	jmp    0x7ffff7cb28ff <_int_malloc+1279>
+
+2325	in ./malloc/malloc.c
+   0x00007ffff7cb3161 <+3425>:	xor    %r14d,%r14d
+
+2352	in ./malloc/malloc.c
+2353	in ./malloc/malloc.c
+2354	in ./malloc/malloc.c
+2355	in ./malloc/malloc.c
+2356	in ./malloc/malloc.c
+2357	in ./malloc/malloc.c
+2358	in ./malloc/malloc.c
+2359	in ./malloc/malloc.c
+2360	in ./malloc/malloc.c
+2361	in ./malloc/malloc.c
+   0x00007ffff7cb3164 <+3428>:	mov    -0x38(%rbp),%rdx
+   0x00007ffff7cb3168 <+3432>:	mov    0x8(%rdx),%rax
+   0x00007ffff7cb316c <+3436>:	mov    %rax,%rcx
+   0x00007ffff7cb316f <+3439>:	and    $0xfffffffffffffff8,%rcx
+
+2362	in ./malloc/malloc.c
+   0x00007ffff7cb3173 <+3443>:	lea    (%rdx,%rcx,1),%rdi
+
+2361	in ./malloc/malloc.c
+   0x00007ffff7cb3177 <+3447>:	mov    %rcx,-0x48(%rbp)
+
+2362	in ./malloc/malloc.c
+   0x00007ffff7cb317b <+3451>:	mov    %rdi,-0x58(%rbp)
+
+2363	in ./malloc/malloc.c
+2364	in ./malloc/malloc.c
+2365	in ./malloc/malloc.c
+2366	in ./malloc/malloc.c
+2367	in ./malloc/malloc.c
+2368	in ./malloc/malloc.c
+2369	in ./malloc/malloc.c
+2370	in ./malloc/malloc.c
+2371	in ./malloc/malloc.c
+   0x00007ffff7cb317f <+3455>:	cmp    %rdx,%r9
+   0x00007ffff7cb3182 <+3458>:	jne    0x7ffff7cb3189 <_int_malloc+3465>
+   0x00007ffff7cb3184 <+3460>:	test   %rcx,%rcx
+   0x00007ffff7cb3187 <+3463>:	je     0x7ffff7cb31bc <_int_malloc+3516>
+   0x00007ffff7cb3189 <+3465>:	cmpq   $0x1f,-0x48(%rbp)
+   0x00007ffff7cb318e <+3470>:	jbe    0x7ffff7cb3b06 <_int_malloc+5894>
+   0x00007ffff7cb3194 <+3476>:	test   $0x1,%al
+   0x00007ffff7cb3196 <+3478>:	je     0x7ffff7cb3b06 <_int_malloc+5894>
+   0x00007ffff7cb319c <+3484>:	mov    -0x40(%rbp),%rax
+   0x00007ffff7cb31a0 <+3488>:	sub    $0x1,%rax
+   0x00007ffff7cb31a4 <+3492>:	test   %rax,-0x58(%rbp)
+   0x00007ffff7cb31a8 <+3496>:	jne    0x7ffff7cb3b06 <_int_malloc+5894>
+
+2372	in ./malloc/malloc.c
+2373	in ./malloc/malloc.c
+2374	in ./malloc/malloc.c
+2375	in ./malloc/malloc.c
+2376	in ./malloc/malloc.c
+2377	in ./malloc/malloc.c
+   0x00007ffff7cb31ae <+3502>:	mov    -0x50(%rbp),%rcx
+   0x00007ffff7cb31b2 <+3506>:	cmp    %rcx,-0x48(%rbp)
+   0x00007ffff7cb31b6 <+3510>:	jae    0x7ffff7cb3ae7 <_int_malloc+5863>
+
+2378	in ./malloc/malloc.c
+2379	in ./malloc/malloc.c
+2380	in ./malloc/malloc.c
+   0x00007ffff7cb31bc <+3516>:	lea    0x15f8fd(%rip),%rax        # 0x7ffff7e12ac0 <main_arena>
+   0x00007ffff7cb31c3 <+3523>:	mov    %rax,%r15
+   0x00007ffff7cb31c6 <+3526>:	cmp    %rax,%r11
+   0x00007ffff7cb31c9 <+3529>:	je     0x7ffff7cb340e <_int_malloc+4110>
+
+./malloc/arena.c:
+   0x00007ffff7cb31cf <+3535>:	mov    -0x38(%rbp),%r12
+
+./malloc/malloc.c:
+   0x00007ffff7cb31d3 <+3539>:	mov    %r10,%rax
+   0x00007ffff7cb31d6 <+3542>:	sub    -0x48(%rbp),%rax
+   0x00007ffff7cb31da <+3546>:	lea    0x20(%rax),%rdx
+
+./malloc/arena.c:
+   0x00007ffff7cb31de <+3550>:	and    $0xfffffffffc000000,%r12
+
+./malloc/malloc.c:
+   0x00007ffff7cb31e5 <+3557>:	test   %rdx,%rdx
+   0x00007ffff7cb31e8 <+3560>:	jle    0x7ffff7cb334c <_int_malloc+3916>
+
+./malloc/arena.c:
+   0x00007ffff7cb31ee <+3566>:	mov    0x20(%r12),%rax
+
+./malloc/malloc.c:
+   0x00007ffff7cb31f3 <+3571>:	mov    0x10(%r12),%rsi
+
+./malloc/arena.c:
+   0x00007ffff7cb31f8 <+3576>:	lea    -0x1(%rdx,%rax,1),%rcx
+   0x00007ffff7cb31fd <+3581>:	neg    %rax
+
+./malloc/malloc.c:
+   0x00007ffff7cb3200 <+3584>:	mov    %rsi,-0x58(%rbp)
+
+./malloc/arena.c:
+   0x00007ffff7cb3204 <+3588>:	and    %rax,%rcx
+
+478	in ./malloc/arena.c
+   0x00007ffff7cb3207 <+3591>:	lea    (%rcx,%rsi,1),%r13
+
+479	in ./malloc/arena.c
+   0x00007ffff7cb320b <+3595>:	cmp    $0x4000000,%r13
+   0x00007ffff7cb3212 <+3602>:	ja     0x7ffff7cb334c <_int_malloc+3916>
+
+480	in ./malloc/arena.c
+481	in ./malloc/arena.c
+482	in ./malloc/arena.c
+   0x00007ffff7cb3218 <+3608>:	mov    0x18(%r12),%rax
+   0x00007ffff7cb321d <+3613>:	cmp    %r13,%rax
+   0x00007ffff7cb3220 <+3616>:	jb     0x7ffff7cb3967 <_int_malloc+5479>
+
+490	in ./malloc/arena.c
+491	in ./malloc/arena.c
+492	in ./malloc/arena.c
+493	in ./malloc/arena.c
+494	in ./malloc/arena.c
+   0x00007ffff7cb3226 <+3622>:	mov    0x15ef83(%rip),%rax        # 0x7ffff7e121b0 <mp_+48>
+   0x00007ffff7cb322d <+3629>:	cmp    %rax,0x10(%r12)
+   0x00007ffff7cb3232 <+3634>:	jae    0x7ffff7cb3273 <_int_malloc+3699>
+
+./malloc/malloc.c:
+   0x00007ffff7cb3234 <+3636>:	cmpl   $0x1,0x15ef6d(%rip)        # 0x7ffff7e121a8 <mp_+40>
+   0x00007ffff7cb323b <+3643>:	jne    0x7ffff7cb3273 <_int_malloc+3699>
+   0x00007ffff7cb323d <+3645>:	cmp    %rax,%r13
+   0x00007ffff7cb3240 <+3648>:	jb     0x7ffff7cb3273 <_int_malloc+3699>
+
+1913	in ./malloc/malloc.c
+1914	in ./malloc/malloc.c
+1915	in ./malloc/malloc.c
+1916	in ./malloc/malloc.c
+1917	in ./malloc/malloc.c
+   0x00007ffff7cb3242 <+3650>:	mov    -0x40(%rbp),%rax
+   0x00007ffff7cb3246 <+3654>:	mov    %r13,%rsi
+   0x00007ffff7cb3249 <+3657>:	mov    %r12,%rdi
+   0x00007ffff7cb324c <+3660>:	sub    $0x1,%rax
+   0x00007ffff7cb3250 <+3664>:	test   %rax,%r12
+   0x00007ffff7cb3253 <+3667>:	jne    0x7ffff7cb3c6c <_int_malloc+6252>
+
+1922	in ./malloc/malloc.c
+1923	in ./malloc/malloc.c
+1924	in ./malloc/malloc.c
+   0x00007ffff7cb3259 <+3673>:	mov    $0xe,%edx
+   0x00007ffff7cb325e <+3678>:	mov    %r11,-0x48(%rbp)
+   0x00007ffff7cb3262 <+3682>:	mov    %r10,-0x40(%rbp)
+   0x00007ffff7cb3266 <+3686>:	call   0x7ffff7d32d50 <__GI_madvise>
+   0x00007ffff7cb326b <+3691>:	mov    -0x48(%rbp),%r11
+   0x00007ffff7cb326f <+3695>:	mov    -0x40(%rbp),%r10
+
+./malloc/arena.c:
+   0x00007ffff7cb3273 <+3699>:	mov    %r13,0x10(%r12)
+
+498	in ./malloc/arena.c
+   0x00007ffff7cb3278 <+3704>:	nop
+
+./malloc/malloc.c:
+   0x00007ffff7cb3279 <+3705>:	mov    0x10(%r12),%rax
+   0x00007ffff7cb327e <+3710>:	add    0x830(%r11),%rax
+   0x00007ffff7cb3285 <+3717>:	sub    -0x58(%rbp),%rax
+
+2392	in ./malloc/malloc.c
+   0x00007ffff7cb3289 <+3721>:	mov    -0x38(%rbp),%rcx
+
+2391	in ./malloc/malloc.c
+   0x00007ffff7cb328d <+3725>:	mov    %rax,0x830(%r11)
+
+2392	in ./malloc/malloc.c
+   0x00007ffff7cb3294 <+3732>:	mov    0x10(%r12),%rax
+   0x00007ffff7cb3299 <+3737>:	add    %r12,%rax
+   0x00007ffff7cb329c <+3740>:	sub    %rcx,%rax
+   0x00007ffff7cb329f <+3743>:	or     $0x1,%rax
+   0x00007ffff7cb32a3 <+3747>:	mov    %rax,0x8(%rcx)
+
+2691	in ./malloc/malloc.c
+2692	in ./malloc/malloc.c
+2693	in ./malloc/malloc.c
+2694	in ./malloc/malloc.c
+2695	in ./malloc/malloc.c
+2696	in ./malloc/malloc.c
+2697	in ./malloc/malloc.c
+2698	in ./malloc/malloc.c
+   0x00007ffff7cb32a7 <+3751>:	mov    0x830(%r11),%rax
+   0x00007ffff7cb32ae <+3758>:	cmp    %rax,0x838(%r11)
+   0x00007ffff7cb32b5 <+3765>:	jae    0x7ffff7cb32be <_int_malloc+3774>
+
+2699	in ./malloc/malloc.c
+   0x00007ffff7cb32b7 <+3767>:	mov    %rax,0x838(%r11)
+
+2700	in ./malloc/malloc.c
+2701	in ./malloc/malloc.c
+2702	in ./malloc/malloc.c
+2703	in ./malloc/malloc.c
+   0x00007ffff7cb32be <+3774>:	mov    0x8(%r11),%r12
+
+2704	in ./malloc/malloc.c
+   0x00007ffff7cb32c2 <+3778>:	mov    0x8(%r12),%rax
+   0x00007ffff7cb32c7 <+3783>:	and    $0xfffffffffffffff8,%rax
+
+2705	in ./malloc/malloc.c
+2706	in ./malloc/malloc.c
+2707	in ./malloc/malloc.c
+   0x00007ffff7cb32cb <+3787>:	cmp    -0x50(%rbp),%rax
+   0x00007ffff7cb32cf <+3791>:	jb     0x7ffff7cb2970 <_int_malloc+1392>
+
+2710	in ./malloc/malloc.c
+   0x00007ffff7cb32d5 <+3797>:	xor    %ecx,%ecx
+   0x00007ffff7cb32d7 <+3799>:	cmp    %r15,%r11
+   0x00007ffff7cb32da <+3802>:	lea    (%r12,%r10,1),%rdx
+
+2711	in ./malloc/malloc.c
+   0x00007ffff7cb32de <+3806>:	setne  %cl
+
+2709	in ./malloc/malloc.c
+   0x00007ffff7cb32e1 <+3809>:	sub    %r10,%rax
+
+2711	in ./malloc/malloc.c
+   0x00007ffff7cb32e4 <+3812>:	mov    %rdx,0x8(%r11)
+
+2712	in ./malloc/malloc.c
+   0x00007ffff7cb32e8 <+3816>:	add    $0x10,%r12
+   0x00007ffff7cb32ec <+3820>:	shl    $0x2,%rcx
+
+2713	in ./malloc/malloc.c
+   0x00007ffff7cb32f0 <+3824>:	or     $0x1,%rax
+
+2712	in ./malloc/malloc.c
+   0x00007ffff7cb32f4 <+3828>:	or     %r10,%rcx
+   0x00007ffff7cb32f7 <+3831>:	or     $0x1,%rcx
+   0x00007ffff7cb32fb <+3835>:	mov    %rcx,-0x8(%r12)
+
+2713	in ./malloc/malloc.c
+   0x00007ffff7cb3300 <+3840>:	mov    %rax,0x8(%rdx)
+
+4322	in ./malloc/malloc.c
+4323	in ./malloc/malloc.c
+4324	in ./malloc/malloc.c
+4325	in ./malloc/malloc.c
+4326	in ./malloc/malloc.c
+4327	in ./malloc/malloc.c
+4328	in ./malloc/malloc.c
+4329	in ./malloc/malloc.c
+4330	in ./malloc/malloc.c
+4331	in ./malloc/malloc.c
+4332	in ./malloc/malloc.c
+4333	in ./malloc/malloc.c
+4334	in ./malloc/malloc.c
+4335	in ./malloc/malloc.c
+   0x00007ffff7cb3304 <+3844>:	jmp    0x7ffff7cb30a4 <_int_malloc+3236>
+
+4251	in ./malloc/malloc.c
+   0x00007ffff7cb3309 <+3849>:	lea    0x15f7b0(%rip),%rax        # 0x7ffff7e12ac0 <main_arena>
+   0x00007ffff7cb3310 <+3856>:	orq    $0x1,0x8(%r12,%r13,1)
+
+4252	in ./malloc/malloc.c
+   0x00007ffff7cb3316 <+3862>:	cmp    %rax,%r11
+   0x00007ffff7cb3319 <+3865>:	je     0x7ffff7cb2936 <_int_malloc+1334>
+
+4253	in ./malloc/malloc.c
+   0x00007ffff7cb331f <+3871>:	orq    $0x4,0x8(%r12)
+   0x00007ffff7cb3325 <+3877>:	jmp    0x7ffff7cb2936 <_int_malloc+1334>
+
+3031	in ./malloc/malloc.c
+   0x00007ffff7cb332a <+3882>:	lea    0x12e557(%rip),%rdi        # 0x7ffff7de1888
+   0x00007ffff7cb3331 <+3889>:	call   0x7ffff7cb0890 <malloc_printerr>
+
+4312	in ./malloc/malloc.c
+   0x00007ffff7cb3336 <+3894>:	lea    0x1296f3(%rip),%rdi        # 0x7ffff7ddca30
+   0x00007ffff7cb333d <+3901>:	call   0x7ffff7cb0890 <malloc_printerr>
+
+4208	in ./malloc/malloc.c
+   0x00007ffff7cb3342 <+3906>:	mov    $0x3,%edi
+   0x00007ffff7cb3347 <+3911>:	jmp    0x7ffff7cb30b6 <_int_malloc+3254>
+
+2395	in ./malloc/malloc.c
+   0x00007ffff7cb334c <+3916>:	mov    0x15ee65(%rip),%rdx        # 0x7ffff7e121b8 <mp_+56>
+   0x00007ffff7cb3353 <+3923>:	mov    0x15ee2e(%rip),%r13        # 0x7ffff7e12188 <mp_+8>
+   0x00007ffff7cb335a <+3930>:	lea    0x50(%r10),%rdi
+
+./malloc/arena.c:
+   0x00007ffff7cb335e <+3934>:	test   %rdx,%rdx
+   0x00007ffff7cb3361 <+3937>:	jne    0x7ffff7cb36fa <_int_malloc+4858>
+   0x00007ffff7cb3367 <+3943>:	mov    0x15ee42(%rip),%rdx        # 0x7ffff7e121b0 <mp_+48>
+
+456	in ./malloc/arena.c
+457	in ./malloc/arena.c
+   0x00007ffff7cb336e <+3950>:	lea    -0x1(%rdx),%rax
+   0x00007ffff7cb3372 <+3954>:	cmp    $0x3ffffff,%rax
+   0x00007ffff7cb3378 <+3960>:	jbe    0x7ffff7cb3a83 <_int_malloc+5763>
+
+462	in ./malloc/arena.c
+463	in ./malloc/arena.c
+464	in ./malloc/arena.c
+   0x00007ffff7cb337e <+3966>:	mov    -0x40(%rbp),%rdx
+   0x00007ffff7cb3382 <+3970>:	xor    %ecx,%ecx
+   0x00007ffff7cb3384 <+3972>:	mov    %r13,%rsi
+   0x00007ffff7cb3387 <+3975>:	mov    %r11,-0x60(%rbp)
+   0x00007ffff7cb338b <+3979>:	mov    %r10,-0x58(%rbp)
+   0x00007ffff7cb338f <+3983>:	call   0x7ffff7cb1180 <alloc_new_heap>
+
+./malloc/malloc.c:
+   0x00007ffff7cb3394 <+3988>:	mov    -0x58(%rbp),%r10
+   0x00007ffff7cb3398 <+3992>:	mov    -0x60(%rbp),%r11
+   0x00007ffff7cb339c <+3996>:	test   %rax,%rax
+   0x00007ffff7cb339f <+3999>:	je     0x7ffff7cb3a06 <_int_malloc+5638>
+
+2396	in ./malloc/malloc.c
+2397	in ./malloc/malloc.c
+2398	in ./malloc/malloc.c
+   0x00007ffff7cb33a5 <+4005>:	mov    0x10(%rax),%rdx
+   0x00007ffff7cb33a9 <+4009>:	mov    %r11,(%rax)
+
+2399	in ./malloc/malloc.c
+   0x00007ffff7cb33ac <+4012>:	mov    %r12,0x8(%rax)
+
+2400	in ./malloc/malloc.c
+   0x00007ffff7cb33b0 <+4016>:	add    %rdx,0x830(%r11)
+
+2401	in ./malloc/malloc.c
+2402	in ./malloc/malloc.c
+   0x00007ffff7cb33b7 <+4023>:	mov    0x10(%rax),%rcx
+   0x00007ffff7cb33bb <+4027>:	lea    0x30(%rax),%rdx
+   0x00007ffff7cb33bf <+4031>:	mov    %rdx,0x8(%r11)
+
+2403	in ./malloc/malloc.c
+   0x00007ffff7cb33c3 <+4035>:	lea    -0x30(%rcx),%rdx
+
+2411	in ./malloc/malloc.c
+   0x00007ffff7cb33c7 <+4039>:	mov    -0x38(%rbp),%rcx
+
+2403	in ./malloc/malloc.c
+   0x00007ffff7cb33cb <+4043>:	or     $0x1,%rdx
+   0x00007ffff7cb33cf <+4047>:	mov    %rdx,0x38(%rax)
+
+2404	in ./malloc/malloc.c
+2405	in ./malloc/malloc.c
+2406	in ./malloc/malloc.c
+2407	in ./malloc/malloc.c
+2408	in ./malloc/malloc.c
+2409	in ./malloc/malloc.c
+2410	in ./malloc/malloc.c
+   0x00007ffff7cb33d3 <+4051>:	mov    -0x48(%rbp),%rdx
+   0x00007ffff7cb33d7 <+4055>:	sub    $0x20,%rdx
+   0x00007ffff7cb33db <+4059>:	and    $0xfffffffffffffff0,%rdx
+
+2411	in ./malloc/malloc.c
+   0x00007ffff7cb33df <+4063>:	lea    0x10(%rdx),%rax
+   0x00007ffff7cb33e3 <+4067>:	movq   $0x1,0x8(%rcx,%rax,1)
+
+2412	in ./malloc/malloc.c
+2413	in ./malloc/malloc.c
+   0x00007ffff7cb33ec <+4076>:	cmp    $0x1f,%rdx
+   0x00007ffff7cb33f0 <+4080>:	ja     0x7ffff7cb39c8 <_int_malloc+5576>
+
+2420	in ./malloc/malloc.c
+2421	in ./malloc/malloc.c
+2422	in ./malloc/malloc.c
+2423	in ./malloc/malloc.c
+   0x00007ffff7cb33f6 <+4086>:	mov    -0x38(%rbp),%rdi
+   0x00007ffff7cb33fa <+4090>:	mov    %rax,%rdx
+   0x00007ffff7cb33fd <+4093>:	or     $0x1,%rdx
+   0x00007ffff7cb3401 <+4097>:	mov    %rdx,0x8(%rdi)
+
+2424	in ./malloc/malloc.c
+   0x00007ffff7cb3405 <+4101>:	mov    %rax,(%rcx,%rax,1)
+   0x00007ffff7cb3409 <+4105>:	jmp    0x7ffff7cb32a7 <_int_malloc+3751>
+
+2434	in ./malloc/malloc.c
+2435	in ./malloc/malloc.c
+2436	in ./malloc/malloc.c
+2437	in ./malloc/malloc.c
+2438	in ./malloc/malloc.c
+2439	in ./malloc/malloc.c
+2440	in ./malloc/malloc.c
+2441	in ./malloc/malloc.c
+   0x00007ffff7cb340e <+4110>:	mov    0x15ed73(%rip),%rax        # 0x7ffff7e12188 <mp_+8>
+   0x00007ffff7cb3415 <+4117>:	lea    0x20(%r10,%rax,1),%r12
+
+2442	in ./malloc/malloc.c
+2443	in ./malloc/malloc.c
+2444	in ./malloc/malloc.c
+2445	in ./malloc/malloc.c
+2446	in ./malloc/malloc.c
+2447	in ./malloc/malloc.c
+2448	in ./malloc/malloc.c
+2449	in ./malloc/malloc.c
+   0x00007ffff7cb341a <+4122>:	testb  $0x2,0x4(%r11)
+   0x00007ffff7cb341f <+4127>:	jne    0x7ffff7cb3425 <_int_malloc+4133>
+
+2450	in ./malloc/malloc.c
+   0x00007ffff7cb3421 <+4129>:	sub    -0x48(%rbp),%r12
+
+2451	in ./malloc/malloc.c
+2452	in ./malloc/malloc.c
+2453	in ./malloc/malloc.c
+2454	in ./malloc/malloc.c
+2455	in ./malloc/malloc.c
+2456	in ./malloc/malloc.c
+2457	in ./malloc/malloc.c
+2458	in ./malloc/malloc.c
+2459	in ./malloc/malloc.c
+2460	in ./malloc/malloc.c
+   0x00007ffff7cb3425 <+4133>:	cmpq   $0x0,0x15ed83(%rip)        # 0x7ffff7e121b0 <mp_+48>
+   0x00007ffff7cb342d <+4141>:	jne    0x7ffff7cb3c1c <_int_malloc+6172>
+
+2465	in ./malloc/malloc.c
+2466	in ./malloc/malloc.c
+2467	in ./malloc/malloc.c
+   0x00007ffff7cb3433 <+4147>:	mov    -0x40(%rbp),%rax
+   0x00007ffff7cb3437 <+4151>:	lea    -0x1(%rax,%r12,1),%r13
+   0x00007ffff7cb343c <+4156>:	neg    %rax
+   0x00007ffff7cb343f <+4159>:	and    %rax,%r13
+
+2468	in ./malloc/malloc.c
+2469	in ./malloc/malloc.c
+2470	in ./malloc/malloc.c
+2471	in ./malloc/malloc.c
+2472	in ./malloc/malloc.c
+2473	in ./malloc/malloc.c
+2474	in ./malloc/malloc.c
+2475	in ./malloc/malloc.c
+   0x00007ffff7cb3442 <+4162>:	test   %r13,%r13
+   0x00007ffff7cb3445 <+4165>:	jg     0x7ffff7cb38a4 <_int_malloc+5284>
+
+2484	in ./malloc/malloc.c
+2485	in ./malloc/malloc.c
+2486	in ./malloc/malloc.c
+2487	in ./malloc/malloc.c
+2488	in ./malloc/malloc.c
+2489	in ./malloc/malloc.c
+2490	in ./malloc/malloc.c
+2491	in ./malloc/malloc.c
+2492	in ./malloc/malloc.c
+2493	in ./malloc/malloc.c
+2494	in ./malloc/malloc.c
+   0x00007ffff7cb344b <+4171>:	mov    0x15ed36(%rip),%rax        # 0x7ffff7e12188 <mp_+8>
+   0x00007ffff7cb3452 <+4178>:	lea    0x20(%r10,%rax,1),%rax
+   0x00007ffff7cb3457 <+4183>:	mov    %rax,-0x60(%rbp)
+
+2495	in ./malloc/malloc.c
+2496	in ./malloc/malloc.c
+   0x00007ffff7cb345b <+4187>:	mov    0x15ed56(%rip),%rax        # 0x7ffff7e121b8 <mp_+56>
+   0x00007ffff7cb3462 <+4194>:	test   %rax,%rax
+   0x00007ffff7cb3465 <+4197>:	je     0x7ffff7cb37f4 <_int_malloc+5108>
+
+2283	in ./malloc/malloc.c
+   0x00007ffff7cb346b <+4203>:	mov    -0x60(%rbp),%rcx
+   0x00007ffff7cb346f <+4207>:	mov    %rax,%rdx
+
+2287	in ./malloc/malloc.c
+2288	in ./malloc/malloc.c
+2289	in ./malloc/malloc.c
+   0x00007ffff7cb3472 <+4210>:	mov    $0xffffffff,%r8d
+
+2497	in ./malloc/malloc.c
+   0x00007ffff7cb3478 <+4216>:	mov    0x15ed41(%rip),%r14d        # 0x7ffff7e121c0 <mp_+64>
+
+2283	in ./malloc/malloc.c
+   0x00007ffff7cb347f <+4223>:	neg    %rdx
+   0x00007ffff7cb3482 <+4226>:	mov    %r11,-0x70(%rbp)
+   0x00007ffff7cb3486 <+4230>:	lea    -0x1(%rcx,%rax,1),%r13
+
+2287	in ./malloc/malloc.c
+2288	in ./malloc/malloc.c
+2289	in ./malloc/malloc.c
+   0x00007ffff7cb348b <+4235>:	mov    %r14d,%ecx
+   0x00007ffff7cb348e <+4238>:	mov    %r10,-0x68(%rbp)
+
+2286	in ./malloc/malloc.c
+   0x00007ffff7cb3492 <+4242>:	and    %rdx,%r13
+
+2287	in ./malloc/malloc.c
+2288	in ./malloc/malloc.c
+2289	in ./malloc/malloc.c
+   0x00007ffff7cb3495 <+4245>:	mov    $0x3,%edx
+
+2286	in ./malloc/malloc.c
+   0x00007ffff7cb349a <+4250>:	cmp    %rax,%r13
+   0x00007ffff7cb349d <+4253>:	cmovb  %rax,%r13
+
+2287	in ./malloc/malloc.c
+2288	in ./malloc/malloc.c
+2289	in ./malloc/malloc.c
+   0x00007ffff7cb34a1 <+4257>:	or     $0x22,%ecx
+   0x00007ffff7cb34a4 <+4260>:	xor    %r9d,%r9d
+   0x00007ffff7cb34a7 <+4263>:	xor    %edi,%edi
+   0x00007ffff7cb34a9 <+4265>:	mov    %r13,%rsi
+   0x00007ffff7cb34ac <+4268>:	call   0x7ffff7d32f80 <__GI___mmap64>
+
+2290	in ./malloc/malloc.c
+2291	in ./malloc/malloc.c
+2292	in ./malloc/malloc.c
+   0x00007ffff7cb34b1 <+4273>:	mov    -0x68(%rbp),%r10
+   0x00007ffff7cb34b5 <+4277>:	mov    -0x70(%rbp),%r11
+   0x00007ffff7cb34b9 <+4281>:	cmp    $0xffffffffffffffff,%rax
+
+2289	in ./malloc/malloc.c
+   0x00007ffff7cb34bd <+4285>:	mov    %rax,%r12
+
+2290	in ./malloc/malloc.c
+2291	in ./malloc/malloc.c
+2292	in ./malloc/malloc.c
+   0x00007ffff7cb34c0 <+4288>:	je     0x7ffff7cb37f4 <_int_malloc+5108>
+
+2293	in ./malloc/malloc.c
+2294	in ./malloc/malloc.c
+2295	in ./malloc/malloc.c
+   0x00007ffff7cb34c6 <+4294>:	test   %r14d,%r14d
+   0x00007ffff7cb34c9 <+4297>:	jne    0x7ffff7cb3515 <_int_malloc+4373>
+
+1912	in ./malloc/malloc.c
+   0x00007ffff7cb34cb <+4299>:	cmpl   $0x1,0x15ecd6(%rip)        # 0x7ffff7e121a8 <mp_+40>
+   0x00007ffff7cb34d2 <+4306>:	jne    0x7ffff7cb3515 <_int_malloc+4373>
+   0x00007ffff7cb34d4 <+4308>:	cmp    0x15ecd5(%rip),%r13        # 0x7ffff7e121b0 <mp_+48>
+   0x00007ffff7cb34db <+4315>:	jb     0x7ffff7cb3515 <_int_malloc+4373>
+
+1913	in ./malloc/malloc.c
+1914	in ./malloc/malloc.c
+1915	in ./malloc/malloc.c
+1916	in ./malloc/malloc.c
+1917	in ./malloc/malloc.c
+   0x00007ffff7cb34dd <+4317>:	mov    0x15e9d4(%rip),%rax        # 0x7ffff7e11eb8
+   0x00007ffff7cb34e4 <+4324>:	mov    %r13,%rsi
+   0x00007ffff7cb34e7 <+4327>:	mov    %r12,%rdi
+   0x00007ffff7cb34ea <+4330>:	mov    0x18(%rax),%rax
+   0x00007ffff7cb34ee <+4334>:	lea    -0x1(%rax),%rdx
+   0x00007ffff7cb34f2 <+4338>:	test   %rdx,%r12
+   0x00007ffff7cb34f5 <+4341>:	jne    0x7ffff7cb3c53 <_int_malloc+6227>
+
+1922	in ./malloc/malloc.c
+1923	in ./malloc/malloc.c
+1924	in ./malloc/malloc.c
+   0x00007ffff7cb34fb <+4347>:	mov    $0xe,%edx
+   0x00007ffff7cb3500 <+4352>:	mov    %r11,-0x70(%rbp)
+   0x00007ffff7cb3504 <+4356>:	mov    %r10,-0x68(%rbp)
+   0x00007ffff7cb3508 <+4360>:	call   0x7ffff7d32d50 <__GI_madvise>
+
+2498	in ./malloc/malloc.c
+2499	in ./malloc/malloc.c
+2500	in ./malloc/malloc.c
+   0x00007ffff7cb350d <+4365>:	mov    -0x68(%rbp),%r10
+   0x00007ffff7cb3511 <+4369>:	mov    -0x70(%rbp),%r11
+
+2505	in ./malloc/malloc.c
+2506	in ./malloc/malloc.c
+   0x00007ffff7cb3515 <+4373>:	mov    -0x60(%rbp),%rsi
+   0x00007ffff7cb3519 <+4377>:	lea    0x129467(%rip),%rdx        # 0x7ffff7ddc987
+   0x00007ffff7cb3520 <+4384>:	mov    %r12,%rdi
+   0x00007ffff7cb3523 <+4387>:	mov    %r11,-0x70(%rbp)
+   0x00007ffff7cb3527 <+4391>:	mov    %r10,-0x68(%rbp)
+   0x00007ffff7cb352b <+4395>:	call   0x7ffff7d37fa0 <__set_vma_name>
+
+2507	in ./malloc/malloc.c
+2508	in ./malloc/malloc.c
+2509	in ./malloc/malloc.c
+2510	in ./malloc/malloc.c
+2511	in ./malloc/malloc.c
+   0x00007ffff7cb3530 <+4400>:	mov    0x15f58e(%rip),%eax        # 0x7ffff7e12ac4 <main_arena+4>
+
+2516	in ./malloc/malloc.c
+2517	in ./malloc/malloc.c
+2518	in ./malloc/malloc.c
+2519	in ./malloc/malloc.c
+   0x00007ffff7cb3536 <+4406>:	mov    -0x68(%rbp),%r10
+   0x00007ffff7cb353a <+4410>:	mov    -0x70(%rbp),%r11
+
+2511	in ./malloc/malloc.c
+   0x00007ffff7cb353e <+4414>:	or     $0x2,%eax
+
+2516	in ./malloc/malloc.c
+2517	in ./malloc/malloc.c
+2518	in ./malloc/malloc.c
+2519	in ./malloc/malloc.c
+   0x00007ffff7cb3541 <+4417>:	test   %r12,%r12
+
+2511	in ./malloc/malloc.c
+   0x00007ffff7cb3544 <+4420>:	mov    %eax,0x15f57a(%rip)        # 0x7ffff7e12ac4 <main_arena+4>
+
+2516	in ./malloc/malloc.c
+2517	in ./malloc/malloc.c
+2518	in ./malloc/malloc.c
+2519	in ./malloc/malloc.c
+   0x00007ffff7cb354a <+4426>:	je     0x7ffff7cb32a7 <_int_malloc+3751>
+
+2520	in ./malloc/malloc.c
+2521	in ./malloc/malloc.c
+   0x00007ffff7cb3550 <+4432>:	cmpq   $0x0,0x15ec90(%rip)        # 0x7ffff7e121e8 <mp_+104>
+
+2515	in ./malloc/malloc.c
+   0x00007ffff7cb3558 <+4440>:	lea    (%r12,%r13,1),%r8
+
+2520	in ./malloc/malloc.c
+2521	in ./malloc/malloc.c
+   0x00007ffff7cb355c <+4444>:	je     0x7ffff7cb3bd2 <_int_malloc+6098>
+
+2523	in ./malloc/malloc.c
+   0x00007ffff7cb3562 <+4450>:	mov    0x15fd87(%rip),%rdx        # 0x7ffff7e132f0 <main_arena+2096>
+
+2524	in ./malloc/malloc.c
+2525	in ./malloc/malloc.c
+2526	in ./malloc/malloc.c
+2527	in ./malloc/malloc.c
+2528	in ./malloc/malloc.c
+2529	in ./malloc/malloc.c
+   0x00007ffff7cb3569 <+4457>:	xor    %esi,%esi
+
+2523	in ./malloc/malloc.c
+   0x00007ffff7cb356b <+4459>:	add    %r13,%rdx
+   0x00007ffff7cb356e <+4462>:	mov    %rdx,0x15fd7b(%rip)        # 0x7ffff7e132f0 <main_arena+2096>
+
+2531	in ./malloc/malloc.c
+2532	in ./malloc/malloc.c
+   0x00007ffff7cb3575 <+4469>:	test   $0x2,%al
+   0x00007ffff7cb3577 <+4471>:	jne    0x7ffff7cb3b6a <_int_malloc+5994>
+   0x00007ffff7cb357d <+4477>:	cmpq   $0x0,-0x48(%rbp)
+   0x00007ffff7cb3582 <+4482>:	je     0x7ffff7cb35a6 <_int_malloc+4518>
+   0x00007ffff7cb3584 <+4484>:	cmp    -0x58(%rbp),%r12
+   0x00007ffff7cb3588 <+4488>:	jb     0x7ffff7cb3bde <_int_malloc+6110>
+
+2561	in ./malloc/malloc.c
+2562	in ./malloc/malloc.c
+2563	in ./malloc/malloc.c
+2564	in ./malloc/malloc.c
+2565	in ./malloc/malloc.c
+2566	in ./malloc/malloc.c
+   0x00007ffff7cb358e <+4494>:	cmpq   $0x0,-0x48(%rbp)
+   0x00007ffff7cb3593 <+4499>:	je     0x7ffff7cb35a6 <_int_malloc+4518>
+
+2567	in ./malloc/malloc.c
+   0x00007ffff7cb3595 <+4501>:	mov    %r12,%rax
+   0x00007ffff7cb3598 <+4504>:	sub    -0x58(%rbp),%rax
+   0x00007ffff7cb359c <+4508>:	add    %rdx,%rax
+   0x00007ffff7cb359f <+4511>:	mov    %rax,0x15fd4a(%rip)        # 0x7ffff7e132f0 <main_arena+2096>
+
+2568	in ./malloc/malloc.c
+2569	in ./malloc/malloc.c
+2570	in ./malloc/malloc.c
+2571	in ./malloc/malloc.c
+2572	in ./malloc/malloc.c
+   0x00007ffff7cb35a6 <+4518>:	mov    %r12,%rax
+
+2560	in ./malloc/malloc.c
+   0x00007ffff7cb35a9 <+4521>:	mov    %r12,%r14
+
+2568	in ./malloc/malloc.c
+2569	in ./malloc/malloc.c
+2570	in ./malloc/malloc.c
+2571	in ./malloc/malloc.c
+2572	in ./malloc/malloc.c
+   0x00007ffff7cb35ac <+4524>:	and    $0xf,%eax
+   0x00007ffff7cb35af <+4527>:	je     0x7ffff7cb35c0 <_int_malloc+4544>
+
+2573	in ./malloc/malloc.c
+2574	in ./malloc/malloc.c
+2575	in ./malloc/malloc.c
+2576	in ./malloc/malloc.c
+2577	in ./malloc/malloc.c
+2578	in ./malloc/malloc.c
+2579	in ./malloc/malloc.c
+2580	in ./malloc/malloc.c
+2581	in ./malloc/malloc.c
+2582	in ./malloc/malloc.c
+   0x00007ffff7cb35b1 <+4529>:	mov    $0x10,%edx
+   0x00007ffff7cb35b6 <+4534>:	sub    %rax,%rdx
+   0x00007ffff7cb35b9 <+4537>:	mov    %rdx,%rax
+
+2583	in ./malloc/malloc.c
+   0x00007ffff7cb35bc <+4540>:	lea    (%r12,%rdx,1),%r14
+
+2584	in ./malloc/malloc.c
+2585	in ./malloc/malloc.c
+2586	in ./malloc/malloc.c
+2587	in ./malloc/malloc.c
+2588	in ./malloc/malloc.c
+2589	in ./malloc/malloc.c
+2590	in ./malloc/malloc.c
+2591	in ./malloc/malloc.c
+   0x00007ffff7cb35c0 <+4544>:	add    -0x48(%rbp),%rax
+
+2592	in ./malloc/malloc.c
+2593	in ./malloc/malloc.c
+2594	in ./malloc/malloc.c
+   0x00007ffff7cb35c4 <+4548>:	mov    -0x40(%rbp),%rcx
+   0x00007ffff7cb35c8 <+4552>:	lea    (%rax,%r13,1),%rdx
+   0x00007ffff7cb35cc <+4556>:	add    %r12,%rdx
+
+2595	in ./malloc/malloc.c
+   0x00007ffff7cb35cf <+4559>:	lea    -0x1(%rcx,%rdx,1),%rsi
+   0x00007ffff7cb35d4 <+4564>:	neg    %rcx
+   0x00007ffff7cb35d7 <+4567>:	sub    %rdx,%rax
+   0x00007ffff7cb35da <+4570>:	and    %rcx,%rsi
+   0x00007ffff7cb35dd <+4573>:	lea    (%rsi,%rax,1),%r12
+   0x00007ffff7cb35e1 <+4577>:	mov    %r12,%r13
+
+2596	in ./malloc/malloc.c
+2597	in ./malloc/malloc.c
+   0x00007ffff7cb35e4 <+4580>:	test   %r12,%r12
+   0x00007ffff7cb35e7 <+4583>:	js     0x7ffff7cb3b4b <_int_malloc+5963>
+
+2598	in ./malloc/malloc.c
+   0x00007ffff7cb35ed <+4589>:	mov    %r12,%rdi
+   0x00007ffff7cb35f0 <+4592>:	mov    %r11,-0x58(%rbp)
+   0x00007ffff7cb35f4 <+4596>:	mov    %r10,-0x40(%rbp)
+   0x00007ffff7cb35f8 <+4600>:	call   0x7ffff7cb1bb0 <__glibc_morecore>
+
+2599	in ./malloc/malloc.c
+2600	in ./malloc/malloc.c
+2601	in ./malloc/malloc.c
+2602	in ./malloc/malloc.c
+2603	in ./malloc/malloc.c
+2604	in ./malloc/malloc.c
+2605	in ./malloc/malloc.c
+2606	in ./malloc/malloc.c
+2607	in ./malloc/malloc.c
+2608	in ./malloc/malloc.c
+2609	in ./malloc/malloc.c
+2610	in ./malloc/malloc.c
+   0x00007ffff7cb35fd <+4605>:	mov    -0x40(%rbp),%r10
+   0x00007ffff7cb3601 <+4609>:	mov    -0x58(%rbp),%r11
+   0x00007ffff7cb3605 <+4613>:	test   %rax,%rax
+
+2598	in ./malloc/malloc.c
+   0x00007ffff7cb3608 <+4616>:	mov    %rax,%r8
+
+2599	in ./malloc/malloc.c
+2600	in ./malloc/malloc.c
+2601	in ./malloc/malloc.c
+2602	in ./malloc/malloc.c
+2603	in ./malloc/malloc.c
+2604	in ./malloc/malloc.c
+2605	in ./malloc/malloc.c
+2606	in ./malloc/malloc.c
+2607	in ./malloc/malloc.c
+2608	in ./malloc/malloc.c
+2609	in ./malloc/malloc.c
+2610	in ./malloc/malloc.c
+   0x00007ffff7cb360b <+4619>:	je     0x7ffff7cb3b25 <_int_malloc+5925>
+
+1912	in ./malloc/malloc.c
+   0x00007ffff7cb3611 <+4625>:	cmpl   $0x1,0x15eb90(%rip)        # 0x7ffff7e121a8 <mp_+40>
+   0x00007ffff7cb3618 <+4632>:	jne    0x7ffff7cb3663 <_int_malloc+4707>
+   0x00007ffff7cb361a <+4634>:	cmp    0x15eb8f(%rip),%r12        # 0x7ffff7e121b0 <mp_+48>
+   0x00007ffff7cb3621 <+4641>:	jb     0x7ffff7cb3663 <_int_malloc+4707>
+
+1913	in ./malloc/malloc.c
+1914	in ./malloc/malloc.c
+1915	in ./malloc/malloc.c
+1916	in ./malloc/malloc.c
+1917	in ./malloc/malloc.c
+   0x00007ffff7cb3623 <+4643>:	mov    0x15e88e(%rip),%rax        # 0x7ffff7e11eb8
+   0x00007ffff7cb362a <+4650>:	mov    %r8,%rdi
+   0x00007ffff7cb362d <+4653>:	mov    0x18(%rax),%rax
+   0x00007ffff7cb3631 <+4657>:	lea    -0x1(%rax),%rdx
+   0x00007ffff7cb3635 <+4661>:	test   %rdx,%r8
+   0x00007ffff7cb3638 <+4664>:	jne    0x7ffff7cb3b98 <_int_malloc+6040>
+
+1922	in ./malloc/malloc.c
+1923	in ./malloc/malloc.c
+1924	in ./malloc/malloc.c
+   0x00007ffff7cb363e <+4670>:	mov    $0xe,%edx
+   0x00007ffff7cb3643 <+4675>:	mov    %r12,%rsi
+   0x00007ffff7cb3646 <+4678>:	mov    %r11,-0x60(%rbp)
+   0x00007ffff7cb364a <+4682>:	mov    %r8,-0x58(%rbp)
+   0x00007ffff7cb364e <+4686>:	mov    %r10,-0x40(%rbp)
+   0x00007ffff7cb3652 <+4690>:	call   0x7ffff7d32d50 <__GI_madvise>
+   0x00007ffff7cb3657 <+4695>:	mov    -0x60(%rbp),%r11
+   0x00007ffff7cb365b <+4699>:	mov    -0x58(%rbp),%r8
+   0x00007ffff7cb365f <+4703>:	mov    -0x40(%rbp),%r10
+
+2646	in ./malloc/malloc.c
+2647	in ./malloc/malloc.c
+2648	in ./malloc/malloc.c
+2649	in ./malloc/malloc.c
+2650	in ./malloc/malloc.c
+   0x00007ffff7cb3663 <+4707>:	mov    %r14,%r12
+
+2651	in ./malloc/malloc.c
+2652	in ./malloc/malloc.c
+   0x00007ffff7cb3666 <+4710>:	mov    %r8,%rax
+   0x00007ffff7cb3669 <+4713>:	mov    %r12,0x15f458(%rip)        # 0x7ffff7e12ac8 <main_arena+8>
+
+2653	in ./malloc/malloc.c
+   0x00007ffff7cb3670 <+4720>:	sub    %r12,%rax
+   0x00007ffff7cb3673 <+4723>:	add    %r13,%rax
+   0x00007ffff7cb3676 <+4726>:	or     $0x1,%rax
+   0x00007ffff7cb367a <+4730>:	mov    %rax,0x8(%r12)
+
+2654	in ./malloc/malloc.c
+   0x00007ffff7cb367f <+4735>:	mov    -0x48(%rbp),%rax
+   0x00007ffff7cb3683 <+4739>:	add    %r13,0x15fc66(%rip)        # 0x7ffff7e132f0 <main_arena+2096>
+
+2655	in ./malloc/malloc.c
+2656	in ./malloc/malloc.c
+2657	in ./malloc/malloc.c
+2658	in ./malloc/malloc.c
+2659	in ./malloc/malloc.c
+2660	in ./malloc/malloc.c
+2661	in ./malloc/malloc.c
+2662	in ./malloc/malloc.c
+2663	in ./malloc/malloc.c
+2664	in ./malloc/malloc.c
+2665	in ./malloc/malloc.c
+   0x00007ffff7cb368a <+4746>:	test   %rax,%rax
+   0x00007ffff7cb368d <+4749>:	je     0x7ffff7cb32a7 <_int_malloc+3751>
+
+2666	in ./malloc/malloc.c
+2667	in ./malloc/malloc.c
+2668	in ./malloc/malloc.c
+2669	in ./malloc/malloc.c
+2670	in ./malloc/malloc.c
+2671	in ./malloc/malloc.c
+2672	in ./malloc/malloc.c
+   0x00007ffff7cb3693 <+4755>:	sub    $0x20,%rax
+
+2673	in ./malloc/malloc.c
+   0x00007ffff7cb3697 <+4759>:	mov    -0x38(%rbp),%rcx
+
+2672	in ./malloc/malloc.c
+   0x00007ffff7cb369b <+4763>:	and    $0xfffffffffffffff0,%rax
+
+2673	in ./malloc/malloc.c
+   0x00007ffff7cb369f <+4767>:	mov    %rax,%rdx
+   0x00007ffff7cb36a2 <+4770>:	or     $0x1,%rdx
+   0x00007ffff7cb36a6 <+4774>:	mov    %rdx,0x8(%rcx)
+
+2674	in ./malloc/malloc.c
+2675	in ./malloc/malloc.c
+2676	in ./malloc/malloc.c
+2677	in ./malloc/malloc.c
+2678	in ./malloc/malloc.c
+2679	in ./malloc/malloc.c
+2680	in ./malloc/malloc.c
+2681	in ./malloc/malloc.c
+   0x00007ffff7cb36aa <+4778>:	movq   $0x11,0x8(%rcx,%rax,1)
+
+2682	in ./malloc/malloc.c
+2683	in ./malloc/malloc.c
+   0x00007ffff7cb36b3 <+4787>:	movq   $0x11,0x18(%rcx,%rax,1)
+
+2684	in ./malloc/malloc.c
+2685	in ./malloc/malloc.c
+2686	in ./malloc/malloc.c
+2687	in ./malloc/malloc.c
+2688	in ./malloc/malloc.c
+   0x00007ffff7cb36bc <+4796>:	cmp    $0x1f,%rax
+   0x00007ffff7cb36c0 <+4800>:	jbe    0x7ffff7cb32a7 <_int_malloc+3751>
+
+2689	in ./malloc/malloc.c
+2690	in ./malloc/malloc.c
+   0x00007ffff7cb36c6 <+4806>:	mov    0x8(%rcx),%rax
+   0x00007ffff7cb36ca <+4810>:	mov    %rcx,%rsi
+   0x00007ffff7cb36cd <+4813>:	mov    %r15,%rdi
+   0x00007ffff7cb36d0 <+4816>:	mov    $0x1,%ecx
+   0x00007ffff7cb36d5 <+4821>:	mov    %r11,-0x48(%rbp)
+   0x00007ffff7cb36d9 <+4825>:	mov    %rax,%rdx
+   0x00007ffff7cb36dc <+4828>:	mov    %r10,-0x40(%rbp)
+   0x00007ffff7cb36e0 <+4832>:	and    $0xfffffffffffffff8,%rdx
+   0x00007ffff7cb36e4 <+4836>:	mov    %rax,-0x38(%rbp)
+   0x00007ffff7cb36e8 <+4840>:	call   0x7ffff7cb2300 <_int_free_chunk>
+   0x00007ffff7cb36ed <+4845>:	mov    -0x48(%rbp),%r11
+   0x00007ffff7cb36f1 <+4849>:	mov    -0x40(%rbp),%r10
+   0x00007ffff7cb36f5 <+4853>:	jmp    0x7ffff7cb32a7 <_int_malloc+3751>
+
+./malloc/arena.c:
+   0x00007ffff7cb36fa <+4858>:	cmp    $0x4000000,%rdx
+   0x00007ffff7cb3701 <+4865>:	ja     0x7ffff7cb337e <_int_malloc+3966>
+
+458	in ./malloc/arena.c
+459	in ./malloc/arena.c
+   0x00007ffff7cb3707 <+4871>:	mov    0x15eab3(%rip),%ecx        # 0x7ffff7e121c0 <mp_+64>
+   0x00007ffff7cb370d <+4877>:	mov    %r13,%rsi
+   0x00007ffff7cb3710 <+4880>:	mov    %r11,-0x68(%rbp)
+   0x00007ffff7cb3714 <+4884>:	mov    %r10,-0x60(%rbp)
+   0x00007ffff7cb3718 <+4888>:	mov    %rdi,-0x58(%rbp)
+   0x00007ffff7cb371c <+4892>:	call   0x7ffff7cb1180 <alloc_new_heap>
+
+460	in ./malloc/arena.c
+461	in ./malloc/arena.c
+   0x00007ffff7cb3721 <+4897>:	mov    -0x58(%rbp),%rdi
+   0x00007ffff7cb3725 <+4901>:	mov    -0x60(%rbp),%r10
+   0x00007ffff7cb3729 <+4905>:	test   %rax,%rax
+   0x00007ffff7cb372c <+4908>:	mov    -0x68(%rbp),%r11
+   0x00007ffff7cb3730 <+4912>:	jne    0x7ffff7cb33a5 <_int_malloc+4005>
+   0x00007ffff7cb3736 <+4918>:	jmp    0x7ffff7cb337e <_int_malloc+3966>
+
+./malloc/malloc.c:
+   0x00007ffff7cb373b <+4923>:	lea    0x12e766(%rip),%rcx        # 0x7ffff7de1ea8 <__PRETTY_FUNCTION__.11>
+   0x00007ffff7cb3742 <+4930>:	mov    $0x107e,%edx
+   0x00007ffff7cb3747 <+4935>:	lea    0x1291aa(%rip),%rsi        # 0x7ffff7ddc8f8
+   0x00007ffff7cb374e <+4942>:	lea    0x1292d2(%rip),%rdi        # 0x7ffff7ddca27
+   0x00007ffff7cb3755 <+4949>:	call   0x7ffff7c3be60 <__libc_assert_fail>
+   0x00007ffff7cb375a <+4954>:	mov    -0x38(%rbp),%r11
+   0x00007ffff7cb375e <+4958>:	mov    -0x48(%rbp),%r10
+
+2351	in ./malloc/malloc.c
+   0x00007ffff7cb3762 <+4962>:	mov    $0x1,%r14d
+   0x00007ffff7cb3768 <+4968>:	mov    -0x58(%rbp),%r9
+   0x00007ffff7cb376c <+4972>:	mov    0x8(%r11),%rax
+   0x00007ffff7cb3770 <+4976>:	mov    %rax,-0x38(%rbp)
+   0x00007ffff7cb3774 <+4980>:	jmp    0x7ffff7cb3164 <_int_malloc+3428>
+
+3965	in ./malloc/malloc.c
+   0x00007ffff7cb3779 <+4985>:	lea    (%rdx,%r10,1),%rdi
+
+3964	in ./malloc/malloc.c
+   0x00007ffff7cb377d <+4989>:	sub    %r10,%rax
+   0x00007ffff7cb3780 <+4992>:	mov    -0x40(%rbp),%rbx
+
+3966	in ./malloc/malloc.c
+   0x00007ffff7cb3784 <+4996>:	movq   %rdi,%xmm0
+   0x00007ffff7cb3789 <+5001>:	mov    %rdi,0x20(%r11)
+
+3967	in ./malloc/malloc.c
+   0x00007ffff7cb378d <+5005>:	punpcklqdq %xmm0,%xmm0
+   0x00007ffff7cb3791 <+5009>:	movups %xmm0,0x10(%r11)
+
+3968	in ./malloc/malloc.c
+   0x00007ffff7cb3796 <+5014>:	movq   %r9,%xmm0
+   0x00007ffff7cb379b <+5019>:	punpcklqdq %xmm0,%xmm0
+   0x00007ffff7cb379f <+5023>:	movups %xmm0,0x10(%rdi)
+
+3969	in ./malloc/malloc.c
+   0x00007ffff7cb37a3 <+5027>:	cmp    $0x3ff,%rax
+   0x00007ffff7cb37a9 <+5033>:	jbe    0x7ffff7cb37b3 <_int_malloc+5043>
+
+3970	in ./malloc/malloc.c
+3971	in ./malloc/malloc.c
+3972	in ./malloc/malloc.c
+   0x00007ffff7cb37ab <+5035>:	pxor   %xmm0,%xmm0
+   0x00007ffff7cb37af <+5039>:	movups %xmm0,0x20(%rdi)
+
+3973	in ./malloc/malloc.c
+3974	in ./malloc/malloc.c
+3975	in ./malloc/malloc.c
+   0x00007ffff7cb37b3 <+5043>:	lea    0x15f306(%rip),%rcx        # 0x7ffff7e12ac0 <main_arena>
+
+3979	in ./malloc/malloc.c
+3980	in ./malloc/malloc.c
+3981	in ./malloc/malloc.c
+   0x00007ffff7cb37ba <+5050>:	lea    0x10(%rdx),%r12
+
+3975	in ./malloc/malloc.c
+   0x00007ffff7cb37be <+5054>:	cmp    %rcx,%r11
+   0x00007ffff7cb37c1 <+5057>:	setne  %cl
+   0x00007ffff7cb37c4 <+5060>:	movzbl %cl,%ecx
+   0x00007ffff7cb37c7 <+5063>:	shl    $0x2,%rcx
+   0x00007ffff7cb37cb <+5067>:	or     %r10,%rcx
+   0x00007ffff7cb37ce <+5070>:	or     $0x1,%rcx
+   0x00007ffff7cb37d2 <+5074>:	mov    %rcx,0x8(%rdx)
+
+3976	in ./malloc/malloc.c
+3977	in ./malloc/malloc.c
+   0x00007ffff7cb37d6 <+5078>:	mov    %rax,%rcx
+   0x00007ffff7cb37d9 <+5081>:	or     $0x1,%rcx
+   0x00007ffff7cb37dd <+5085>:	mov    %rcx,0x8(%rdi)
+
+3978	in ./malloc/malloc.c
+   0x00007ffff7cb37e1 <+5089>:	mov    %r12,%rdi
+   0x00007ffff7cb37e4 <+5092>:	mov    %rax,(%rsi)
+
+3982	in ./malloc/malloc.c
+   0x00007ffff7cb37e7 <+5095>:	mov    %rbx,%rsi
+   0x00007ffff7cb37ea <+5098>:	call   0x7ffff7cb08d0 <alloc_perturb>
+
+3983	in ./malloc/malloc.c
+   0x00007ffff7cb37ef <+5103>:	jmp    0x7ffff7cb2772 <_int_malloc+882>
+
+2283	in ./malloc/malloc.c
+   0x00007ffff7cb37f4 <+5108>:	mov    -0x40(%rbp),%rax
+   0x00007ffff7cb37f8 <+5112>:	mov    -0x60(%rbp),%rcx
+
+2287	in ./malloc/malloc.c
+2288	in ./malloc/malloc.c
+2289	in ./malloc/malloc.c
+   0x00007ffff7cb37fc <+5116>:	mov    $0xffffffff,%r8d
+   0x00007ffff7cb3802 <+5122>:	mov    $0x3,%edx
+   0x00007ffff7cb3807 <+5127>:	mov    %r11,-0x70(%rbp)
+
+2283	in ./malloc/malloc.c
+   0x00007ffff7cb380b <+5131>:	lea    -0x1(%rax,%rcx,1),%r13
+   0x00007ffff7cb3810 <+5136>:	neg    %rax
+
+2287	in ./malloc/malloc.c
+2288	in ./malloc/malloc.c
+2289	in ./malloc/malloc.c
+   0x00007ffff7cb3813 <+5139>:	mov    $0x22,%ecx
+   0x00007ffff7cb3818 <+5144>:	mov    %r10,-0x68(%rbp)
+
+2286	in ./malloc/malloc.c
+   0x00007ffff7cb381c <+5148>:	and    %rax,%r13
+   0x00007ffff7cb381f <+5151>:	mov    $0x100000,%eax
+   0x00007ffff7cb3824 <+5156>:	cmp    %rax,%r13
+   0x00007ffff7cb3827 <+5159>:	cmovb  %rax,%r13
+
+2287	in ./malloc/malloc.c
+2288	in ./malloc/malloc.c
+2289	in ./malloc/malloc.c
+   0x00007ffff7cb382b <+5163>:	xor    %r9d,%r9d
+   0x00007ffff7cb382e <+5166>:	xor    %edi,%edi
+   0x00007ffff7cb3830 <+5168>:	mov    %r13,%rsi
+   0x00007ffff7cb3833 <+5171>:	call   0x7ffff7d32f80 <__GI___mmap64>
+
+2290	in ./malloc/malloc.c
+2291	in ./malloc/malloc.c
+2292	in ./malloc/malloc.c
+   0x00007ffff7cb3838 <+5176>:	mov    -0x68(%rbp),%r10
+   0x00007ffff7cb383c <+5180>:	mov    -0x70(%rbp),%r11
+   0x00007ffff7cb3840 <+5184>:	cmp    $0xffffffffffffffff,%rax
+
+2289	in ./malloc/malloc.c
+   0x00007ffff7cb3844 <+5188>:	mov    %rax,%r12
+
+2290	in ./malloc/malloc.c
+2291	in ./malloc/malloc.c
+2292	in ./malloc/malloc.c
+   0x00007ffff7cb3847 <+5191>:	je     0x7ffff7cb32a7 <_int_malloc+3751>
+
+1912	in ./malloc/malloc.c
+   0x00007ffff7cb384d <+5197>:	cmpl   $0x1,0x15e954(%rip)        # 0x7ffff7e121a8 <mp_+40>
+   0x00007ffff7cb3854 <+5204>:	jne    0x7ffff7cb3515 <_int_malloc+4373>
+   0x00007ffff7cb385a <+5210>:	cmp    0x15e94f(%rip),%r13        # 0x7ffff7e121b0 <mp_+48>
+   0x00007ffff7cb3861 <+5217>:	jb     0x7ffff7cb3515 <_int_malloc+4373>
+
+1913	in ./malloc/malloc.c
+1914	in ./malloc/malloc.c
+1915	in ./malloc/malloc.c
+1916	in ./malloc/malloc.c
+1917	in ./malloc/malloc.c
+   0x00007ffff7cb3867 <+5223>:	mov    0x15e64a(%rip),%rax        # 0x7ffff7e11eb8
+   0x00007ffff7cb386e <+5230>:	mov    %r13,%rsi
+   0x00007ffff7cb3871 <+5233>:	mov    %r12,%rdi
+   0x00007ffff7cb3874 <+5236>:	mov    0x18(%rax),%rax
+   0x00007ffff7cb3878 <+5240>:	lea    -0x1(%rax),%rdx
+   0x00007ffff7cb387c <+5244>:	test   %rdx,%r12
+   0x00007ffff7cb387f <+5247>:	jne    0x7ffff7cb3bea <_int_malloc+6122>
+
+1922	in ./malloc/malloc.c
+1923	in ./malloc/malloc.c
+1924	in ./malloc/malloc.c
+   0x00007ffff7cb3885 <+5253>:	mov    $0xe,%edx
+   0x00007ffff7cb388a <+5258>:	mov    %r11,-0x70(%rbp)
+   0x00007ffff7cb388e <+5262>:	mov    %r10,-0x68(%rbp)
+   0x00007ffff7cb3892 <+5266>:	call   0x7ffff7d32d50 <__GI_madvise>
+   0x00007ffff7cb3897 <+5271>:	mov    -0x70(%rbp),%r11
+   0x00007ffff7cb389b <+5275>:	mov    -0x68(%rbp),%r10
+
+2501	in ./malloc/malloc.c
+2502	in ./malloc/malloc.c
+2503	in ./malloc/malloc.c
+2504	in ./malloc/malloc.c
+   0x00007ffff7cb389f <+5279>:	jmp    0x7ffff7cb3515 <_int_malloc+4373>
+
+2477	in ./malloc/malloc.c
+   0x00007ffff7cb38a4 <+5284>:	mov    %r13,%rdi
+   0x00007ffff7cb38a7 <+5287>:	mov    %r11,-0x68(%rbp)
+   0x00007ffff7cb38ab <+5291>:	mov    %r10,-0x60(%rbp)
+   0x00007ffff7cb38af <+5295>:	call   0x7ffff7cb1bb0 <__glibc_morecore>
+
+2478	in ./malloc/malloc.c
+   0x00007ffff7cb38b4 <+5300>:	mov    -0x60(%rbp),%r10
+   0x00007ffff7cb38b8 <+5304>:	mov    -0x68(%rbp),%r11
+   0x00007ffff7cb38bc <+5308>:	test   %rax,%rax
+
+2477	in ./malloc/malloc.c
+   0x00007ffff7cb38bf <+5311>:	mov    %rax,%r12
+
+2478	in ./malloc/malloc.c
+   0x00007ffff7cb38c2 <+5314>:	je     0x7ffff7cb3907 <_int_malloc+5383>
+
+1912	in ./malloc/malloc.c
+   0x00007ffff7cb38c4 <+5316>:	cmpl   $0x1,0x15e8dd(%rip)        # 0x7ffff7e121a8 <mp_+40>
+   0x00007ffff7cb38cb <+5323>:	jne    0x7ffff7cb3907 <_int_malloc+5383>
+   0x00007ffff7cb38cd <+5325>:	cmp    0x15e8dc(%rip),%r13        # 0x7ffff7e121b0 <mp_+48>
+   0x00007ffff7cb38d4 <+5332>:	jb     0x7ffff7cb3907 <_int_malloc+5383>
+
+1913	in ./malloc/malloc.c
+1914	in ./malloc/malloc.c
+1915	in ./malloc/malloc.c
+1916	in ./malloc/malloc.c
+1917	in ./malloc/malloc.c
+   0x00007ffff7cb38d6 <+5334>:	mov    -0x40(%rbp),%rax
+   0x00007ffff7cb38da <+5338>:	mov    %r13,%rsi
+   0x00007ffff7cb38dd <+5341>:	mov    %r12,%rdi
+   0x00007ffff7cb38e0 <+5344>:	sub    $0x1,%rax
+   0x00007ffff7cb38e4 <+5348>:	test   %rax,%r12
+   0x00007ffff7cb38e7 <+5351>:	jne    0x7ffff7cb3c03 <_int_malloc+6147>
+
+1922	in ./malloc/malloc.c
+1923	in ./malloc/malloc.c
+1924	in ./malloc/malloc.c
+   0x00007ffff7cb38ed <+5357>:	mov    $0xe,%edx
+   0x00007ffff7cb38f2 <+5362>:	mov    %r11,-0x68(%rbp)
+   0x00007ffff7cb38f6 <+5366>:	mov    %r10,-0x60(%rbp)
+   0x00007ffff7cb38fa <+5370>:	call   0x7ffff7d32d50 <__GI_madvise>
+   0x00007ffff7cb38ff <+5375>:	mov    -0x68(%rbp),%r11
+   0x00007ffff7cb3903 <+5379>:	mov    -0x60(%rbp),%r10
+
+2479	in ./malloc/malloc.c
+2480	in ./malloc/malloc.c
+   0x00007ffff7cb3907 <+5383>:	nop
+
+2481	in ./malloc/malloc.c
+2482	in ./malloc/malloc.c
+2483	in ./malloc/malloc.c
+   0x00007ffff7cb3908 <+5384>:	test   %r12,%r12
+   0x00007ffff7cb390b <+5387>:	je     0x7ffff7cb344b <_int_malloc+4171>
+
+2520	in ./malloc/malloc.c
+2521	in ./malloc/malloc.c
+   0x00007ffff7cb3911 <+5393>:	mov    0x15e8d0(%rip),%r8        # 0x7ffff7e121e8 <mp_+104>
+   0x00007ffff7cb3918 <+5400>:	test   %r8,%r8
+   0x00007ffff7cb391b <+5403>:	je     0x7ffff7cb3bd2 <_int_malloc+6098>
+   0x00007ffff7cb3921 <+5409>:	xor    %r8d,%r8d
+
+2523	in ./malloc/malloc.c
+   0x00007ffff7cb3924 <+5412>:	mov    0x15f9c5(%rip),%rdx        # 0x7ffff7e132f0 <main_arena+2096>
+   0x00007ffff7cb392b <+5419>:	add    %r13,%rdx
+
+2524	in ./malloc/malloc.c
+2525	in ./malloc/malloc.c
+2526	in ./malloc/malloc.c
+2527	in ./malloc/malloc.c
+2528	in ./malloc/malloc.c
+2529	in ./malloc/malloc.c
+   0x00007ffff7cb392e <+5422>:	test   %r8,%r8
+
+2523	in ./malloc/malloc.c
+   0x00007ffff7cb3931 <+5425>:	mov    %rdx,0x15f9b8(%rip)        # 0x7ffff7e132f0 <main_arena+2096>
+
+2524	in ./malloc/malloc.c
+2525	in ./malloc/malloc.c
+2526	in ./malloc/malloc.c
+2527	in ./malloc/malloc.c
+2528	in ./malloc/malloc.c
+2529	in ./malloc/malloc.c
+   0x00007ffff7cb3938 <+5432>:	sete   %sil
+   0x00007ffff7cb393c <+5436>:	cmp    %r12,-0x58(%rbp)
+   0x00007ffff7cb3940 <+5440>:	jne    0x7ffff7cb3c87 <_int_malloc+6279>
+   0x00007ffff7cb3946 <+5446>:	test   %sil,%sil
+   0x00007ffff7cb3949 <+5449>:	je     0x7ffff7cb3c87 <_int_malloc+6279>
+
+2530	in ./malloc/malloc.c
+   0x00007ffff7cb394f <+5455>:	mov    -0x48(%rbp),%rax
+   0x00007ffff7cb3953 <+5459>:	mov    -0x38(%rbp),%rcx
+   0x00007ffff7cb3957 <+5463>:	add    %r13,%rax
+   0x00007ffff7cb395a <+5466>:	or     $0x1,%rax
+   0x00007ffff7cb395e <+5470>:	mov    %rax,0x8(%rcx)
+   0x00007ffff7cb3962 <+5474>:	jmp    0x7ffff7cb32a7 <_int_malloc+3751>
+
+./malloc/arena.c:
+   0x00007ffff7cb3967 <+5479>:	mov    %r13,%rsi
+
+484	in ./malloc/arena.c
+   0x00007ffff7cb396a <+5482>:	lea    (%r12,%rax,1),%rdi
+   0x00007ffff7cb396e <+5486>:	mov    $0x3,%edx
+   0x00007ffff7cb3973 <+5491>:	mov    %r11,-0x68(%rbp)
+
+485	in ./malloc/arena.c
+   0x00007ffff7cb3977 <+5495>:	sub    %rax,%rsi
+   0x00007ffff7cb397a <+5498>:	mov    %r10,-0x60(%rbp)
+
+484	in ./malloc/arena.c
+   0x00007ffff7cb397e <+5502>:	call   0x7ffff7d338a0 <__GI_mprotect>
+   0x00007ffff7cb3983 <+5507>:	mov    -0x60(%rbp),%r10
+   0x00007ffff7cb3987 <+5511>:	mov    -0x68(%rbp),%r11
+   0x00007ffff7cb398b <+5515>:	test   %eax,%eax
+   0x00007ffff7cb398d <+5517>:	jne    0x7ffff7cb334c <_int_malloc+3916>
+
+486	in ./malloc/arena.c
+487	in ./malloc/arena.c
+488	in ./malloc/arena.c
+489	in ./malloc/arena.c
+   0x00007ffff7cb3993 <+5523>:	mov    %r13,0x18(%r12)
+   0x00007ffff7cb3998 <+5528>:	jmp    0x7ffff7cb3226 <_int_malloc+3622>
+
+./malloc/malloc.c:
+   0x00007ffff7cb399d <+5533>:	lea    0x12df14(%rip),%rdi        # 0x7ffff7de18b8
+   0x00007ffff7cb39a4 <+5540>:	call   0x7ffff7cb0890 <malloc_printerr>
+
+4061	in ./malloc/malloc.c
+   0x00007ffff7cb39a9 <+5545>:	lea    0x12e4f8(%rip),%rcx        # 0x7ffff7de1ea8 <__PRETTY_FUNCTION__.11>
+   0x00007ffff7cb39b0 <+5552>:	mov    $0xfdd,%edx
+   0x00007ffff7cb39b5 <+5557>:	lea    0x128f3c(%rip),%rsi        # 0x7ffff7ddc8f8
+   0x00007ffff7cb39bc <+5564>:	lea    0x12904d(%rip),%rdi        # 0x7ffff7ddca10
+   0x00007ffff7cb39c3 <+5571>:	call   0x7ffff7c3be60 <__libc_assert_fail>
+
+2415	in ./malloc/malloc.c
+   0x00007ffff7cb39c8 <+5576>:	mov    -0x38(%rbp),%rsi
+
+2418	in ./malloc/malloc.c
+   0x00007ffff7cb39cc <+5580>:	mov    %rdx,%rax
+
+2419	in ./malloc/malloc.c
+   0x00007ffff7cb39cf <+5583>:	mov    %r11,%rdi
+   0x00007ffff7cb39d2 <+5586>:	mov    $0x1,%ecx
+
+2415	in ./malloc/malloc.c
+   0x00007ffff7cb39d7 <+5591>:	movdqa 0x132181(%rip),%xmm0        # 0x7ffff7de5b60
+
+2418	in ./malloc/malloc.c
+   0x00007ffff7cb39df <+5599>:	or     $0x5,%rax
+   0x00007ffff7cb39e3 <+5603>:	mov    %r10,-0x40(%rbp)
+
+2417	in ./malloc/malloc.c
+   0x00007ffff7cb39e7 <+5607>:	mov    %r11,-0x38(%rbp)
+
+2415	in ./malloc/malloc.c
+   0x00007ffff7cb39eb <+5611>:	movups %xmm0,0x8(%rsi,%rdx,1)
+
+2418	in ./malloc/malloc.c
+   0x00007ffff7cb39f0 <+5616>:	mov    %rax,0x8(%rsi)
+
+2419	in ./malloc/malloc.c
+   0x00007ffff7cb39f4 <+5620>:	call   0x7ffff7cb2300 <_int_free_chunk>
+   0x00007ffff7cb39f9 <+5625>:	mov    -0x38(%rbp),%r11
+   0x00007ffff7cb39fd <+5629>:	mov    -0x40(%rbp),%r10
+   0x00007ffff7cb3a01 <+5633>:	jmp    0x7ffff7cb32a7 <_int_malloc+3751>
+
+2425	in ./malloc/malloc.c
+2426	in ./malloc/malloc.c
+2427	in ./malloc/malloc.c
+   0x00007ffff7cb3a06 <+5638>:	test   %r14b,%r14b
+   0x00007ffff7cb3a09 <+5641>:	jne    0x7ffff7cb32a7 <_int_malloc+3751>
+
+2428	in ./malloc/malloc.c
+2429	in ./malloc/malloc.c
+2430	in ./malloc/malloc.c
+2431	in ./malloc/malloc.c
+2432	in ./malloc/malloc.c
+   0x00007ffff7cb3a0f <+5647>:	mov    -0x40(%rbp),%rsi
+   0x00007ffff7cb3a13 <+5651>:	xor    %edx,%edx
+   0x00007ffff7cb3a15 <+5653>:	mov    %r10,%rdi
+   0x00007ffff7cb3a18 <+5656>:	mov    %r11,-0x48(%rbp)
+   0x00007ffff7cb3a1c <+5660>:	mov    %r10,-0x38(%rbp)
+   0x00007ffff7cb3a20 <+5664>:	call   0x7ffff7cb1040 <sysmalloc_mmap>
+   0x00007ffff7cb3a25 <+5669>:	mov    %rax,%r12
+
+2433	in ./malloc/malloc.c
+   0x00007ffff7cb3a28 <+5672>:	cmp    $0xffffffffffffffff,%rax
+   0x00007ffff7cb3a2c <+5676>:	jne    0x7ffff7cb30a4 <_int_malloc+3236>
+   0x00007ffff7cb3a32 <+5682>:	mov    -0x38(%rbp),%r10
+   0x00007ffff7cb3a36 <+5686>:	mov    -0x48(%rbp),%r11
+   0x00007ffff7cb3a3a <+5690>:	jmp    0x7ffff7cb32a7 <_int_malloc+3751>
+
+4266	in ./malloc/malloc.c
+   0x00007ffff7cb3a3f <+5695>:	lea    0x12deca(%rip),%rdi        # 0x7ffff7de1910
+   0x00007ffff7cb3a46 <+5702>:	call   0x7ffff7cb0890 <malloc_printerr>
+
+2344	in ./malloc/malloc.c
+   0x00007ffff7cb3a4b <+5707>:	mov    0x15e76f(%rip),%edx        # 0x7ffff7e121c0 <mp_+64>
+   0x00007ffff7cb3a51 <+5713>:	mov    %r10,%rdi
+   0x00007ffff7cb3a54 <+5716>:	mov    %r11,-0x58(%rbp)
+   0x00007ffff7cb3a58 <+5720>:	mov    %r9,-0x48(%rbp)
+   0x00007ffff7cb3a5c <+5724>:	mov    %r10,-0x38(%rbp)
+   0x00007ffff7cb3a60 <+5728>:	call   0x7ffff7cb1040 <sysmalloc_mmap>
+   0x00007ffff7cb3a65 <+5733>:	mov    %rax,%r12
+
+2345	in ./malloc/malloc.c
+   0x00007ffff7cb3a68 <+5736>:	cmp    $0xffffffffffffffff,%rax
+   0x00007ffff7cb3a6c <+5740>:	jne    0x7ffff7cb30a4 <_int_malloc+3236>
+   0x00007ffff7cb3a72 <+5746>:	mov    -0x38(%rbp),%r10
+   0x00007ffff7cb3a76 <+5750>:	mov    -0x48(%rbp),%r9
+   0x00007ffff7cb3a7a <+5754>:	mov    -0x58(%rbp),%r11
+   0x00007ffff7cb3a7e <+5758>:	jmp    0x7ffff7cb307d <_int_malloc+3197>
+
+./malloc/arena.c:
+   0x00007ffff7cb3a83 <+5763>:	xor    %ecx,%ecx
+   0x00007ffff7cb3a85 <+5765>:	jmp    0x7ffff7cb370d <_int_malloc+4877>
+
+./malloc/malloc.c:
+   0x00007ffff7cb3a8a <+5770>:	lea    0x12e417(%rip),%rcx        # 0x7ffff7de1ea8 <__PRETTY_FUNCTION__.11>
+   0x00007ffff7cb3a91 <+5777>:	mov    $0x1091,%edx
+   0x00007ffff7cb3a96 <+5782>:	lea    0x128e5b(%rip),%rsi        # 0x7ffff7ddc8f8
+   0x00007ffff7cb3a9d <+5789>:	lea    0x12de3c(%rip),%rdi        # 0x7ffff7de18e0
+   0x00007ffff7cb3aa4 <+5796>:	call   0x7ffff7c3be60 <__libc_assert_fail>
+
+4041	in ./malloc/malloc.c
+   0x00007ffff7cb3aa9 <+5801>:	lea    0x12e3f8(%rip),%rcx        # 0x7ffff7de1ea8 <__PRETTY_FUNCTION__.11>
+   0x00007ffff7cb3ab0 <+5808>:	mov    $0xfc9,%edx
+   0x00007ffff7cb3ab5 <+5813>:	lea    0x128e3c(%rip),%rsi        # 0x7ffff7ddc8f8
+   0x00007ffff7cb3abc <+5820>:	lea    0x128f32(%rip),%rdi        # 0x7ffff7ddc9f5
+   0x00007ffff7cb3ac3 <+5827>:	call   0x7ffff7c3be60 <__libc_assert_fail>
+
+4054	in ./malloc/malloc.c
+4055	in ./malloc/malloc.c
+4056	in ./malloc/malloc.c
+4057	in ./malloc/malloc.c
+   0x00007ffff7cb3ac8 <+5832>:	lea    0x12e3d9(%rip),%rcx        # 0x7ffff7de1ea8 <__PRETTY_FUNCTION__.11>
+   0x00007ffff7cb3acf <+5839>:	mov    $0xfd9,%edx
+   0x00007ffff7cb3ad4 <+5844>:	lea    0x128e1d(%rip),%rsi        # 0x7ffff7ddc8f8
+   0x00007ffff7cb3adb <+5851>:	lea    0x128f2e(%rip),%rdi        # 0x7ffff7ddca10
+   0x00007ffff7cb3ae2 <+5858>:	call   0x7ffff7c3be60 <__libc_assert_fail>
+
+2377	in ./malloc/malloc.c
+   0x00007ffff7cb3ae7 <+5863>:	lea    0x12e3aa(%rip),%rcx        # 0x7ffff7de1e98 <__PRETTY_FUNCTION__.12>
+   0x00007ffff7cb3aee <+5870>:	mov    $0x949,%edx
+   0x00007ffff7cb3af3 <+5875>:	lea    0x128dfe(%rip),%rsi        # 0x7ffff7ddc8f8
+   0x00007ffff7cb3afa <+5882>:	lea    0x12dedf(%rip),%rdi        # 0x7ffff7de19e0
+   0x00007ffff7cb3b01 <+5889>:	call   0x7ffff7c3be60 <__libc_assert_fail>
+
+2371	in ./malloc/malloc.c
+   0x00007ffff7cb3b06 <+5894>:	lea    0x12e38b(%rip),%rcx        # 0x7ffff7de1e98 <__PRETTY_FUNCTION__.12>
+   0x00007ffff7cb3b0d <+5901>:	mov    $0x943,%edx
+   0x00007ffff7cb3b12 <+5906>:	lea    0x128ddf(%rip),%rsi        # 0x7ffff7ddc8f8
+   0x00007ffff7cb3b19 <+5913>:	lea    0x12de18(%rip),%rdi        # 0x7ffff7de1938
+   0x00007ffff7cb3b20 <+5920>:	call   0x7ffff7c3be60 <__libc_assert_fail>
+
+2611	in ./malloc/malloc.c
+2612	in ./malloc/malloc.c
+2613	in ./malloc/malloc.c
+   0x00007ffff7cb3b25 <+5925>:	xor    %edi,%edi
+   0x00007ffff7cb3b27 <+5927>:	mov    %r14,%r12
+   0x00007ffff7cb3b2a <+5930>:	call   0x7ffff7cb1bb0 <__glibc_morecore>
+   0x00007ffff7cb3b2f <+5935>:	mov    -0x40(%rbp),%r10
+   0x00007ffff7cb3b33 <+5939>:	mov    -0x58(%rbp),%r11
+   0x00007ffff7cb3b37 <+5943>:	mov    %rax,%r8
+
+2646	in ./malloc/malloc.c
+2647	in ./malloc/malloc.c
+2648	in ./malloc/malloc.c
+2649	in ./malloc/malloc.c
+2650	in ./malloc/malloc.c
+   0x00007ffff7cb3b3a <+5946>:	test   %r8,%r8
+   0x00007ffff7cb3b3d <+5949>:	je     0x7ffff7cb32a7 <_int_malloc+3751>
+   0x00007ffff7cb3b43 <+5955>:	xor    %r13d,%r13d
+   0x00007ffff7cb3b46 <+5958>:	jmp    0x7ffff7cb3666 <_int_malloc+4710>
+
+2597	in ./malloc/malloc.c
+   0x00007ffff7cb3b4b <+5963>:	lea    0x12e346(%rip),%rcx        # 0x7ffff7de1e98 <__PRETTY_FUNCTION__.12>
+   0x00007ffff7cb3b52 <+5970>:	mov    $0xa25,%edx
+   0x00007ffff7cb3b57 <+5975>:	lea    0x128d9a(%rip),%rsi        # 0x7ffff7ddc8f8
+   0x00007ffff7cb3b5e <+5982>:	lea    0x128ee8(%rip),%rdi        # 0x7ffff7ddca4d
+   0x00007ffff7cb3b65 <+5989>:	call   0x7ffff7c3be60 <__libc_assert_fail>
+
+2614	in ./malloc/malloc.c
+2615	in ./malloc/malloc.c
+2616	in ./malloc/malloc.c
+2617	in ./malloc/malloc.c
+2618	in ./malloc/malloc.c
+2619	in ./malloc/malloc.c
+2620	in ./malloc/malloc.c
+2621	in ./malloc/malloc.c
+2622	in ./malloc/malloc.c
+2623	in ./malloc/malloc.c
+2624	in ./malloc/malloc.c
+   0x00007ffff7cb3b6a <+5994>:	test   $0xf,%r12b
+   0x00007ffff7cb3b6e <+5998>:	jne    0x7ffff7cb3bb3 <_int_malloc+6067>
+
+2625	in ./malloc/malloc.c
+2626	in ./malloc/malloc.c
+2627	in ./malloc/malloc.c
+2628	in ./malloc/malloc.c
+2629	in ./malloc/malloc.c
+2630	in ./malloc/malloc.c
+2631	in ./malloc/malloc.c
+2632	in ./malloc/malloc.c
+2633	in ./malloc/malloc.c
+2634	in ./malloc/malloc.c
+2635	in ./malloc/malloc.c
+2636	in ./malloc/malloc.c
+2637	in ./malloc/malloc.c
+2638	in ./malloc/malloc.c
+2639	in ./malloc/malloc.c
+2640	in ./malloc/malloc.c
+2641	in ./malloc/malloc.c
+2642	in ./malloc/malloc.c
+2643	in ./malloc/malloc.c
+   0x00007ffff7cb3b70 <+6000>:	xor    %r13d,%r13d
+   0x00007ffff7cb3b73 <+6003>:	test   %sil,%sil
+   0x00007ffff7cb3b76 <+6006>:	je     0x7ffff7cb3666 <_int_malloc+4710>
+
+2644	in ./malloc/malloc.c
+2645	in ./malloc/malloc.c
+   0x00007ffff7cb3b7c <+6012>:	xor    %edi,%edi
+   0x00007ffff7cb3b7e <+6014>:	mov    %r11,-0x58(%rbp)
+   0x00007ffff7cb3b82 <+6018>:	mov    %r10,-0x40(%rbp)
+   0x00007ffff7cb3b86 <+6022>:	call   0x7ffff7cb1bb0 <__glibc_morecore>
+   0x00007ffff7cb3b8b <+6027>:	mov    -0x58(%rbp),%r11
+   0x00007ffff7cb3b8f <+6031>:	mov    -0x40(%rbp),%r10
+   0x00007ffff7cb3b93 <+6035>:	mov    %rax,%r8
+   0x00007ffff7cb3b96 <+6038>:	jmp    0x7ffff7cb3b3a <_int_malloc+5946>
+
+1919	in ./malloc/malloc.c
+   0x00007ffff7cb3b98 <+6040>:	add    %r8,%rdx
+   0x00007ffff7cb3b9b <+6043>:	neg    %rax
+
+1920	in ./malloc/malloc.c
+   0x00007ffff7cb3b9e <+6046>:	lea    (%r12,%r8,1),%rsi
+
+1919	in ./malloc/malloc.c
+   0x00007ffff7cb3ba2 <+6050>:	and    %rax,%rdx
+
+1920	in ./malloc/malloc.c
+   0x00007ffff7cb3ba5 <+6053>:	sub    %rdx,%rsi
+
+1919	in ./malloc/malloc.c
+   0x00007ffff7cb3ba8 <+6056>:	mov    %rdx,%rdi
+
+1920	in ./malloc/malloc.c
+   0x00007ffff7cb3bab <+6059>:	mov    %rsi,%r12
+
+1921	in ./malloc/malloc.c
+   0x00007ffff7cb3bae <+6062>:	jmp    0x7ffff7cb363e <_int_malloc+4670>
+
+2614	in ./malloc/malloc.c
+2615	in ./malloc/malloc.c
+2616	in ./malloc/malloc.c
+2617	in ./malloc/malloc.c
+2618	in ./malloc/malloc.c
+2619	in ./malloc/malloc.c
+2620	in ./malloc/malloc.c
+2621	in ./malloc/malloc.c
+2622	in ./malloc/malloc.c
+2623	in ./malloc/malloc.c
+2624	in ./malloc/malloc.c
+   0x00007ffff7cb3bb3 <+6067>:	lea    0x12e2de(%rip),%rcx        # 0x7ffff7de1e98 <__PRETTY_FUNCTION__.12>
+   0x00007ffff7cb3bba <+6074>:	mov    $0xa40,%edx
+   0x00007ffff7cb3bbf <+6079>:	lea    0x128d32(%rip),%rsi        # 0x7ffff7ddc8f8
+   0x00007ffff7cb3bc6 <+6086>:	lea    0x12de7b(%rip),%rdi        # 0x7ffff7de1a48
+   0x00007ffff7cb3bcd <+6093>:	call   0x7ffff7c3be60 <__libc_assert_fail>
+
+2522	in ./malloc/malloc.c
+   0x00007ffff7cb3bd2 <+6098>:	mov    %r12,0x15e60f(%rip)        # 0x7ffff7e121e8 <mp_+104>
+   0x00007ffff7cb3bd9 <+6105>:	jmp    0x7ffff7cb3924 <_int_malloc+5412>
+
+2533	in ./malloc/malloc.c
+2534	in ./malloc/malloc.c
+   0x00007ffff7cb3bde <+6110>:	lea    0x12de3b(%rip),%rdi        # 0x7ffff7de1a20
+   0x00007ffff7cb3be5 <+6117>:	call   0x7ffff7cb0890 <malloc_printerr>
+
+1919	in ./malloc/malloc.c
+   0x00007ffff7cb3bea <+6122>:	add    %r12,%rdx
+   0x00007ffff7cb3bed <+6125>:	neg    %rax
+
+1920	in ./malloc/malloc.c
+   0x00007ffff7cb3bf0 <+6128>:	lea    0x0(%r13,%r12,1),%rsi
+
+1919	in ./malloc/malloc.c
+   0x00007ffff7cb3bf5 <+6133>:	and    %rax,%rdx
+   0x00007ffff7cb3bf8 <+6136>:	mov    %rdx,%rdi
+
+1920	in ./malloc/malloc.c
+   0x00007ffff7cb3bfb <+6139>:	sub    %rdx,%rsi
+
+1921	in ./malloc/malloc.c
+   0x00007ffff7cb3bfe <+6142>:	jmp    0x7ffff7cb3885 <_int_malloc+5253>
+
+1919	in ./malloc/malloc.c
+   0x00007ffff7cb3c03 <+6147>:	mov    -0x40(%rbp),%rdi
+   0x00007ffff7cb3c07 <+6151>:	add    %r12,%rax
+
+1920	in ./malloc/malloc.c
+   0x00007ffff7cb3c0a <+6154>:	lea    (%r12,%r13,1),%rsi
+
+1919	in ./malloc/malloc.c
+   0x00007ffff7cb3c0e <+6158>:	neg    %rdi
+   0x00007ffff7cb3c11 <+6161>:	and    %rax,%rdi
+
+1920	in ./malloc/malloc.c
+   0x00007ffff7cb3c14 <+6164>:	sub    %rdi,%rsi
+
+1921	in ./malloc/malloc.c
+   0x00007ffff7cb3c17 <+6167>:	jmp    0x7ffff7cb38ed <_int_malloc+5357>
+
+2461	in ./malloc/malloc.c
+2462	in ./malloc/malloc.c
+   0x00007ffff7cb3c1c <+6172>:	xor    %edi,%edi
+   0x00007ffff7cb3c1e <+6174>:	mov    %r11,-0x68(%rbp)
+   0x00007ffff7cb3c22 <+6178>:	mov    %r10,-0x60(%rbp)
+   0x00007ffff7cb3c26 <+6182>:	call   0x7ffff7cb1bb0 <__glibc_morecore>
+   0x00007ffff7cb3c2b <+6187>:	mov    -0x60(%rbp),%r10
+   0x00007ffff7cb3c2f <+6191>:	mov    -0x68(%rbp),%r11
+   0x00007ffff7cb3c33 <+6195>:	mov    %rax,%rdx
+
+2463	in ./malloc/malloc.c
+   0x00007ffff7cb3c36 <+6198>:	mov    0x15e573(%rip),%rax        # 0x7ffff7e121b0 <mp_+48>
+
+2464	in ./malloc/malloc.c
+   0x00007ffff7cb3c3d <+6205>:	lea    -0x1(%r12,%rax,1),%r13
+   0x00007ffff7cb3c42 <+6210>:	neg    %rax
+   0x00007ffff7cb3c45 <+6213>:	add    %rdx,%r13
+   0x00007ffff7cb3c48 <+6216>:	and    %rax,%r13
+   0x00007ffff7cb3c4b <+6219>:	sub    %rdx,%r13
+   0x00007ffff7cb3c4e <+6222>:	jmp    0x7ffff7cb3442 <_int_malloc+4162>
+
+1919	in ./malloc/malloc.c
+   0x00007ffff7cb3c53 <+6227>:	add    %r12,%rdx
+   0x00007ffff7cb3c56 <+6230>:	neg    %rax
+
+1920	in ./malloc/malloc.c
+   0x00007ffff7cb3c59 <+6233>:	lea    0x0(%r13,%r12,1),%rsi
+
+1919	in ./malloc/malloc.c
+   0x00007ffff7cb3c5e <+6238>:	and    %rax,%rdx
+   0x00007ffff7cb3c61 <+6241>:	mov    %rdx,%rdi
+
+1920	in ./malloc/malloc.c
+   0x00007ffff7cb3c64 <+6244>:	sub    %rdx,%rsi
+
+1921	in ./malloc/malloc.c
+   0x00007ffff7cb3c67 <+6247>:	jmp    0x7ffff7cb34fb <_int_malloc+4347>
+
+1919	in ./malloc/malloc.c
+   0x00007ffff7cb3c6c <+6252>:	mov    -0x40(%rbp),%rdi
+   0x00007ffff7cb3c70 <+6256>:	add    %r12,%rax
+
+1920	in ./malloc/malloc.c
+   0x00007ffff7cb3c73 <+6259>:	mov    %r12,%rsi
+
+1919	in ./malloc/malloc.c
+   0x00007ffff7cb3c76 <+6262>:	neg    %rdi
+   0x00007ffff7cb3c79 <+6265>:	and    %rax,%rdi
+
+1920	in ./malloc/malloc.c
+   0x00007ffff7cb3c7c <+6268>:	sub    %rdi,%rsi
+   0x00007ffff7cb3c7f <+6271>:	add    %r13,%rsi
+
+1921	in ./malloc/malloc.c
+   0x00007ffff7cb3c82 <+6274>:	jmp    0x7ffff7cb3259 <_int_malloc+3673>
+   0x00007ffff7cb3c87 <+6279>:	mov    0x15ee37(%rip),%eax        # 0x7ffff7e12ac4 <main_arena+4>
+   0x00007ffff7cb3c8d <+6285>:	jmp    0x7ffff7cb3575 <_int_malloc+4469>
+End of assembler dump.
