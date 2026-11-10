@@ -23,6 +23,7 @@ if the mail server has MFA enabled. Sessions are in-memory (per-process).
 
 import html
 import imaplib
+import json
 import os
 import re
 import smtplib
@@ -35,6 +36,7 @@ from email.header import decode_header
 from email.utils import parseaddr
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse, quote
+import urllib.parse
 
 # ---------------------------------------------------------------- config
 
@@ -54,43 +56,14 @@ SESSIONS = {}
 LOCK = threading.Lock()
 
 # ---------------------------------------------------------------- session
+# Store sesi dipindah ke sessions.py supaya dipakai bareng api.py (SPA).
 
-
-def _secure_flag(headers):
-    """Set-Cookie 'Secure' hanya kalau request datang lewat TLS terdepan (Caddy)."""
-    proto = (headers.get("X-Forwarded-Proto") or "").split(",")[0].strip().lower()
-    return "; Secure" if proto == "https" else ""
-
-
-def new_session(user, password):
-    tok = uuid.uuid4().hex + uuid.uuid4().hex
-    with LOCK:
-        SESSIONS[tok] = {
-            "user": user,
-            "password": password,
-            "ts": time.time(),
-            "csrf": uuid.uuid4().hex,
-        }
-    return tok
-
-
-def get_session(tok):
-    if not tok:
-        return None
-    with LOCK:
-        s = SESSIONS.get(tok)
-        if not s:
-            return None
-        if time.time() - s["ts"] > SESSION_TTL:
-            SESSIONS.pop(tok, None)
-            return None
-        s["ts"] = time.time()
-        return s
-
-
-def drop_session(tok):
-    with LOCK:
-        SESSIONS.pop(tok, None)
+from sessions import (  # noqa: E402
+    new_session,
+    get_session,
+    drop_session,
+    secure_flag as _secure_flag,
+)
 
 
 # ---------------------------------------------------------------- mail
@@ -415,10 +388,67 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header(k, v)
         self.end_headers()
 
+    def _raw_body(self):
+        if getattr(self, "_body_cache", None) is None:
+            length = int(self.headers.get("Content-Length") or 0)
+            self._body_cache = self.rfile.read(length) if length else b""
+        return self._body_cache
+
     def _form(self):
-        length = int(self.headers.get("Content-Length") or 0)
-        body = self.rfile.read(length).decode("utf-8", "replace")
+        body = self._raw_body().decode("utf-8", "replace")
         return {k: v[0] for k, v in parse_qs(body).items()}
+
+    def _json(self, payload, status=200, extra_headers=None):
+        data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        for k, v in (extra_headers or []):
+            self.send_header(k, v)
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _bytes(self, data, ctype, filename=None):
+        self.send_response(200)
+        self.send_header("Content-Type", ctype or "application/octet-stream")
+        self.send_header("Content-Length", str(len(data)))
+        if filename:
+            safe = urllib.parse.quote(filename)
+            self.send_header(
+                "Content-Disposition", "attachment; filename*=UTF-8''%s" % safe
+            )
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _static(self, relpath):
+        base = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ui")
+        target = os.path.realpath(os.path.join(base, relpath.lstrip("/")))
+        if not target.startswith(os.path.realpath(base)) or not os.path.isfile(target):
+            self._json({"message": "not found"}, 404)
+            return
+        ctypes = {
+            ".html": "text/html; charset=utf-8",
+            ".js": "text/javascript; charset=utf-8",
+            ".mjs": "text/javascript; charset=utf-8",
+            ".css": "text/css; charset=utf-8",
+            ".json": "application/json; charset=utf-8",
+            ".png": "image/png",
+            ".svg": "image/svg+xml",
+            ".woff": "font/woff",
+            ".woff2": "font/woff2",
+        }
+        ext = os.path.splitext(target)[1].lower()
+        with open(target, "rb") as f:
+            data = f.read()
+        cache = "public, max-age=86400" if ext == ".mjs" else "no-cache"
+        self.send_response(200)
+        self.send_header("Content-Type", ctypes.get(ext, "application/octet-stream"))
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", cache)
+        self.end_headers()
+        self.wfile.write(data)
 
     def log_message(self, format, *args):
         pass
@@ -430,11 +460,25 @@ class Handler(BaseHTTPRequestHandler):
         path = u.path.rstrip("/") or "/"
         sess = self._sess()
 
+        if path.startswith("/api"):
+            import api as _api
+
+            if _api.handle(self, "GET"):
+                return
+
+        if path in ("/", "/app"):
+            self._static("index.html")
+            return
+
+        if path.startswith("/ui/"):
+            self._static(path[len("/ui/") :])
+            return
+
         if path == "/healthz":
             self._send("<html><body>ok</body></html>")
             return
 
-        if path in ("/", "/login"):
+        if path == "/login":
             if sess:
                 self._redirect("/inbox")
                 return
@@ -535,6 +579,13 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         u = urlparse(self.path)
         path = u.path.rstrip("/") or "/"
+
+        if path.startswith("/api"):
+            import api as _api
+
+            if _api.handle(self, "POST"):
+                return
+
         f = self._form()
 
         if path == "/login":

@@ -1,0 +1,15 @@
+{
+  "name": "Cloud Mail",
+  "short_name": "Mail",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#F1F1F1",
+  "theme_color": "#F1F1F1",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%231890ff'/%3E%3C/svg%3E",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}
