@@ -56,6 +56,12 @@ LOCK = threading.Lock()
 # ---------------------------------------------------------------- session
 
 
+def _secure_flag(headers):
+    """Set-Cookie 'Secure' hanya kalau request datang lewat TLS terdepan (Caddy)."""
+    proto = (headers.get("X-Forwarded-Proto") or "").split(",")[0].strip().lower()
+    return "; Secure" if proto == "https" else ""
+
+
 def new_session(user, password):
     tok = uuid.uuid4().hex + uuid.uuid4().hex
     with LOCK:
@@ -541,7 +547,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(login_page("Login gagal. Cek email/password."))
                 return
             tok = new_session(user, pw)
-            self._redirect("/inbox", [("Set-Cookie", "webmail_session=%s; HttpOnly; SameSite=Lax; Path=/" % tok)])
+            self._redirect("/inbox", [("Set-Cookie", "webmail_session=%s; HttpOnly; SameSite=Lax%s; Path=/" % (tok, _secure_flag(self.headers)))])
             return
 
         sess = self._sess()

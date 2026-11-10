@@ -84,9 +84,15 @@ systemctl daemon-reload && systemctl restart webmail-farielozora
 - Backend `local` = pengiriman **hanya antar-mailbox lokal** di VPS ini. Untuk
   email keluar/masuk internet, perlu MTA (Postfix/Dovecot) + DNS MX + PTR +
   port 25 terbuka di provider.
-- Belum ada TLS. Jangan login lewat internet sebelum domain + Caddy aktif
-  (password lewat HTTP polos bisa di-sniff).
+- TLS aktif: `https://farielozora.biz.id`, `https://www.farielozora.biz.id`,
+  `https://mail.farielozora.biz.id` — sertifikat Let's Encrypt otomatis oleh Caddy
+  (http-01). HTTP :80 di-redirect 308 ke HTTPS. `Secure` pada cookie session
+  dipasang otomatis saat request lewat Caddy (`X-Forwarded-Proto: https`).
+  Login lewat `http://85.9.196.242:8080` masih mungkin secara teknis, tapi
+  jangan — password lewat plaintext.
 - Session disimpan di memory proses → restart service = semua sesi logout.
+- Belum ada rate-limit login. Kalau port/domain terekspos publik, tambahkan
+  throttle per-IP sebelum dipakai luas.
 
 ## Ganti backend ke IMAP/SMTP nyata
 
