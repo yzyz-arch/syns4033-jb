@@ -582,6 +582,25 @@ html.dark { background: #141414; }
 .form-wrapper .btn { width: 100%; height: 42px; }
 .login-error { color: #f56c6c; font-size: 13px; }
 
+.email-group { position: relative; display: flex; align-items: center; gap: 0; }
+.email-group .field { padding-right: 150px; }
+.email-suffix {
+  position: absolute;
+  right: 12px;
+  font-size: 13px;
+  color: var(--secondary-text-color);
+  pointer-events: none;
+  white-space: nowrap;
+}
+.login-switch {
+  text-align: center;
+  font-size: 13px;
+  color: var(--secondary-text-color);
+  margin-top: 2px;
+}
+.login-switch a { color: var(--login-switch-color); text-decoration: none; margin-left: 4px; }
+.login-switch a:hover { text-decoration: underline; }
+
 /* ------------------------------------------------------------- settings */
 
 .settings-page { padding: 24px; max-width: 760px; }

@@ -70,3 +70,39 @@ echo "25) /api/send            : $(api -X POST \
   -d "{\"to\":\"$U\",\"subject\":\"API smoke\",\"body\":\"dari smoke test\"}" "$BASE/api/send" | head -c 140)"
 echo "26) /api/logout          : $(api -X POST -d '{}' "$BASE/api/logout")"
 echo "27) /api/me after logout (expect 401): $(code -b "$JAR2" "$BASE/api/me")"
+
+echo
+echo "== registrasi =="
+echo "28) /api/config          : $(curl -s "$BASE/api/config")"
+NEW="smoke_$(date +%s)"
+echo "29) reg password pendek (expect 400): $(code -X POST -H 'Content-Type: application/json' \
+  -d "{\"email\":\"$NEW\",\"password\":\"123\",\"confirm\":\"123\"}" "$BASE/api/register")"
+echo "30) reg beda domain (expect 400): $(code -X POST -H 'Content-Type: application/json' \
+  -d "{\"email\":\"x@gmal.com\",\"password\":\"rahasia12345\",\"confirm\":\"rahasia12345\"}" "$BASE/api/register")"
+REGJAR=/tmp/wm-reg.jar; rm -f "$REGJAR"
+echo "31) reg baru             : $(curl -s -c "$REGJAR" -X POST -H 'Content-Type: application/json' \
+  -d "{\"email\":\"$NEW\",\"password\":\"rahasia12345\",\"confirm\":\"rahasia12345\"}" \
+  "$BASE/api/register" | head -c 110)"
+echo "32) mailbox baru punya welcome: $(curl -s -b "$REGJAR" "$BASE/api/emails?folder=INBOX&size=1" \
+  | python3 -c 'import sys,json; d=json.load(sys.stdin); print("total",d["total"],"|",(d["list"][0]["subject"] if d["list"] else "-")[:45])')"
+echo "33) reg duplikat (expect 409): $(code -X POST -H 'Content-Type: application/json' \
+  -d "{\"email\":\"$NEW\",\"password\":\"rahasia12345\",\"confirm\":\"rahasia12345\"}" "$BASE/api/register")"
+# bersihkan user uji
+WEBMAIL_USERS=${WEBMAIL_USERS:-/var/lib/webmail-farielozora/users.json} \
+WEBMAIL_MAILDIR=${WEBMAIL_MAILDIR:-/var/lib/webmail-farielozora/mail} \
+python3 - "$NEW@farielozora.biz.id" <<'PY'
+import json, os, shutil, sys
+u = sys.argv[1]
+users_p = os.environ["WEBMAIL_USERS"]
+maildir = os.environ["WEBMAIL_MAILDIR"]
+try:
+    d = json.load(open(users_p))
+    d.pop(u, None)
+    json.dump(d, open(users_p, "w"), indent=2, sort_keys=True)
+    fs = u.replace("/", "_").replace("@", "_at_")
+    shutil.rmtree(os.path.join(maildir, fs), ignore_errors=True)
+    print("34) cleanup user uji    : ok (%s dihapus)" % u)
+except Exception as e:
+    print("34) cleanup user uji    : GAGAL %s" % e)
+PY
+

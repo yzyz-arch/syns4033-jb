@@ -412,20 +412,47 @@ async function bootAfterLogin() {
 
 const LoginView = {
   setup() {
-    const form = reactive({ email: '', password: '' })
+    const form = reactive({ email: '', password: '', confirm: '', name: '' })
     const error = reactive({ v: '' })
     const loading = reactive({ v: false })
+    const mode = reactive({ v: 'login' })
+    const cfg = reactive({ domain: 'farielozora.biz.id', register: false, minPassword: 8, maxPerHour: 5 })
+
+    api('/config')
+      .then((c) => Object.assign(cfg, c))
+      .catch(() => {})
+
+    function switchMode(m) {
+      mode.v = m
+      error.v = ''
+      form.password = ''
+      form.confirm = ''
+    }
 
     async function submit() {
       error.v = ''
-      if (!form.email.trim() || !form.password) {
+      const local = form.email.trim()
+      if (!local || !form.password) {
         error.v = 'Email dan password wajib diisi.'
         return
       }
       loading.v = true
       try {
-        const d = await post('/login', { email: form.email.trim(), password: form.password })
-        store.user = d.user
+        if (mode.v === 'register') {
+          const d = await post('/register', {
+            email: local,
+            password: form.password,
+            confirm: form.confirm,
+            name: form.name,
+          })
+          store.user = d.user
+        } else {
+          const d = await post('/login', {
+            email: local.indexOf('@') > -1 ? local : local + '@' + cfg.domain,
+            password: form.password,
+          })
+          store.user = d.user
+        }
         await bootAfterLogin()
       } catch (e) {
         error.v = e.message
@@ -434,7 +461,7 @@ const LoginView = {
       }
     }
 
-    return { form, error, loading, submit }
+    return { form, error, loading, mode, cfg, submit, switchMode }
   },
   template: `
   <div id="login-box">
@@ -445,15 +472,42 @@ const LoginView = {
     <div class="form-wrapper">
       <div class="container">
         <span class="form-title">Cloud Mail</span>
-        <span class="form-desc">Masuk ke mailbox kamu</span>
-        <input class="field" v-model="form.email" type="text" placeholder="Email"
+        <span class="form-desc">
+          {{ mode.v === 'login' ? 'Masuk ke mailbox kamu' : 'Buat mailbox baru di @' + cfg.domain }}
+        </span>
+
+        <div class="email-group">
+          <input class="field" v-model="form.email" type="text" :placeholder="mode.v === 'login' ? 'Email' : 'Nama mailbox'"
+                 autocomplete="off" @keyup.enter="submit" />
+          <span class="email-suffix">@{{ cfg.domain }}</span>
+        </div>
+
+        <input v-if="mode.v === 'register'" class="field" v-model="form.name"
+               type="text" placeholder="Nama tampilan (opsional)" autocomplete="off" />
+
+        <input class="field" v-model="form.password" type="password"
+               :placeholder="mode.v === 'register' ? 'Password (min ' + cfg.minPassword + ' karakter)' : 'Password'"
                autocomplete="off" @keyup.enter="submit" />
-        <input class="field" v-model="form.password" type="password" placeholder="Password"
-               autocomplete="off" @keyup.enter="submit" />
+
+        <input v-if="mode.v === 'register'" class="field" v-model="form.confirm" type="password"
+               placeholder="Ulangi password" autocomplete="off" @keyup.enter="submit" />
+
         <div class="login-error" v-if="error.v">{{ error.v }}</div>
+
         <button class="btn primary full" :disabled="loading.v" @click="submit">
-          {{ loading.v ? 'Memproses...' : 'Masuk' }}
+          {{ loading.v ? 'Memproses...' : (mode.v === 'login' ? 'Masuk' : 'Daftar') }}
         </button>
+
+        <div class="login-switch" v-if="cfg.register">
+          <template v-if="mode.v === 'login'">
+            Belum punya akun?
+            <a href="#" @click.prevent="switchMode('register')">Daftar sekarang</a>
+          </template>
+          <template v-else>
+            Sudah punya akun?
+            <a href="#" @click.prevent="switchMode('login')">Masuk</a>
+          </template>
+        </div>
       </div>
     </div>
   </div>

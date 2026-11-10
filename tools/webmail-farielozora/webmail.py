@@ -389,10 +389,12 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def _raw_body(self):
-        if getattr(self, "_body_cache", None) is None:
+        cached = getattr(self, "_body_cache", None)
+        if cached is None:
             length = int(self.headers.get("Content-Length") or 0)
-            self._body_cache = self.rfile.read(length) if length else b""
-        return self._body_cache
+            cached = self.rfile.read(length) if length else b""
+            self._body_cache = cached
+        return cached
 
     def _form(self):
         body = self._raw_body().decode("utf-8", "replace")
@@ -455,6 +457,7 @@ class Handler(BaseHTTPRequestHandler):
 
     # ---- GET
     def do_GET(self):
+        self._body_cache = None  # instance dipakai ulang untuk keep-alive
         u = urlparse(self.path)
         q = {k: v[0] for k, v in parse_qs(u.query).items()}
         path = u.path.rstrip("/") or "/"
@@ -577,6 +580,7 @@ class Handler(BaseHTTPRequestHandler):
 
     # ---- POST
     def do_POST(self):
+        self._body_cache = None  # instance dipakai ulang untuk keep-alive
         u = urlparse(self.path)
         path = u.path.rstrip("/") or "/"
 

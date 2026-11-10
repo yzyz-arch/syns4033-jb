@@ -22,10 +22,12 @@ Endpoints:
 
 import json
 import os
+import re
 import time
 import urllib.parse
 from email import message_from_bytes
-from email.utils import parseaddr
+from email.message import EmailMessage
+from email.utils import formatdate, make_msgid, parseaddr
 
 import backend_local as be
 import sessions as ss
@@ -35,6 +37,22 @@ STARS = os.environ.get(
 )
 
 FOLDERS = ("INBOX", "Sent", "Drafts", "Trash")
+
+# ---------------------------------------------------------------- register
+
+REGISTER_OPEN = (os.environ.get("WEBMAIL_REGISTER", "1").strip().lower()
+                 not in ("0", "false", "no", "off"))
+REGISTER_DOMAIN = os.environ.get(
+    "WEBMAIL_REGISTER_DOMAIN",
+    os.environ.get("WEBMAIL_DOMAIN", "farielozora.biz.id"),
+).strip().lower()
+MIN_PASSWORD = int(os.environ.get("WEBMAIL_MIN_PASSWORD", "8"))
+REGISTER_LIMIT = int(os.environ.get("WEBMAIL_REGISTER_LIMIT", "20"))
+REGISTER_WINDOW = 3600
+
+_LOCAL_RE = re.compile(r"^[a-z0-9](?:[a-z0-9._-]{1,30})$")
+_REGISTER_HITS = {}
+
 
 
 # ---------------------------------------------------------------- helpers
@@ -207,6 +225,103 @@ def op_login(body):
     return 200, {
         "token": tok,
         "user": {"email": email, "name": display, "display": display},
+    }
+
+
+def op_config():
+    return 200, {
+        "domain": REGISTER_DOMAIN,
+        "register": REGISTER_OPEN,
+        "minPassword": MIN_PASSWORD,
+        "maxPerHour": REGISTER_LIMIT,
+    }
+
+
+def _rate_ok(ip):
+    """True kalau IP masih boleh registrasi (sliding window per jam)."""
+    if REGISTER_LIMIT <= 0:
+        return True
+    now = time.time()
+    hits = [t for t in _REGISTER_HITS.get(ip, []) if now - t < REGISTER_WINDOW]
+    if len(hits) >= REGISTER_LIMIT:
+        _REGISTER_HITS[ip] = hits
+        return False
+    hits.append(now)
+    _REGISTER_HITS[ip] = hits
+    return True
+
+
+def _welcome(addr):
+    """Kirim 1 pesan sambutan ke INBOX user baru."""
+    try:
+        msg = EmailMessage()
+        msg["From"] = "webmail@" + REGISTER_DOMAIN
+        msg["To"] = addr
+        msg["Subject"] = "Selamat datang di Cloud Mail %s" % REGISTER_DOMAIN
+        msg["Date"] = formatdate(localtime=True)
+        msg["Message-ID"] = make_msgid(domain=REGISTER_DOMAIN)
+        msg.set_content(
+            "Halo!\n\n"
+            "Mailbox %s sudah aktif.\n\n"
+            "Yang bisa kamu pakai sekarang:\n"
+            "  - kirim & terima pesan antar mailbox di server ini\n"
+            "  - folder Inbox, Sent, Drafts, Trash\n"
+            "  - star, cari, balas, teruskan, dark mode\n\n"
+            "Catatan: domain ini belum punya MTA, jadi email dari/ke internet\n"
+            "(Gmail dll) belum bisa. Pesan hanya beredar di dalam server.\n\n"
+            "Waktu dibuat: %s\n" % (addr, time.strftime("%Y-%m-%d %H:%M:%S"))
+        )
+        be.deliver(addr, msg.as_bytes())
+    except Exception:
+        pass
+
+
+def op_register(body, ip):
+    if not REGISTER_OPEN:
+        return 403, {"message": "Registrasi ditutup."}
+    if not _rate_ok(ip):
+        return 429, {"message": "Terlalu banyak pendaftaran dari IP ini. Coba lagi nanti."}
+
+    raw = (body.get("email") or "").strip().lower()
+    pw = body.get("password") or ""
+    pw2 = body.get("confirm") if body.get("confirm") is not None else pw
+    display = (body.get("name") or "").strip()[:40]
+
+    # email boleh dikirim utuh atau cuma local-part
+    if "@" in raw:
+        local, _, domain = raw.partition("@")
+    else:
+        local, domain = raw, REGISTER_DOMAIN
+    local = local.strip()
+    domain = (domain or REGISTER_DOMAIN).strip().lower()
+
+    if domain != REGISTER_DOMAIN:
+        return 400, {"message": "Domain harus @%s." % REGISTER_DOMAIN}
+    if not local or not _LOCAL_RE.match(local):
+        return 400, {
+            "message": "Nama mailbox 3-31 karakter, hanya huruf kecil/angka/titik/_-."
+        }
+    if len(pw) < MIN_PASSWORD:
+        return 400, {"message": "Password minimal %d karakter." % MIN_PASSWORD}
+    if pw != pw2:
+        return 400, {"message": "Konfirmasi password tidak sama."}
+
+    addr = local + "@" + domain
+    if be.user_exists(addr):
+        return 409, {"message": "Mailbox %s sudah dipakai." % addr}
+
+    try:
+        be.add_user(addr, pw, display or local)
+    except Exception as e:  # noqa: BLE001
+        return 500, {"message": "Gagal membuat mailbox: %s" % e}
+
+    _welcome(addr)
+    tok = ss.new_session(addr, pw, display or local)
+    users = be._load_users()
+    name = (users.get(addr) or {}).get("display") or local
+    return 200, {
+        "token": tok,
+        "user": {"email": addr, "name": name, "display": name},
     }
 
 
@@ -435,8 +550,30 @@ def handle(handler, method):
 
     sess = ss.get_session(handler._cookie())
     name = path[len("/api") :] or "/"
+    ip = (handler.headers.get("X-Forwarded-For") or "").split(",")[0].strip() or (
+        handler.client_address[0] if handler.client_address else "?"
+    )
 
     try:
+        if name == "/config" and method == "GET":
+            status, payload = op_config()
+            handler._json(payload, status)
+            return True
+
+        if name == "/register" and method == "POST":
+            status, payload = op_register(body, ip)
+            if status == 200:
+                tok = payload.pop("token")
+                cookie = "%s=%s; HttpOnly; SameSite=Lax%s; Path=/; Max-Age=28800" % (
+                    ss.COOKIE_NAME,
+                    tok,
+                    ss.secure_flag(handler.headers),
+                )
+                handler._json(payload, status, extra_headers=[("Set-Cookie", cookie)])
+                return True
+            handler._json(payload, status)
+            return True
+
         if name == "/login" and method == "POST":
             status, payload = op_login(body)
             if status == 200:

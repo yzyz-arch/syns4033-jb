@@ -33,12 +33,39 @@ Endpoint API (cookie `webmail_session`):
 
 ```
 POST /api/login   {email,password}      GET  /api/me
+POST /api/register {email,password,confirm,name}   GET /api/config
 POST /api/logout                        GET  /api/folders
 GET  /api/emails?folder=&offset=&size=  GET  /api/email?folder=&uid=
 GET  /api/search?q=&type=&folder=       GET  /api/attach?folder=&uid=&idx=
 POST /api/send    {to,cc,subject,body}  POST /api/star {folder,uid,star}
 POST /api/read    {folder,uids[]}       POST /api/delete {folder,uids[]}
 ```
+
+## Registrasi mandiri (siapa saja bisa daftar)
+
+Di halaman login ada link **Daftar sekarang** -> form: nama mailbox + nama
+tampilan (opsional) + password + ulangi password. Domain otomatis
+`@farielozora.biz.id` (suffix ditampilkan di input). Setelah daftar, user
+langsung login (cookie dipasang) dan dapat 1 pesan sambutan di INBOX.
+
+Aturan validasi:
+
+- nama mailbox 3-31 karakter, hanya `a-z 0-9 . _ -`, diawali huruf/angka
+- password minimal 8 karakter, harus sama dengan konfirmasi
+- domain harus domain server; mailbox duplikat ditolak (409)
+
+Env yang mengatur (di unit systemd):
+
+| Env | Default | Arti |
+|---|---|---|
+| `WEBMAIL_REGISTER` | `1` | `0` = tutup registrasi total |
+| `WEBMAIL_REGISTER_DOMAIN` | `WEBMAIL_DOMAIN` | domain yang boleh didaftarkan |
+| `WEBMAIL_MIN_PASSWORD` | `8` | panjang minimum password |
+| `WEBMAIL_REGISTER_LIMIT` | `20` | maksimal pendaftaran per IP per jam (`0` = tanpa batas) |
+
+Rate limit dihitung per IP (pakai `X-Forwarded-For` dari Caddy) dengan sliding
+window 1 jam. Kalau kena, server balas 429.
+
 
 ## Status DNS (sudah aktif)
 
