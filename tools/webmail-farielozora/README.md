@@ -7,9 +7,70 @@ tanpa nginx, tanpa database. Mailbox disimpan sebagai file `.eml` (maildir) di
 ## Status deploy (VPS 85.9.196.242)
 
 - Service: `webmail-farielozora.service` (systemd, enabled, restart=always)
-- URL: **http://85.9.196.242:8080**
+- URL: **https://farielozora.biz.id** (juga `www.` dan `mail.`) — TLS Let's Encrypt via Caddy
+- Fallback: `http://85.9.196.242:8080` (plaintext, jangan dipakai login)
 - Backend: `local` (maildir), user pertama: `farielozora@farielozora.biz.id`
-- Data: `/var/lib/webmail-farielozora/` (users.json 0600 + maildir)
+- Data: `/var/lib/webmail-farielozora/` (users.json 0600 + maildir + stars.json)
+
+## Dua antarmuka
+
+| Path | Isi |
+|---|---|
+| `/` | **SPA Cloud Mail** (`ui/`) — tampilan & fitur mengikuti mail.flame.edu.kg |
+| `/api/*` | JSON API untuk SPA (`api.py`) |
+| `/login`, `/inbox`, `/view`, `/compose`, `/send` | UI lama stdlib (masih jalan, dipakai smoke test) |
+
+SPA tidak butuh build step dan tidak butuh CDN: Vue 3 dipinjam dari
+`ui/vendor/vue.mjs`, ikon SVG inline, CSS ditulis sendiri dengan token warna
+Cloud Mail (`--el-color-primary: #1890ff`, aside `#191A23`, dsb).
+
+Fitur SPA: login, folder Inbox/Sent/Drafts/Trash, list virtual-friendly dengan
+checkbox + star + unread dot, buka pesan (body HTML di iframe sandbox), reply,
+forward, compose panel, hapus, tandai dibaca, cari (subjek/isi/pengirim) dengan
+highlight, dark mode, responsif sampai 390px.
+
+Endpoint API (cookie `webmail_session`):
+
+```
+POST /api/login   {email,password}      GET  /api/me
+POST /api/logout                        GET  /api/folders
+GET  /api/emails?folder=&offset=&size=  GET  /api/email?folder=&uid=
+GET  /api/search?q=&type=&folder=       GET  /api/attach?folder=&uid=&idx=
+POST /api/send    {to,cc,subject,body}  POST /api/star {folder,uid,star}
+POST /api/read    {folder,uids[]}       POST /api/delete {folder,uids[]}
+```
+
+## Status DNS (sudah aktif)
+
+Record dibuat via `cf_dns.py` (Cloudflare API, DNS-only / grey cloud):
+
+| Type | Name | Content |
+|---|---|---|
+| A | farielozora.biz.id | 85.9.196.242 |
+| A | mail.farielozora.biz.id | 85.9.196.242 |
+| CNAME | www.farielozora.biz.id | farielozora.biz.id |
+| MX | farielozora.biz.id (prio 10) | mail.farielozora.biz.id |
+| TXT | farielozora.biz.id | `v=spf1 mx -all` |
+| TXT | _dmarc.farielozora.biz.id | `v=DMARC1; p=quarantine; ...` |
+
+Token Cloudflare disimpan di VPS: `/root/.cf_token` (0600). Jalankan ulang:
+
+```bash
+cd tools/webmail-farielozora
+CF_TOKEN="$(cat /root/.cf_token)" python3 cf_dns.py      # idempotent
+CF_TOKEN="$(cat /root/.cf_token)" python3 cf_dns.py --dry-run
+```
+
+## Smoke test
+
+```bash
+WEBMAIL_TEST_PASS='password-kamu' ./smoke_test.sh
+```
+
+27 cek: 13 untuk UI lama (login, inbox, view, send, CSRF, logout) + 14 untuk
+API SPA (login/me/folders/emails/email/star/search/send/delete/logout).
+Password tidak disimpan di repo.
+
 
 ## Perintah harian
 
