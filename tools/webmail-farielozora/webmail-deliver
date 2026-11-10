@@ -1,0 +1,81 @@
+#!/usr/bin/env python3
+"""
+webmail-deliver — Postfix pipe transport untuk webmail-farielozora.
+
+Postfix memanggil script ini untuk setiap pesan masuk ke domain lokal:
+    webmail-deliver <recipient>
+Pesan RFC822 dibaca dari stdin lalu ditulis ke maildir user:
+
+    <base>/<user_at_domain>/INBOX/new/<epoch_ms>_<uuid10>.eml
+
+Script sengaja SELF-CONTAINED (tidak import backend_local) karena
+dijalankan sebagai user `vmail` yang tidak boleh membaca /root, dan
+tidak perlu users.json: penerima yang sah sudah disaring Postfix lewat
+virtual_mailbox_maps (texthash:/etc/postfix/vmailbox).
+
+Exit code:
+    0   sukses
+    67  mailbox tidak ada (EX_NOUSER) -> Postfix bounce
+    75  error sementara (EX_TEMPFAIL)
+"""
+
+import os
+import sys
+import time
+import uuid
+
+BASE = os.environ.get("WEBMAIL_MAILDIR", "/var/lib/webmail-farielozora/mail")
+
+EX_NOUSER = 67
+EX_TEMPFAIL = 75
+
+
+def mailbox_dir(addr):
+    fs = addr.strip().lower().replace("/", "_").replace("@", "_at_")
+    return os.path.join(BASE, fs)
+
+
+def deliver(addr, raw):
+    home = mailbox_dir(addr)
+    if not os.path.isdir(home):
+        return None
+    folder = os.path.join(home, "INBOX")
+    for sub in ("new", "cur", "tmp"):
+        os.makedirs(os.path.join(folder, sub), exist_ok=True)
+    uid = "%d_%s.eml" % (int(time.time() * 1000), uuid.uuid4().hex[:10])
+    tmp = os.path.join(folder, "tmp", uid)
+    with open(tmp, "wb") as f:
+        f.write(raw)
+    os.rename(tmp, os.path.join(folder, "new", uid))
+    return uid
+
+
+def main():
+    if len(sys.argv) < 2:
+        sys.stderr.write("usage: webmail-deliver <recipient>\n")
+        return EX_TEMPFAIL
+    rcpt = sys.argv[1].strip().lower()
+    raw = sys.stdin.buffer.read()
+    if not raw:
+        sys.stderr.write("empty message\n")
+        return EX_TEMPFAIL
+
+    try:
+        uid = deliver(rcpt, raw)
+    except PermissionError as e:
+        sys.stderr.write("permission denied: %s\n" % e)
+        return EX_TEMPFAIL
+    except Exception as e:  # noqa: BLE001
+        sys.stderr.write("delivery failed: %s\n" % e)
+        return EX_TEMPFAIL
+
+    if not uid:
+        sys.stderr.write("no such mailbox: %s\n" % rcpt)
+        return EX_NOUSER
+
+    sys.stderr.write("delivered %s -> INBOX/new/%s (%d bytes)\n" % (rcpt, uid, len(raw)))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

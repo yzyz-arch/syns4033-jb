@@ -27,6 +27,12 @@ def cmd_adduser(argv):
         return 1
     be.add_user(email_addr, argv[1], argv[2] if len(argv) > 2 else None)
     print("user dibuat: %s" % email_addr)
+    try:
+        import sync_vmailbox
+
+        sync_vmailbox.main()
+    except Exception as e:  # noqa: BLE001
+        print("peringatan: gagal sync vmailbox: %s" % e)
     return 0
 
 

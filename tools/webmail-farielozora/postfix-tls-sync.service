@@ -1,0 +1,8 @@
+[Unit]
+Description=Sync sertifikat TLS Caddy -> Postfix
+After=caddy.service postfix.service
+Wants=caddy.service
+
+[Service]
+Type=oneshot
+ExecStart=/root/syns4033-jb/tools/webmail-farielozora/sync-postfix-tls.sh

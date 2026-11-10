@@ -53,6 +53,31 @@ REGISTER_WINDOW = 3600
 _LOCAL_RE = re.compile(r"^[a-z0-9](?:[a-z0-9._-]{1,30})$")
 _REGISTER_HITS = {}
 
+# batas kirim keluar per user per hari (proteksi kalau registrasi terbuka)
+SEND_LIMIT = int(os.environ.get("WEBMAIL_SEND_LIMIT", "200"))
+_SEND_HITS = {}
+
+
+def _send_quota(user):
+    """Return (ok, used, limit). Reset otomatis tiap ganti hari UTC."""
+    if SEND_LIMIT <= 0:
+        return True, 0, 0
+    day = time.strftime("%Y-%m-%d", time.gmtime())
+    rec = _SEND_HITS.get(user)
+    if not rec or rec[0] != day:
+        rec = [day, 0]
+        _SEND_HITS[user] = rec
+    return rec[1] < SEND_LIMIT, rec[1], SEND_LIMIT
+
+
+def _send_count(user):
+    rec = _SEND_HITS.get(user)
+    day = time.strftime("%Y-%m-%d", time.gmtime())
+    if not rec or rec[0] != day:
+        return 0
+    return rec[1]
+
+
 
 
 # ---------------------------------------------------------------- helpers
@@ -315,6 +340,14 @@ def op_register(body, ip):
     except Exception as e:  # noqa: BLE001
         return 500, {"message": "Gagal membuat mailbox: %s" % e}
 
+    # daftarkan ke Postfix supaya alamat ini bisa menerima email
+    try:
+        import sync_vmailbox
+
+        sync_vmailbox.main()
+    except Exception:
+        pass
+
     _welcome(addr)
     tok = ss.new_session(addr, pw, display or local)
     users = be._load_users()
@@ -465,6 +498,11 @@ def op_search(sess, q):
 
 def op_send(sess, body):
     u = sess["user"]
+    ok, used, limit = _send_quota(u)
+    if not ok:
+        return 429, {
+            "message": "Kuota kirim harian habis (%d/%d). Coba lagi besok." % (used, limit)
+        }
     to = (body.get("to") or "").strip()
     if not to:
         return 400, {"message": "Penerima kosong."}
@@ -481,7 +519,16 @@ def op_send(sess, body):
         return 401, {"message": "Sesi kedaluwarsa, login ulang."}
     except Exception as e:
         return 400, {"message": str(e)}
-    return 200, {"message": "Pesan terkirim", **res}
+    msg = "Pesan terkirim"
+    if res.get("via", "").startswith("relay:"):
+        msg = "Pesan masuk antrean MTA (Postfix)"
+    day = time.strftime("%Y-%m-%d", time.gmtime())
+    rec = _SEND_HITS.get(u)
+    if not rec or rec[0] != day:
+        _SEND_HITS[u] = [day, 1]
+    else:
+        rec[1] += 1
+    return 200, {"message": msg, "quota": {"used": _send_count(u), "limit": SEND_LIMIT}, **res}
 
 
 def op_star(sess, body):

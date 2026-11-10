@@ -113,7 +113,38 @@ def _ensure_folder(email_addr, folder):
     base = _folder_path(email_addr, folder)
     for sub in ("new", "cur", "tmp"):
         os.makedirs(os.path.join(base, sub), exist_ok=True)
+    _chown_tree(base)
     return base
+
+
+# Delivery lewat Postfix pipe berjalan sebagai user `vmail`, jadi direktori
+# mailbox harus bisa ditulis user itu. Service webmail tetap jalan sebagai root.
+VMAIL_UID = int(os.environ.get("WEBMAIL_VMAIL_UID", "5000"))
+VMAIL_GID = int(os.environ.get("WEBMAIL_VMAIL_GID", "5000"))
+
+
+def _chown_tree(path):
+    try:
+        st = os.stat(path)
+    except OSError:
+        return
+    if st.st_uid == VMAIL_UID:
+        return  # sudah benar, tidak perlu jalan tiap delivery
+    try:
+        os.chown(path, VMAIL_UID, VMAIL_GID)
+    except OSError:
+        return
+    for root, dirs, files in os.walk(path):
+        for d in dirs:
+            try:
+                os.chown(os.path.join(root, d), VMAIL_UID, VMAIL_GID)
+            except OSError:
+                pass
+        for f in files:
+            try:
+                os.chown(os.path.join(root, f), VMAIL_UID, VMAIL_GID)
+            except OSError:
+                pass
 
 
 def folders(email_addr):
@@ -265,7 +296,12 @@ def mark_read(email_addr, folder, uid):
 
 
 def send(email_addr, password, to, subject, body, cc=""):
-    """Compose + deliver locally to every recipient, keep a Sent copy."""
+    """Compose the message, submit ke MTA (Postfix) atau deliver lokal.
+
+    WEBMAIL_RELAY (default 127.0.0.1:25) -> kirim lewat Postfix, sehingga
+    pesan keluar ikut di-DKIM-sign dan bisa sampai ke internet begitu port
+    25 dibuka. Set WEBMAIL_RELAY="" untuk kembali ke mode lokal murni.
+    """
     email_addr = email_addr.strip().lower()
     if not verify(email_addr, password):
         raise PermissionError("autentikasi gagal")
@@ -284,6 +320,51 @@ def send(email_addr, password, to, subject, body, cc=""):
     msg.set_content(body or "")
 
     raw = msg.as_bytes()
+    relay = (os.environ.get("WEBMAIL_RELAY", "127.0.0.1:25") or "").strip()
+
+    if relay:
+        import smtplib
+
+        host, _, port = relay.partition(":")
+        delivered, refused = [], {}
+        try:
+            with smtplib.SMTP(host, int(port or 25), timeout=30) as s:
+                s.ehlo()
+                try:
+                    s.starttls()
+                    s.ehlo()
+                except smtplib.SMTPException:
+                    pass
+                refused_map = s.send_message(msg, from_addr=email_addr, to_addrs=recipients)
+                refused = {}
+                for addr, err in (refused_map or {}).items():
+                    if isinstance(err, bytes):
+                        refused[addr] = err.decode("utf-8", "replace")
+                    else:
+                        refused[addr] = str(err)
+                delivered = [r for r in recipients if r not in refused]
+        except smtplib.SMTPRecipientsRefused as e:
+            raise RuntimeError(
+                "semua penerima ditolak: " + ", ".join(sorted(e.recipients.keys()))
+            )
+        except smtplib.SMTPServerDisconnected:
+            raise RuntimeError("MTA lokal tidak merespons (%s)" % relay)
+        except smtplib.SMTPException as e:
+            raise RuntimeError("MTA menolak pesan: %s" % e)
+
+        if not delivered:
+            raise RuntimeError(
+                "semua penerima ditolak MTA: " + ", ".join(sorted(refused.keys()))
+            )
+
+        _deliver_to(email_addr, "Sent", raw)
+        return {
+            "delivered": delivered,
+            "missing": sorted(refused.keys()),
+            "refused": refused,
+            "via": "relay:" + relay,
+        }
+
     delivered, missing = [], []
     for rcpt in recipients:
         if user_exists(rcpt):
@@ -293,4 +374,4 @@ def send(email_addr, password, to, subject, body, cc=""):
             missing.append(rcpt)
 
     _deliver_to(email_addr, "Sent", raw)
-    return {"delivered": delivered, "missing": missing}
+    return {"delivered": delivered, "missing": missing, "via": "local"}
