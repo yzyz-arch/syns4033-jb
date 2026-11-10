@@ -31,25 +31,52 @@ python3 manage.py seed    nama@farielozora.biz.id         # kirim pesan selamat 
 
 ## DNS yang harus ditambahkan di registrar (belum ada!)
 
-| Type | Name | Value | TTL |
-|------|------|-------|-----|
-| A    | `@` (farielozora.biz.id) | `85.9.196.242` | 300 |
-| CNAME| `mail` | `farielozora.biz.id` | 300 |
-| MX   | `@` | `mail.farielozora.biz.id` (priority 10) | 300 |
-| TXT  | `@` | `v=spf1 mx -all` | 300 |
-| TXT  | `_dmarc` | `v=DMARC1; p=quarantine; rua=mailto:postmaster@farielozora.biz.id` | 300 |
+### Cara cepat: import zone file (Cloudflare)
 
-Setelah A record aktif, webmail bisa diakses di `http://farielozora.biz.id:8080`,
-dan TLS bisa dipasang otomatis dengan Caddy:
+1. Cloudflare Dashboard -> pilih `farielozora.biz.id` -> **DNS** -> **Records**
+2. Klik **Import** -> tempel isi `cloudflare-zone.txt` (atau upload file itu)
+3. Pastikan semua record **Proxy status = DNS only (grey cloud)** saat pertama setup
+4. Setelah sertifikat Let's Encrypt terbit (cek `journalctl -u caddy -f`), root domain
+   boleh diubah ke **Proxied (orange cloud)** dengan SSL/TLS mode **Full (strict)**
+
+### Record manual
+
+| Type | Name | Content | Proxy | TTL |
+|------|------|---------|-------|-----|
+| A    | `@` | `85.9.196.242` | DNS only | Auto |
+| A    | `mail` | `85.9.196.242` | DNS only | Auto |
+| CNAME| `www` | `farielozora.biz.id` | DNS only | Auto |
+| MX   | `@` | `mail.farielozora.biz.id` priority 10 | - | Auto |
+| TXT  | `@` | `v=spf1 mx -all` | - | Auto |
+| TXT  | `_dmarc` | `v=DMARC1; p=quarantine; rua=mailto:postmaster@farielozora.biz.id` | - | Auto |
+
+### Catatan khusus Cloudflare
+
+- **Email Routing**: kalau aktif, Cloudflare menaruh MX sendiri (route1.mx.cloudflare.net).
+  Matikan dulu (Email -> Email Routing -> Disable) atau MX di atas tidak akan berfungsi.
+- **`mail` wajib grey cloud** — Cloudflare tidak memproxy port 25/143/993, dan MX target
+  yang di-proxy akan merusak email.
+- **Port 8080**: Cloudflare memang mendukung proxy port 8080, tapi hanya HTTP. Karena
+  Caddy sudah menangani 443, akses lewat `https://mail.farielozora.biz.id` saja.
+- **CAA**: tidak perlu; Caddy memakai Let's Encrypt dan Cloudflare otomatis mengizinkannya.
+- **PTR/rDNS** (untuk email keluar nanti) diatur di panel provider VPS, bukan Cloudflare.
+
+Setelah A record aktif, Caddy (sudah terpasang dan jalan) otomatis menerbitkan
+sertifikat Let's Encrypt untuk `farielozora.biz.id` dan `mail.farielozora.biz.id`:
 
 ```bash
-apt-get install -y caddy
-cat >/etc/caddy/Caddyfile <<'EOF'
-mail.farielozora.biz.id {
-    reverse_proxy 127.0.0.1:8080
-}
-EOF
-systemctl enable --now caddy
+journalctl -u caddy -f          # pantau penerbitan sertifikat
+curl -I https://mail.farielozora.biz.id
+```
+
+Caddyfile aktif: `/etc/caddy/Caddyfile` (reverse_proxy 127.0.0.1:8080, redirect
+HTTP->HTTPS, HSTS). Setelah HTTPS hidup, port 8080 bisa ditutup dari publik:
+
+```bash
+# batasi webmail hanya untuk Caddy
+sed -i 's/^Environment=WEBMAIL_BIND=0.0.0.0/Environment=WEBMAIL_BIND=127.0.0.1/' \
+  /etc/systemd/system/webmail-farielozora.service
+systemctl daemon-reload && systemctl restart webmail-farielozora
 ```
 
 ## Batasan yang perlu diketahui

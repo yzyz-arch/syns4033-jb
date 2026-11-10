@@ -1,0 +1,14 @@
+; ============================================================
+; farielozora.biz.id — zone file untuk di-IMPORT ke Cloudflare
+; Cloudflare Dashboard > pilih domain > DNS > Records > Import
+; File ini bikin semua record sekaligus (A, MX, SPF, DMARC).
+; Semua record masuk sebagai DNS-only (grey cloud), yang memang
+; dibutuhkan untuk MX + penerbitan sertifikat Let's Encrypt.
+; ============================================================
+
+farielozora.biz.id.        300 IN A     85.9.196.242
+mail.farielozora.biz.id.   300 IN A     85.9.196.242
+www.farielozora.biz.id.    300 IN CNAME farielozora.biz.id.
+farielozora.biz.id.        300 IN MX    10 mail.farielozora.biz.id.
+farielozora.biz.id.        300 IN TXT   "v=spf1 mx -all"
+_dmarc.farielozora.biz.id. 300 IN TXT   "v=DMARC1; p=quarantine; rua=mailto:postmaster@farielozora.biz.id"
