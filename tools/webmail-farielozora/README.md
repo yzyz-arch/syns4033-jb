@@ -88,14 +88,25 @@ CF_TOKEN="$(cat /root/.cf_token)" python3 cf_dns.py      # idempotent
 CF_TOKEN="$(cat /root/.cf_token)" python3 cf_dns.py --dry-run
 ```
 
+## MTA / email internet
+
+Postfix + OpenDKIM sudah terpasang dan dikonfigurasi penuh; delivery masuk ke
+maildir webmail lewat pipe transport. Status kelengkapan dan langkah yang
+tersisa di sisi provider ada di **[MTA.md](MTA.md)**.
+
+```bash
+./check_mta.sh        # status DNS, PTR, port 25, TLS, queue, layanan
+```
+
 ## Smoke test
 
 ```bash
 WEBMAIL_TEST_PASS='password-kamu' ./smoke_test.sh
 ```
 
-27 cek: 13 untuk UI lama (login, inbox, view, send, CSRF, logout) + 14 untuk
-API SPA (login/me/folders/emails/email/star/search/send/delete/logout).
+34 cek: 13 untuk UI lama (login, inbox, view, send, CSRF, logout), 14 untuk API
+SPA (login/me/folders/emails/email/star/search/send/delete/logout), 7 untuk
+registrasi (config, validasi, buat user, welcome, duplikat, cleanup).
 Password tidak disimpan di repo.
 
 
