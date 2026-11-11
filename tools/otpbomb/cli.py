@@ -36,8 +36,10 @@ def _base_parser() -> argparse.ArgumentParser:
     def common(sp: argparse.ArgumentParser) -> None:
         sp.add_argument("--cc", default="62", help="country code default (62)")
         sp.add_argument("--category", choices=["all", "wa", "sms"], default="all")
-        sp.add_argument("--tier", choices=["live", "guess", "all"], default="live",
-                        help="live = hasil probe (default), guess = tebakan, all")
+        sp.add_argument("--tier", choices=["live", "guess", "blocked", "dead", "all"],
+                        default="live",
+                        help="live = jalan dari IP bersih (default), guess = tebakan, "
+                             "blocked = kena WAF 401/403, dead = host/path mati, all")
         sp.add_argument("--all", dest="tier_all", action="store_true",
                         help="shortcut --tier all")
         sp.add_argument("--only", default="", help="daftar provider dipisah koma")

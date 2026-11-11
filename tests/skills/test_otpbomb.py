@@ -71,7 +71,7 @@ def test_registry_shape():
         assert p.url.startswith(("https://", "http://"))
         assert p.category in ("wa", "sms")
         assert p.method in ("GET", "POST", "PUT")
-        assert p.tier in ("live", "guess")
+        assert p.tier in ("live", "guess", "blocked", "dead")
         if p.method != "GET":
             assert p.form or p.json_body
 
@@ -301,3 +301,47 @@ def test_load_is_idempotent(tmp_path):
     _load(str(p))
     _load(str(p))
     assert [x.name for x in prov.REGISTRY].count("uniku") == 1
+
+
+# --- tier health model ------------------------------------------------------
+def test_tiers_partition_registry():
+    tiers = {p.tier for p in prov.select(tier="all")}
+    assert tiers == {"live", "guess", "blocked", "dead"}
+    total = len(prov.select(tier="all"))
+    assert total == sum(len(prov.select(tier=t)) for t in tiers)
+
+
+def test_dead_and_blocked_out_of_default_tier():
+    live = {p.name for p in prov.select()}
+    assert live == {p.name for p in prov.select(tier="live")}
+    for name in ("halodoc", "jdid", "sampingan", "smartfren2"):
+        assert name in {p.name for p in prov.select(tier="dead")}
+    for name in ("ajaib", "pluang", "grab", "danacita"):
+        assert name in {p.name for p in prov.select(tier="blocked")}
+    assert not live & {p.name for p in prov.select(tier="dead")}
+    assert not live & {p.name for p in prov.select(tier="blocked")}
+
+
+def test_provider_insecure_flag():
+    t = prov.by_name("trimegah")
+    assert t is not None and t.insecure
+    assert Provider(name="x", category="sms", url="https://x/y").insecure is False
+    assert Provider.from_dict({"name": "i", "category": "sms", "url": "https://x",
+                               "insecure": True}).insecure is True
+
+
+def test_engine_uses_insecure_client_for_flagged_provider():
+    from tools.otpbomb.engine import Engine, Options
+
+    async def go():
+        eng = Engine(normalise("081234567890"), Options(proxy=None))
+        p = Provider(name="i", category="sms", url="https://x/y", insecure=True)
+        plain = object()
+        c = eng._client_for(p, plain)  # type: ignore[arg-type]
+        assert c is not plain
+        assert c is eng._client_for(p, plain)  # type: ignore[arg-type]
+        await eng._close()
+        return eng._insecure_client
+
+    assert asyncio.run(go()) is None
+

@@ -73,6 +73,14 @@ def run() -> int:
     check("tier live only", all(p_.tier == "live" for p_ in select(tier="live")))
     check("by_name", by_name("shopee") is not None and by_name("nope") is None)
     check("unique names", len(names) == len(select(tier="all")))
+    buckets = {t: {p_.name for p_ in select(tier=t)} for t in ("live", "guess", "blocked", "dead")}
+    check("tier buckets disjoint",
+          sum(len(b) for b in buckets.values()) == len(names))
+    live_names = buckets["live"]
+    check("dead tier hidden from default run",
+          "halodoc" in buckets["dead"] and "halodoc" not in live_names)
+    check("blocked tier hidden from default run",
+          "ajaib" in buckets["blocked"] and "ajaib" not in live_names)
     try:
         select(only=["ghost"], tier="all")
         check("unknown only raises", False)

@@ -33,11 +33,21 @@ dikirim ke warm-up `pre_url` juga.
 
 ## Tier
 
-- `live` (default) — sudah di-probe dari host ini dan rutenya menjawab di
-  jaringan. Payload yang sudah di-decode dipakai; `redbus` terkonfirmasi
-  benar-benar mengirim (`OTP Sent Successfully`), `cairin` menerima request
-  (`30101 user have registered`).
-- `guess` — bentuk endpoint hasil tulisan tangan; sering 404. Pakai `--all`.
+- `live` (default) — di-probe dan menjawab di jaringan tanpa cookie. Payload
+  yang sudah di-decode dipakai; `redbus` terkonfirmasi benar-benar mengirim
+  (`OTP Sent Successfully`).
+- `guess` — bentuk endpoint tulisan tangan; sering 404, kadang sukses. Pakai
+  `--all` atau `--tier guess`.
+- `blocked` — endpoint hidup tapi WAF menolak request kosong (Cloudflare,
+  Akamai, F5 ASM: 401/403). Jalankan dengan `-H 'cf_clearance: …'`,
+  `--cookie`, atau `--proxy` residensial.
+- `dead` — host/path sudah mati (NXDOMAIN, backend 504, redirect loop). Tetap
+  disimpan supaya gampang dicek ulang dengan `probe`, tapi tidak lagi
+  mengotori run default.
+
+Tier default hanya `live`, jadi `blast` biasa pulih bersih: sisa `FAIL` = API
+menjawab dengan kode penolakan (mis. `400115` token flow invalid, `40000`
+devId basi) — itu sinyal nyata, bukan noise.
 
 Endpoint OTP cepat busuk: `probe` dulu sebelum job panjang, lalu buang yang
 mati dengan `--skip`, atau ganti dengan hasil `discover`.

