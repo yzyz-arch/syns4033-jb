@@ -16,7 +16,7 @@ async def probe(client: httpx.AsyncClient, base: str, paths) -> list[dict]:
         try:
             r = await client.post(base + path, data=BODY_FORM, timeout=8.0,
                                   follow_redirects=True)
-        except httpx.HTTPError:
+        except Exception:  # any per-path failure is just a dead path
             return rec
         rec["status"] = r.status_code
         rec["alive"] = r.status_code in ALIVE

@@ -50,6 +50,9 @@ class Options:
     verbose: bool = False
     quiet: bool = False
     stop_after_ok: int = 0
+    extra_headers: dict = None  # type: ignore[assignment]
+    cookies: str = ""
+    insecure: bool = False
 
 
 @dataclass
@@ -103,6 +106,8 @@ def classify(status: int, body: str, prov) -> str:
         return ERR
     if prov.fail_contains and any(m.lower() in low for m in prov.fail_contains):
         return FAIL
+    if prov.soft_contains and any(m.lower() in low for m in prov.soft_contains):
+        return OK
     if status not in prov.success_codes:
         return FAIL
     if prov.success_contains and not any(m.lower() in low for m in prov.success_contains):
@@ -122,6 +127,13 @@ class Engine:
         self._print_lock = print_lock or asyncio.Lock()
         self.aborted = False
         self._stop = asyncio.Event()
+        self.notes: list[str] = []
+
+    def _note(self, prov, msg: str) -> None:
+        line = f"{prov.name}: {msg}"
+        self.notes.append(line)
+        if self.opts.verbose:
+            print(f"[NOTE   ] {line}", flush=True)
 
     # -- output ------------------------------------------------------------
     async def _emit(self, line: str) -> None:
@@ -138,13 +150,17 @@ class Engine:
         found: dict[str, str] = {}
         if not prov.pre_url:
             return found
+        hdr = self._headers(prov)
         try:
-            r = await client.get(render_str(prov.pre_url, self.ctx), timeout=self.opts.timeout)
-        except httpx.HTTPError:
+            r = await client.get(render_str(prov.pre_url, self.ctx), headers=hdr,
+                                 timeout=max(20.0, self.opts.timeout))
+        except Exception:  # warm-up failure is not fatal
             return found
         body = r.text
+        # tokens may live in headers or in the body — scan both
+        haystack = "\n".join(f"{k}: {v}" for k, v in r.headers.items()) + "\n" + body
         for target, pattern in prov.extract.items():
-            m = re.search(render_str(pattern, self.ctx), body)
+            m = re.search(render_str(pattern, self.ctx), haystack)
             if not m:
                 continue
             val = m.group(1) if m.groups() else m.group(0)
@@ -157,16 +173,26 @@ class Engine:
                 client.cookies.set(key, val, domain=httpx.URL(prov.url).host)
         return found
 
+    def _headers(self, prov) -> dict:
+        hdr = cast(dict, render(prov.merged_headers(), self.ctx))
+        for k, v in (self.opts.extra_headers or {}).items():
+            hdr.setdefault(k, v)
+        return hdr
+
     async def attempt(self, client: httpx.AsyncClient, prov, idx: int) -> Result:
         res = Result(prov.name, prov.category, ERR, attempt=idx)
         waited = self.cooldown.get(prov.name, 0.0) - time.time()
         if waited > 0:
             await asyncio.sleep(min(waited, 30))
 
-        tokens = await self._prefetch(client, prov)
+        tokens: dict[str, str] = {}
+        try:
+            tokens = await self._prefetch(client, prov)
+        except Exception as exc:  # a broken warm-up must not kill the attempt
+            self._note(prov, f"prefetch {type(exc).__name__}: {exc}")
         form = cast(dict, render(prov.form, self.ctx)) if prov.form else None
         jsbody = cast(dict, render(prov.json_body, self.ctx)) if prov.json_body else None
-        headers = cast(dict, render(prov.merged_headers(), self.ctx))
+        headers = self._headers(prov)
         for key, val in tokens.items():
             if key.startswith("h:"):
                 headers[key[2:]] = val
@@ -190,6 +216,9 @@ class Engine:
                     follow_redirects=True,
                 )
             except httpx.HTTPError as exc:
+                res.status, res.error = 0, f"{type(exc).__name__}: {exc}"
+                res.verdict = ERR
+            except Exception as exc:  # httpx.InvalidURL, render errors, proxy quirks
                 res.status, res.error = 0, f"{type(exc).__name__}: {exc}"
                 res.verdict = ERR
             else:
@@ -231,11 +260,17 @@ class Engine:
     async def run(self, providers: list) -> Stats:
         limits = httpx.Limits(max_connections=self.opts.concurrency * 2,
                               max_keepalive_connections=self.opts.concurrency)
+        jar = httpx.Cookies()
+        for chunk in (self.opts.cookies or "").split(";"):
+            if "=" in chunk:
+                k, _, v = chunk.partition("=")
+                jar.set(k.strip(), v.strip())
         async with httpx.AsyncClient(
             limits=limits,
             http2=http2_ok(),
             proxy=self.opts.proxy,
-            cookies=httpx.Cookies(),
+            cookies=jar,
+            verify=not self.opts.insecure,
         ) as client:
             tasks: list[asyncio.Task] = []
             for rnd in range(max(1, self.opts.rounds)):
@@ -269,7 +304,8 @@ class Engine:
     # -- probe -------------------------------------------------------------
     async def probe(self, providers: list) -> list[Result]:
         self.opts.retries = 0
-        async with httpx.AsyncClient(http2=http2_ok(), proxy=self.opts.proxy) as client:
+        async with httpx.AsyncClient(http2=http2_ok(), proxy=self.opts.proxy,
+                                     verify=not self.opts.insecure) as client:
             async def one(p):
                 async with self.sem:
                     try:

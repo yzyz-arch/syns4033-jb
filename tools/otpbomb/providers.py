@@ -49,6 +49,7 @@ class Provider:
     success_codes: tuple = DEFAULT_SUCCESS
     success_contains: tuple = ()
     fail_contains: tuple = ()
+    soft_contains: tuple = ()
     tier: str = "guess"
     note: str = ""
 
@@ -56,7 +57,7 @@ class Provider:
     def from_dict(cls, d: dict) -> "Provider":
         known = {f for f in cls.__dataclass_fields__}  # type: ignore[attr-defined]
         kwargs = {k: v for k, v in d.items() if k in known}
-        for key in ("success_codes", "success_contains", "fail_contains"):
+        for key in ("success_codes", "success_contains", "fail_contains", "soft_contains"):
             if key in kwargs and isinstance(kwargs[key], list):
                 kwargs[key] = tuple(kwargs[key])
         kwargs.setdefault("name", "unnamed")
@@ -158,18 +159,34 @@ GUESS = [
     _p("gojek-otp", "wa", "https://api.gojekapi.com/v2/user/otp",
        json_body={"phone": "{e164}", "country_code": "+62", "method": "whatsapp"},
        headers={"x-app-version": "4.68.0", "x-user-type": "customer"}),
-    _p("shopee", "wa", "https://shopee.co.id/api/v4/otp/send_vcode",
-       json_body={"phone": "{digits}", "force_channel": "true", "operation": 7,
+    _p("shopee", "wa", "https://shopee.co.id/api/v4/otp/send_vcode", "live",
+       json_body={"phone": "{digits}", "force_channel": True, "operation": 7,
                   "channel": 2, "supported_channels": [1, 2, 3]},
-       headers={"x-api-source": "rweb", "x-requested-with": "XMLHttpRequest"}),
+       headers={"x-api-source": "rweb", "x-shopee-language": "id",
+                "x-requested-with": "XMLHttpRequest",
+                "user-agent": "Mozilla/5.0 (Linux; Android 10; SM-G965F) AppleWebKit/537.36 "
+                              "(KHTML, like Gecko) Chrome/107.0.0.0 Mobile Safari/537.36"},
+       success_contains=('"error":0', '"success":true'),
+       soft_contains=("10002", "23500157", "23500158"),
+       note="force_channel harus boolean; 23500157 nomor belum terdaftar, 10002 butuh csrftoken"),
     _p("shopee-v2", "wa", "https://shopee.co.id/api/v2/authentication/send_otp",
        form={"phone": "{digits}", "type": "sms"}),
-    _p("tokopedia", "wa", "https://accounts.tokopedia.com/otp/c/ajax/request-wa",
+    _p("tokopedia", "wa", "https://accounts.tokopedia.com/otp/c/ajax/request-wa", "live",
+       pre_url="https://accounts.tokopedia.com/otp/c/page?otp_type=116&msisdn={digits}"
+               "&ld=https%3A%2F%2Faccounts.tokopedia.com%2Fregister%3Ftype%3Dphone",
+       extract={"field:tk": r'id="Token"\s+value="([^"]+)"'},
        form={"otp_type": "116", "msisdn": "{digits}", "tk": "", "email": "",
              "original_param": "", "user_id": "", "signature": "", "number_otp_digit": "6"},
        headers={"origin": "https://accounts.tokopedia.com",
-                "x-requested-with": "XMLHttpRequest"},
-       note="butuh token tk dari /otp/c/page — pakai pre_url + extract"),
+                "x-requested-with": "XMLHttpRequest",
+                "content-type": "application/x-www-form-urlencoded; charset=UTF-8",
+                "user-agent": "Mozilla/5.0 (Linux; Android 5.1.1; SM-G600S Build/LMY47V) "
+                              "AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 "
+                              "Chrome/59.0.3071.125 Mobile Safari/537.36"},
+       success_contains=('"success": true',),
+       fail_contains=(),
+       soft_contains=('"success": false',),
+       note="dua tahap: token tk di-scrape dari /otp/c/page; limit 3 kirim/jam per nomor"),
     _p("tokopedia-page", "wa",
        "https://accounts.tokopedia.com/otp/c/page?otp_type=116&msisdn={digits}", method="GET"),
     _p("lazada", "wa", "https://member.lazada.co.id/user/api/sendOtp",

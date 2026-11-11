@@ -41,12 +41,28 @@ def _keep(u: str) -> bool:
     return True
 
 
+def _registrable(domain: str) -> str:
+    """Crude eTLD+1 — enough for the ccTLD set this tool is used on."""
+    parts = domain.lower().strip(".").split(".")
+    if len(parts) <= 2:
+        return ".".join(parts)
+    if len(parts[-1]) == 2 and len(parts[-2]) <= 3:  # co.id, com.my, co.uk-ish
+        return ".".join(parts[-3:])
+    return ".".join(parts[-2:])
+
+
+def _same_site(url: str, domain: str) -> bool:
+    netloc = urlparse(url).netloc.lower().split(":")[0]
+    apex = _registrable(domain)
+    return netloc == apex or netloc.endswith("." + apex)
+
+
 async def _get(client: httpx.AsyncClient, url: str) -> str:
     try:
         r = await client.get(url, follow_redirects=True, timeout=8.0)
         if r.status_code < 400 and "text" in r.headers.get("content-type", ""):
             return r.text
-    except httpx.HTTPError:
+    except Exception:  # HTTPError, InvalidURL, too many redirects, TLS
         return ""
     return ""
 
@@ -61,7 +77,7 @@ async def crawl(client: httpx.AsyncClient, domain: str) -> dict:
 
     for m in HIT.finditer(html):
         u = urljoin(base, m.group(1))
-        if _keep(u) and urlparse(u).netloc.endswith(domain.split(".")[-2] + "." + domain.split(".")[-1]):
+        if _keep(u) and _same_site(u, domain):
             found_site.add(u)
 
     scripts = [urljoin(base, s) for s in SCRIPT.findall(html)][:14]
@@ -84,12 +100,18 @@ async def main_async(domains: list[str], out: str, conc: int) -> int:
     sem = asyncio.Semaphore(conc)
     results = []
 
-    async with httpx.AsyncClient(headers={"user-agent": UA, "accept": "*/*"}) as client:
+    async with httpx.AsyncClient(headers={"user-agent": UA, "accept": "*/*"},
+                                 follow_redirects=True, timeout=20.0) as client:
         async def one(d):
             async with sem:
-                res = await crawl(client, d)
+                try:
+                    res = await crawl(client, d)
+                except Exception as exc:  # one dead domain must not sink the batch
+                    res = {"domain": d, "from_site": [], "path_probe": [],
+                           "error": f"{type(exc).__name__}: {exc}"}
                 print(f"== {d}: {len(res['from_site'])} url / "
-                      f"{sum(1 for h in res['path_probe'] if h['alive'])} path hidup")
+                      f"{sum(1 for h in res['path_probe'] if h['alive'])} path hidup"
+                      + (f"  [{res['error']}]" if res.get("error") else ""))
                 for h in res["path_probe"]:
                     if h["alive"]:
                         print(f"   [{h['status']}] {h['path']}")
