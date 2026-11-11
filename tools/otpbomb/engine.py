@@ -128,12 +128,28 @@ class Engine:
         self.aborted = False
         self._stop = asyncio.Event()
         self.notes: list[str] = []
+        self._insecure_client: httpx.AsyncClient | None = None
 
     def _note(self, prov, msg: str) -> None:
         line = f"{prov.name}: {msg}"
         self.notes.append(line)
         if self.opts.verbose:
             print(f"[NOTE   ] {line}", flush=True)
+
+    def _client_for(self, prov, default: httpx.AsyncClient) -> httpx.AsyncClient:
+        """Providers with broken certs (prov.insecure) get a verify=False client."""
+        if not getattr(prov, "insecure", False):
+            return default
+        if self._insecure_client is None:
+            self._insecure_client = httpx.AsyncClient(verify=False, http2=http2_ok(),
+                                                      proxy=self.opts.proxy,
+                                                      timeout=self.opts.timeout)
+        return self._insecure_client
+
+    async def _close(self) -> None:
+        if self._insecure_client is not None:
+            await self._insecure_client.aclose()
+            self._insecure_client = None
 
     # -- output ------------------------------------------------------------
     async def _emit(self, line: str) -> None:
@@ -186,6 +202,7 @@ class Engine:
             await asyncio.sleep(min(waited, 30))
 
         tokens: dict[str, str] = {}
+        client = self._client_for(prov, client)
         try:
             tokens = await self._prefetch(client, prov)
         except Exception as exc:  # a broken warm-up must not kill the attempt
@@ -203,6 +220,7 @@ class Engine:
                     jsbody[key[2:]] = val
 
         body_preview = ""
+        client = self._client_for(prov, client)
         for tryno in range(self.opts.retries + 1):
             t0 = time.perf_counter()
             try:
@@ -285,6 +303,7 @@ class Engine:
                 if rnd + 1 < self.opts.rounds and self.opts.wave_interval > 0:
                     await asyncio.sleep(self.opts.wave_interval + random.uniform(0, self.opts.jitter))
             await asyncio.gather(*tasks, return_exceptions=True)
+            await self._close()
         return self.stats
 
     def _spawn(self, client, prov, idx: int, sink: list) -> asyncio.Task:
@@ -317,4 +336,5 @@ class Engine:
                         return res
 
             out = await asyncio.gather(*(one(p) for p in providers))
+            await self._close()
             return [r for r in out if isinstance(r, Result)]

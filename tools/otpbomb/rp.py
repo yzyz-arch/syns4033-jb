@@ -59,7 +59,7 @@ async def main(argv: list[str]) -> int:
     eng = Engine(ctx, opts)
 
     async with httpx.AsyncClient(follow_redirects=True, timeout=30.0,
-                                 verify="--insecure" not in argv,
+                                 verify=not (prov.insecure or "--insecure" in argv),
                                  http2=http2_ok()) as client:
         tokens = await eng._prefetch(client, prov)
         form = cast(dict, render(prov.form, ctx)) if prov.form else None
