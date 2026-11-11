@@ -1,0 +1,14 @@
+#!/bin/sh
+# otpbomb launcher — jalan dari direktori mana pun.
+#   ./otpbomb blast 0812...        ./otpbomb discover shopee.co.id
+#   ./otpbomb rp --name tokopedia  ./otpbomb selftest
+HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+PY=${PYTHON:-$HERE/venv/bin/python}
+[ -x "$PY" ] || PY=python3
+
+case "${1:-}" in
+  discover|rp) MOD="otpbomb.$1"; shift ;;
+  *)           MOD="otpbomb" ;;
+esac
+
+PYTHONPATH="$HERE/tools${PYTHONPATH:+:$PYTHONPATH}" exec "$PY" -m "$MOD" "$@"

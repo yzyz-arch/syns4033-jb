@@ -18,8 +18,10 @@ import sys
 import time
 
 from . import providers as prov_mod
-from .engine import Engine, Options
+from .engine import BLOCKED, ERR, FAIL, OK, Engine, Options
 from .phone import PhoneError, normalise
+
+_ORDER = {OK: 0, FAIL: 1, BLOCKED: 2, ERR: 3}
 
 
 def _base_parser() -> argparse.ArgumentParser:
@@ -42,6 +44,11 @@ def _base_parser() -> argparse.ArgumentParser:
         sp.add_argument("--skip", default="", help="provider yang dilewati")
         sp.add_argument("--providers-file", default="", help="JSON list provider kustom")
         sp.add_argument("--proxy", default=None, help="http://127.0.0.1:8080 atau socks5://")
+        sp.add_argument("-H", "--header", dest="headers", action="append", default=[],
+                        metavar="K:V", help="header tambahan (bisa diulang)")
+        sp.add_argument("--cookie", "--cookies", dest="cookies", default="",
+                        help="cookie mentah a=b; c=d")
+        sp.add_argument("-k", "--insecure", action="store_true", help="matikan verifikasi TLS")
         sp.add_argument("--timeout", type=float, default=12.0)
         sp.add_argument("--concurrency", type=int, default=24)
         sp.add_argument("--jitter", type=float, default=0.35)
@@ -63,9 +70,8 @@ def _base_parser() -> argparse.ArgumentParser:
 
     pr = sub.add_parser("probe", help="uji endpoint hidup/mati")
     pr.add_argument("--json", dest="json_out", default="", help="simpan hasil probe (atau -)")
-    pr.set_defaults(tier="all")
     common(pr)
-    pr.set_defaults(tier="all")
+    pr.set_defaults(tier="all")  # probe selalu menyapu semua tier
 
     sub.add_parser("list", help="tampilkan semua provider")
     sub.add_parser("selftest", help="tes offline, tanpa jaringan")
@@ -75,10 +81,26 @@ def _base_parser() -> argparse.ArgumentParser:
 def _load(extra_file: str) -> None:
     if not extra_file:
         return
-    with open(extra_file, encoding="utf-8") as fh:
-        raw = json.load(fh)
+    try:
+        with open(extra_file, encoding="utf-8") as fh:
+            raw = json.load(fh)
+    except OSError as exc:
+        sys.exit(f"[!] providers-file tidak terbaca: {exc}")
+    except json.JSONDecodeError as exc:
+        sys.exit(f"[!] providers-file bukan JSON valid: {exc}")
+    if not isinstance(raw, list):
+        sys.exit("[!] providers-file harus list JSON")
+    seen = {p.name for p in prov_mod.REGISTRY}
     for d in raw:
-        prov_mod.REGISTRY.append(prov_mod.Provider.from_dict(d))
+        if not isinstance(d, dict) or not d.get("url"):
+            sys.exit(f"[!] entri provider tidak valid: {d!r}")
+        prov = prov_mod.Provider.from_dict(d)
+        if prov.method != "GET" and not (prov.form or prov.json_body):
+            sys.exit(f"[!] {prov.name}: method {prov.method} tanpa form/json_body")
+        if prov.name in seen:
+            continue
+        prov_mod.REGISTRY.append(prov)
+        seen.add(prov.name)
 
 
 def _pick(args) -> list:
@@ -96,19 +118,37 @@ def _pick(args) -> list:
 
 def _opts(args) -> Options:
     return Options(
-        timeout=args.timeout,
-        concurrency=args.concurrency,
-        jitter=args.jitter,
+        timeout=max(1.0, args.timeout),
+        concurrency=max(1, args.concurrency),
+        jitter=max(0.0, args.jitter),
         proxy=args.proxy,
         verbose=args.verbose,
         quiet=args.quiet,
-        retries=getattr(args, "retries", 2),
-        backoff=getattr(args, "backoff", 1.6),
-        rounds=getattr(args, "rounds", 1),
-        per_provider=getattr(args, "per_provider", 1),
-        wave_interval=getattr(args, "wave_interval", 0.0),
-        stop_after_ok=getattr(args, "stop_after_ok", 0),
+        retries=max(0, getattr(args, "retries", 2)),
+        backoff=max(1.0, getattr(args, "backoff", 1.6)),
+        rounds=max(1, getattr(args, "rounds", 1)),
+        per_provider=max(1, getattr(args, "per_provider", 1)),
+        wave_interval=max(0.0, getattr(args, "wave_interval", 0.0)),
+        stop_after_ok=max(0, getattr(args, "stop_after_ok", 0)),
+        extra_headers=_headers(args),
+        cookies=getattr(args, "cookies", ""),
+        insecure=getattr(args, "insecure", False),
     )
+
+
+def _headers(args) -> dict:
+    out = {}
+    for raw in getattr(args, "headers", []) or []:
+        if ":" in raw:
+            k, _, v = raw.partition(":")
+        elif "=" in raw:
+            k, _, v = raw.partition("=")
+        else:
+            sys.exit(f"[!] header tidak valid (pakai K:V): {raw!r}")
+        if not k.strip():
+            sys.exit(f"[!] header tanpa nama: {raw!r}")
+        out[k.strip()] = v.strip()
+    return out
 
 
 def cmd_list(_args) -> int:
@@ -134,7 +174,7 @@ def cmd_probe(args) -> int:
     ctx = normalise("081234567890", args.cc)
     eng = Engine(ctx, _opts(args))
     res = asyncio.run(eng.probe(pool))
-    res.sort(key=lambda r: ({"ok": 0, "fail": 1, "blocked": 2, "error": 3}[r.verdict], r.provider))
+    res.sort(key=lambda r: (_ORDER.get(r.verdict, 9), r.provider))
     live = [r for r in res if r.verdict == "ok"]
     print(f"\nlive: {len(live)}/{len(res)}  -> "
           + (",".join(r.provider for r in live) if live else "(tidak ada)"))
@@ -184,6 +224,7 @@ def cmd_blast(args) -> int:
         if top:
             print("terbanyak memicu: " + ", ".join(f"{k}x{v}" for k, v in top))
         _dump(args.json_out, {"target": ctx["e164"], "summary": summary,
+                              "notes": eng.notes,
                               "results": [r.__dict__ for r in eng.results]})
     return 0 if eng.stats.ok else 2
 

