@@ -1,6 +1,7 @@
 """Offline tests for the otpbomb skill package."""
 from __future__ import annotations
 
+import asyncio
 import re
 
 import pytest
@@ -133,3 +134,170 @@ def test_cli_help_runs():
     with pytest.raises(SystemExit) as exc:
         main(["--help"])
     assert exc.value.code == 0
+
+
+# --- soft markers -----------------------------------------------------------
+def test_soft_contains_is_ok():
+    p = Provider(name="s", category="wa", url="https://x/y", soft_contains=("sudah terdaftar",))
+    assert classify(200, '{"m":"nomor sudah terdaftar"}', p) == OK
+
+
+def test_fail_beats_soft():
+    p = Provider(name="s", category="wa", url="https://x/y",
+                 soft_contains=("captcha",), fail_contains=("captcha",))
+    assert classify(200, "solve captcha", p) == FAIL
+
+
+def test_soft_ignored_on_server_error():
+    p = Provider(name="s", category="wa", url="https://x/y", soft_contains=("sudah terdaftar",))
+    assert classify(500, "sudah terdaftar", p) == ERR
+
+
+def test_from_dict_coerces_soft():
+    p = Provider.from_dict({"name": "c", "category": "wa", "url": "https://c/d",
+                            "soft_contains": ["a"]})
+    assert p.soft_contains == ("a",)
+
+
+# --- prefetch / headers (offline via MockTransport) -------------------------
+def _mock_provider() -> Provider:
+    return Provider(
+        name="mock", category="wa", url="https://mock.test/send", tier="live",
+        pre_url="https://mock.test/warm",
+        extract={"field:tk": r'id="Token"\s+value="([^"]+)"',
+                 "header:x-tok": r"x-csrf:? (HDRVAL)",
+                 "cookie:cs": r"cs=([A-Za-z0-9]+)"},
+        form={"phone": "{digits}", "tk": ""},
+    )
+
+
+def _client(seen: dict):
+    import httpx
+
+    def handler(request):
+        if request.url.path == "/warm":
+            seen["warm"] = request.headers.get("x-from-flag")
+            return httpx.Response(
+                200, text='<input id="Token" value="abc123">',
+                headers={"x-csrf": "HDRVAL", "set-cookie": "cs=COOKIEVAL; Path=/",
+                         "content-type": "text/html"})
+        seen["post"] = request.headers.get("x-from-flag")
+        seen["body"] = request.content.decode()
+        return httpx.Response(200, json={"ok": True})
+
+    return httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+
+def test_prefetch_scrapes_tokens():
+    from tools.otpbomb.engine import Engine, Options
+
+    async def go():
+        seen: dict = {}
+        eng = Engine(normalise("081234567890"), Options(retries=0))
+        async with _client(seen) as c:
+            return await eng._prefetch(c, _mock_provider())
+
+    tokens = asyncio.run(go())
+    assert tokens["f:tk"] == "abc123"
+    assert tokens["h:x-tok"] == "HDRVAL"
+
+
+def test_prefetch_without_pre_url_is_empty():
+    from tools.otpbomb.engine import Engine, Options
+
+    async def go():
+        eng = Engine(normalise("081234567890"), Options())
+        async with _client({}) as c:
+            return await eng._prefetch(c, Provider(name="n", category="sms", url="https://m.test/x"))
+
+    assert asyncio.run(go()) == {}
+
+
+def test_attempt_injects_token_and_extra_header():
+    from tools.otpbomb.engine import Engine, Options
+
+    async def go():
+        seen: dict = {}
+        eng = Engine(normalise("081234567890"),
+                     Options(retries=0, extra_headers={"x-from-flag": "yes"}))
+        async with _client(seen) as c:
+            return await eng.attempt(c, _mock_provider(), 1), seen
+
+    res, seen = asyncio.run(go())
+    assert res.verdict == OK
+    assert seen["warm"] == "yes" and seen["post"] == "yes"
+    assert "tk=abc123" in seen["body"]
+
+
+def test_attempt_records_error_without_raising():
+    import httpx
+
+    from tools.otpbomb.engine import Engine, Options
+
+    def boom(_request):
+        raise RuntimeError("dns mati")
+
+    async def go():
+        eng = Engine(normalise("081234567890"), Options(retries=0))
+        async with httpx.AsyncClient(transport=httpx.MockTransport(boom)) as c:
+            return await eng.attempt(c, _mock_provider(), 1)
+
+    res = asyncio.run(go())
+    assert res.verdict == ERR and "RuntimeError" in res.error
+
+
+# --- discover helpers -------------------------------------------------------
+def test_registrable_and_same_site():
+    from tools.otpbomb.discover import _keep, _registrable, _same_site
+
+    assert _registrable("api.shopee.co.id") == "shopee.co.id"
+    assert _same_site("https://shopee.co.id/x", "shopee.co.id")
+    assert not _same_site("https://evil.test/x", "shopee.co.id")
+    assert _keep("/api/v1/otp/send") and not _keep("/img/otp.png")
+
+
+# --- cli glue ---------------------------------------------------------------
+def test_cli_headers_and_clamps():
+    from tools.otpbomb.cli import _base_parser, _opts
+
+    args = _base_parser().parse_args(
+        ["blast", "081234567890", "-H", "x-a: 1", "--cookie", "k=v",
+         "--concurrency", "0", "--rounds", "0", "-k"])
+    opts = _opts(args)
+    assert opts.extra_headers == {"x-a": "1"}
+    assert opts.cookies == "k=v"
+    assert opts.concurrency == 1 and opts.rounds == 1 and opts.insecure
+
+
+def test_cli_bad_header_exits():
+    from tools.otpbomb.cli import _base_parser, _opts
+
+    args = _base_parser().parse_args(["blast", "081234567890", "-H", "noheader"])
+    with pytest.raises(SystemExit):
+        _opts(args)
+
+
+def test_load_rejects_garbage(tmp_path):
+    from tools.otpbomb.cli import _load
+
+    bad = tmp_path / "p.json"
+    bad.write_text("{not json")
+    with pytest.raises(SystemExit):
+        _load(str(bad))
+    bad.write_text('{"a":1}')
+    with pytest.raises(SystemExit):
+        _load(str(bad))
+    bad.write_text('[{"name":"x","category":"wa","method":"POST"}]')
+    with pytest.raises(SystemExit):  # tanpa url
+        _load(str(bad))
+
+
+def test_load_is_idempotent(tmp_path):
+    from tools.otpbomb import providers as prov
+    from tools.otpbomb.cli import _load
+
+    p = tmp_path / "ok.json"
+    p.write_text('[{"name":"uniku","category":"wa","url":"https://u.test/a","json_body":{"a":1}}]')
+    _load(str(p))
+    _load(str(p))
+    assert [x.name for x in prov.REGISTRY].count("uniku") == 1

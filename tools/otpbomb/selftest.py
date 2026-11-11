@@ -117,6 +117,68 @@ def run() -> int:
     check("from_dict coerces tuples", pd.success_codes == (200,) and pd.fail_contains == ("x",))
     check("from_dict drops unknown", not hasattr(pd, "junk"))
 
+    # --- soft markers ------------------------------------------------------
+    ps = Provider(name="s", category="wa", url="https://x/y", soft_contains=("sudah terdaftar",))
+    check("soft marker ok", classify(200, '{"m":"nomor sudah terdaftar"}', ps) == OK)
+    check("fail beats soft",
+          classify(200, "captcha", Provider(name="s2", category="wa", url="https://x",
+                                            soft_contains=("captcha",),
+                                            fail_contains=("captcha",))) == FAIL)
+    check("soft ignored on 500", classify(500, "sudah terdaftar", ps) == ERR)
+
+    # --- extra headers / prefetch (offline, mock transport) ---------------
+    import asyncio
+
+    import httpx
+
+    from .engine import Engine, Options
+
+    async def _mock_checks() -> None:
+        seen: dict[str, object] = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path == "/warm":
+                seen["warm_hdr"] = request.headers.get("x-from-flag")
+                return httpx.Response(200, text='<input id="Token" value="abc123">',
+                                      headers={"x-csrf": "HDRVAL", "content-type": "text/html"})
+            seen["post_hdr"] = request.headers.get("x-from-flag")
+            seen["post_body"] = request.content.decode()
+            return httpx.Response(200, json={"ok": True})
+
+        prov = Provider(
+            name="mock", category="wa", url="https://mock.test/send", tier="live",
+            pre_url="https://mock.test/warm",
+            extract={"field:tk": r'id="Token"\s+value="([^"]+)"',
+                     "header:x-tok": r'x-csrf:? (HDRVAL)'},
+            form={"phone": "{digits}", "tk": ""},
+        )
+        opts = Options(retries=0, extra_headers={"x-from-flag": "yes"})
+        eng = Engine(normalise("081234567890"), opts)
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            tokens = await eng._prefetch(client, prov)
+            check("prefetch scrapes field token", tokens.get("f:tk") == "abc123")
+            check("prefetch scrapes header token", tokens.get("h:x-tok") == "HDRVAL")
+            res = await eng.attempt(client, prov, 1)
+            check("extra header reaches warm-up", seen.get("warm_hdr") == "yes")
+            check("extra header does not override provider", seen.get("post_hdr") == "yes")
+            check("prefetch token lands in form", "tk=abc123" in str(seen.get("post_body")))
+            check("mock attempt ok", res.verdict == OK)
+            empty = Provider(name="np", category="sms", url="https://mock.test/x")
+            check("no pre_url -> no tokens", await eng._prefetch(client, empty) == {})
+
+    asyncio.run(_mock_checks())
+
+    # --- discover helpers --------------------------------------------------
+    from .discover import _keep, _registrable, _same_site
+
+    check("registrable co.id", _registrable("shopee.co.id") == "shopee.co.id")
+    check("registrable sub", _registrable("api.shopee.co.id") == "shopee.co.id")
+    check("same site apex", _same_site("https://shopee.co.id/x", "shopee.co.id"))
+    check("same site sub", _same_site("https://api.shopee.co.id/x", "shopee.co.id"))
+    check("off site", not _same_site("https://evil.test/x", "shopee.co.id"))
+    check("keep otp url", _keep("/api/v1/otp/send"))
+    check("drop image", not _keep("/img/otp-icon.png"))
+
     passed = sum(1 for _, ok in CHECKS if ok)
     for label, ok in CHECKS:
         if not ok:
