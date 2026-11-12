@@ -8,6 +8,7 @@ Harvest publik → verifikasi egress nyata → klasifikasi ASN/ISP (residential 
 | `farm.py` | harvester + validator + classifier + ranker |
 | `proxy_rotate.py` | client pool: rotasi, quarantine, self-heal, reload |
 | `verify.py` | re-check NOW: pisahkan https_anon / http_anon / leak / dead |
+| `filter_residential.py` | saring keras: buang exit yang ASN/namanya DC/hosting |
 | `scrape.py` | contoh scraper pakai pool (JSONL output, resume, concurrency) |
 | `state/` | `candidates.tsv` (cache kandidat), `live.jsonl` (hasil probe), `dead.txt` (resume) |
 | `out/` | `residential.json`, `residential.txt` (anon), `transparent.txt`, `stats.json` |
@@ -37,6 +38,20 @@ entri sekarang dan memisahkan:
 Output: `out/active_https.txt` (pool terbaik), `out/active_http.txt` (fallback),
 `out/active_stats.json`. Terima format farm (`exit@ip:port`) atau list telanjang `ip:port`
 lewat `--input`. Latensi di laporan = waktu ke echo `api.ipify.org`/`icanhazip.com` lewat proxy.
+
+## Saringan residential ketat (`filter_residential.py`)
+Label "residential" dari `farm.py` bertumpu pada flag `hosting` ip-api — flag itu bohong:
+CtrlS (AS18229), Timeweb (AS210976), E2E Networks (AS132420) semua balik `hosting=false`
+padahal DC murni. `filter_residential.py` cek tiga sinyal sebelum satu entri boleh disebut residential:
+
+1. ASN ada di daftar hosting/VPN (di-fetch, cache `state/bad_asn.json`, 723 ASN) + set ASN
+   mega-provider/DC yang dikurasi.
+2. Heuristik nama: `cloud|colo|hosting|server|vps|dedicated|gmbh|s.a.r.l|llp`.
+3. Netblock campuran DC/anon (`45.194.0.0/16`).
+
+Input = `out/residential.json` + `out/active_*.txt` dari `verify.py`, jadi syaratnya
+"terverifikasi jalan DAN anon DAN bukan hosting". Output:
+`out/residential_only.{txt,iponly.txt,json}`. Opsi: `--refresh-asn`, `--min-latency 60000`.
 
 ## Cara verifikasi (kenapa hasilnya gak zonk)
 1. Proxy harus balikin IP egress != IP server sendiri (transparent proxy dibuang ke `transparent.txt`, bukan dianggap anon).

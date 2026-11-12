@@ -1,0 +1,46 @@
+201.219.194.114:8080 http CO 1615ms https_anon AS262215 | ITELKOM
+186.10.150.185:8080 http CL 3961ms https_anon AS27651 | Entel Chile S.A.
+38.103.250.121:8080 http ID 4213ms https_anon AS152436 | PT Erajaya Telco Indonesia / Eratel /Eratelindo
+43.248.213.236:8080 http ID 4334ms https_anon AS58474 | PT. Matrixnet Global Indonesia
+182.52.136.73:80 http TH 4772ms https_anon AS23969 | TOT Public Company Limited
+89.43.135.42:8080 http SY 5270ms https_anon AS216472 | High Speed For Internet Services L.L.C
+85.117.56.42:8080 http GE 5908ms https_anon AS20771 | Caucasus Online Ltd.
+102.68.128.211:8080 http LY 5911ms https_anon AS21003 | LTT Autonomous System, Tripoli Libya
+89.43.134.39:8080 http SY 6183ms https_anon AS216472 | High Speed For Internet Services L.L.C
+1.20.178.251:80 http TH 6905ms https_anon AS23969 | TOT Public Company Limited
+103.171.240.174:8080 http ID 7389ms https_anon AS63859 | My Republic Indonesia
+210.87.92.54:8080 http ID 7459ms https_anon AS149360 | PT Indo Telemedia Solusi
+139.5.75.83:8080 http NP 8450ms https_anon AS17501 | WLINK
+152.169.106.145:8080 http AR 8665ms https_anon AS7303 | Telecom Argentina S.A
+192.42.85.30:8080 http ID 8850ms https_anon AS139742 | PT Ryndo Jaringan Nusantara
+79.98.32.94:8080 http TR 9308ms https_anon AS216472 | High Speed For Internet Services L.L.C
+110.93.236.171:8080 http PK 9533ms https_anon AS135407 | TW RO
+202.179.188.6:8080 http ID 11138ms https_anon AS38750 | PT. Telemedia Dinamika Sarana
+177.12.140.108:8080 http BR 11818ms https_anon AS274777 | Maria P. Fontenele Souza
+45.198.20.166:8080 http ID 14385ms https_anon AS140457 | PT IKHLAS CIPTA TEKNOLOGI
+41.203.83.242:8080 http NG 15398ms https_anon AS37148 | Globacom Limited
+103.80.99.164:8080 http ID 17768ms https_anon AS152082 | Advertise via PT Menaksopal
+116.204.166.198:8080 http TR 18278ms https_anon AS213791 | High Speed For Internet Services L.L.C
+103.39.51.160:80 http ID 19097ms https_anon AS63501 | PT. Mega Mentari Mandiri
+1.20.101.18:80 http TH 20068ms https_anon AS23969 | TOT Public Company Limited
+103.234.35.166:8080 http ID 21973ms https_anon AS151521 | PT. EXABIT GROUP NETWORK
+182.52.113.57:80 http TH 24513ms https_anon AS23969 | TOT Public Company Limited
+12.50.107.220:80 http US 554ms http_anon AS7018 | AT&T Enterprises, LLC
+41.220.16.215:80 http ZW 2706ms http_anon AS37204 | Telone PVT Ltd
+152.230.215.123:80 http CL 3262ms http_anon AS14259 | Gtd Internet S.A.
+160.248.7.177:80 http JP 7303ms http_anon AS2514 | NTT PC Communications, Inc.
+175.139.233.76:80 http MY 9401ms http_anon AS4788 | TM TECHNOLOGY SERVICES SDN BHD
+150.140.148.235:80 http GR 10021ms http_anon AS5408 | UPATRAS
+175.139.233.78:80 http MY 13284ms http_anon AS4788 | TM TECHNOLOGY SERVICES SDN BHD
+219.93.101.63:80 http MY 14775ms http_anon AS4788 | TM TECHNOLOGY SERVICES SDN BHD
+95.129.101.73:80 http CZ 27149ms http_anon AS24641 | FASTER CZ spol. s r.o.
+103.66.47.10:8080 http ID 32253ms http_anon AS23694 | PT Iconmedia Lintas Nusantara
+36.92.140.113:80 http ID 41055ms http_anon AS7713 | PT. Telekomunikasi Indonesia
+181.129.16.218:8080 http CO 41223ms http_anon AS13489 | EPM Telecomunicaciones S.A. E.S.P.
+89.43.133.102:8080 http SY 41780ms http_anon AS216472 | High Speed For Internet Services L.L.C
+110.171.40.132:8080 http TH 42508ms http_anon AS17552 | True Internet Corporation CO. Ltd.
+103.156.114.46:8080 http ID 43882ms http_anon AS63859 | MYREPUBLIC
+89.43.133.116:8080 http SY 44153ms http_anon AS216472 | High Speed For Internet Services L.L.C
+103.173.230.250:8080 http ID 45075ms http_anon AS147087 | PT. Jaringan Internet Banten
+162.4.219.145:8080 http ID 48568ms http_anon AS151198 | PT Nexzet Network Digital
+103.170.22.44:8080 http ID 50165ms http_anon AS141123 | PT Puskomedia Indonesia Kreatif
