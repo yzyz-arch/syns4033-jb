@@ -1,0 +1,28 @@
+45.194.3.132:8080 http IN 1283ms https_anon egress=45.194.3.132 tls=1 CtrlS
+201.219.194.114:8080 http CO 1615ms https_anon egress=186.159.114.74 tls=0 ITELKOM
+186.10.150.185:8080 http CL 3961ms https_anon egress=186.10.150.185 tls=1 Entel Chile S.A.
+38.103.250.121:8080 http ID 4213ms https_anon egress=38.103.250.121 tls=1 PT Erajaya Telco Indonesia / Eratel /Eratelindo
+43.248.213.236:8080 http ID 4334ms https_anon egress=43.248.213.236 tls=0 PT. Matrixnet Global Indonesia
+182.52.136.73:80 http TH 4772ms https_anon egress=182.52.136.73 tls=1 TOT Public Company Limited
+89.43.135.42:8080 http SY 5270ms https_anon egress=89.43.135.42 tls=0 High Speed For Internet Services L.L.C
+85.117.56.42:8080 http GE 5908ms https_anon egress=85.117.56.42 tls=1 Caucasus Online Ltd.
+102.68.128.211:8080 http LY 5911ms https_anon egress=102.68.128.197 tls=1 LTT Autonomous System, Tripoli Libya
+89.43.134.39:8080 http SY 6183ms https_anon egress=89.43.134.39 tls=1 High Speed For Internet Services L.L.C
+1.20.178.251:80 http TH 6905ms https_anon egress=1.20.178.251 tls=1 TOT Public Company Limited
+103.171.240.174:8080 http ID 7389ms https_anon egress=45.198.149.239 tls=0 My Republic Indonesia
+210.87.92.54:8080 http ID 7459ms https_anon egress=210.87.92.54 tls=0 PT Indo Telemedia Solusi
+139.5.75.83:8080 http NP 8450ms https_anon egress=139.5.75.83 tls=1 WLINK
+152.169.106.145:8080 http AR 8665ms https_anon egress=152.169.106.145 tls=1 Telecom Argentina S.A
+192.42.85.30:8080 http ID 8850ms https_anon egress=192.42.85.30 tls=1 PT Ryndo Jaringan Nusantara
+79.98.32.94:8080 http TR 9308ms https_anon egress=79.98.32.94 tls=0 High Speed For Internet Services L.L.C
+110.93.236.171:8080 http PK 9533ms https_anon egress=110.93.236.171 tls=0 TW RO
+202.179.188.6:8080 http ID 11138ms https_anon egress=202.179.188.6 tls=0 PT. Telemedia Dinamika Sarana
+177.12.140.108:8080 http BR 11818ms https_anon egress=177.12.140.108 tls=0 Maria P. Fontenele Souza
+45.198.20.166:8080 http ID 14385ms https_anon egress=45.198.20.166 tls=1 PT IKHLAS CIPTA TEKNOLOGI
+41.203.83.242:8080 http NG 15398ms https_anon egress=41.203.83.242 tls=1 Globacom Limited
+103.80.99.164:8080 http ID 17768ms https_anon egress=103.80.99.164 tls=1 Advertise via PT Menaksopal
+116.204.166.198:8080 http TR 18278ms https_anon egress=116.204.166.198 tls=1 High Speed For Internet Services L.L.C
+103.39.51.160:80 http ID 19097ms https_anon egress=103.39.51.160 tls=0 PT. Mega Mentari Mandiri
+1.20.101.18:80 http TH 20068ms https_anon egress=1.20.101.18 tls=0 TOT Public Company Limited
+103.234.35.166:8080 http ID 21973ms https_anon egress=103.234.35.166 tls=0 PT. EXABIT GROUP NETWORK
+182.52.113.57:80 http TH 24513ms https_anon egress=182.52.113.57 tls=1 TOT Public Company Limited

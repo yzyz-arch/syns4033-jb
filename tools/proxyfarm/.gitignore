@@ -1,0 +1,6 @@
+# transient artifacts
+*.bak.*
+state/live.jsonl.bak.*
+out/*_snapshot_*.json
+out/proxies_iponly_*T*.txt
+cron.log
